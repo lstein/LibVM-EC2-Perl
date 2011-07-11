@@ -117,6 +117,7 @@ use URI;
 use URI::Escape;
 use MyAWS::Object;
 use Carp 'croak';
+our $VERSION = '0.1';
 
 sub new {
     my $self = shift;

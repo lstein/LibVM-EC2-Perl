@@ -1,0 +1,12 @@
+This is an embryonic interface to Amazon EC2 REST tools that follows the 2011-05-15
+API. I created it because I needed access to the Tag and TagSet interfaces, and neither
+euca2ools nor Net::Amazon::EC2 provided this functionality.
+
+It will need to be refactored at some point in the near future. Major todos are:
+
+ 1. Get the right namespace
+ 2. Segregate the Object and ObjectSet modules
+ 3. Documentation
+
+Contact me at lincoln.stein@gmail.com if you are interested in using or extending
+this module.

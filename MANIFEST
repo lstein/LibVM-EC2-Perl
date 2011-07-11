@@ -1,0 +1,27 @@
+Build.PL
+Changes
+lib/MyAWS.pm
+lib/MyAWS/Object.pm
+lib/MyAWS/Object/Attachment.pm
+lib/MyAWS/Object/Base.pm
+lib/MyAWS/Object/BlockDevice.pm
+lib/MyAWS/Object/BlockDeviceMapping.pm
+lib/MyAWS/Object/EBS.pm
+lib/MyAWS/Object/EBSBlockDevice.pm
+lib/MyAWS/Object/EBSInstance.pm
+lib/MyAWS/Object/Group.pm
+lib/MyAWS/Object/Image.pm
+lib/MyAWS/Object/ImageSet.pm
+lib/MyAWS/Object/Instance.pm
+lib/MyAWS/Object/InstanceSet.pm
+lib/MyAWS/Object/InstanceState.pm
+lib/MyAWS/Object/InstanceStateChange.pm
+lib/MyAWS/Object/InstanceStateChangeSet.pm
+lib/MyAWS/Object/Snapshot.pm
+lib/MyAWS/Object/SnapshotSet.pm
+lib/MyAWS/Object/StateReason.pm
+lib/MyAWS/Object/Volume.pm
+lib/MyAWS/Object/VolumeSet.pm
+lib/MyAWS/SnapshotSet.pm
+MANIFEST			This list of files
+README

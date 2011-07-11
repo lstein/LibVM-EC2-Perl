@@ -1,0 +1,12 @@
+^.+\.xml
+^.+\.pl
+^MYMETA.yml$
+^_build
+.+~$
+^\.+
+^Build$
+\.bak$
+^MANIFEST.SKIP$
+
+
+
