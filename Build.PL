@@ -10,6 +10,11 @@ my $build = Module::Build->new(
     dist_version_from => 'lib/MyAWS.pm',
     dist_author       => 'Lincoln Stein <lincoln.stein@oicr.on.ca>',
     requires          => {
+      'LWP' => 5.835,
+      'MIME::Base64' => '3.08',
+      'Digest::SHA'  => '5.48',
+      'URI'          => '1.54',
+      'XML::Simple'  => '2.18',
     },
     recommends        => {
     },
