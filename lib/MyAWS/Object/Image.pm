@@ -38,4 +38,11 @@ sub blockDeviceMapping {
 }
 
 
+sub run_instances {
+    my $self = shift;
+    my %args = @_;
+    $args{-image_id} = $self->imageId;
+    $self->aws->run_instances(%args);
+}
+
 1;

@@ -7,14 +7,15 @@ use URI::Escape;
 
 use constant ObjectRegistration => {
     Error             => 'MyAWS::Object::Error',
-    DescribeInstances => 'MyAWS::Object::InstanceSet',
+    DescribeInstances => 'MyAWS::Object::ReservationSet',
     DescribeSnapshots => 'fetch_items,snapshotSet,MyAWS::Object::Snapshot',
     DescribeVolumes   => 'fetch_items,volumeSet,MyAWS::Object::Volume',
     DescribeImages    => 'fetch_items,imagesSet,MyAWS::Object::Image',
-    StartInstances    => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
-    StopInstances     => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
     DescribeRegions   => 'fetch_items,regionInfo,MyAWS::Object::Region',
     DescribeTags      => 'fetch_items,tagSet,MyAWS::Object::Tag,nokey',
+    RunInstances      => 'MyAWS::Object::InstanceSet',
+    StartInstances    => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
+    StopInstances     => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
     GetConsoleOutput  => 'fetch_one,MyAWS::Object::ConsoleOutput',
 };
 

@@ -2,8 +2,11 @@ package MyAWS::Object::Base;
 
 use strict;
 use Carp 'croak';
+use Data::Dumper;
 
 our $AUTOLOAD;
+$Data::Dumper::Terse++;
+$Data::Dumper::Indent=1;
 
 use overload
     '""'     => sub {shift->primary_id},
@@ -68,6 +71,12 @@ sub tags {
 	$result->{$key} = $innerhash->{$key}{value};
     }
     return $result;
+}
+
+sub fields    { shift->valid_fields }
+sub as_string {
+    my $self = shift;
+    return Dumper($self->{data});
 }
 
 1;

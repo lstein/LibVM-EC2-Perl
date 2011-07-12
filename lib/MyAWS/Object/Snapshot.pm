@@ -21,4 +21,3 @@ sub valid_fields {
 }
 
 1;
-

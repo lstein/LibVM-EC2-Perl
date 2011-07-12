@@ -165,8 +165,8 @@ sub describe_instances {
     my @params;
     push @params,$self->mfilter_parm('InstanceId',\%args);
     push @params,$self->tagfilter_parm(\%args);
-    my $instanceset = $self->call('DescribeInstances',@params) or return;
-    return $instanceset->instances;
+    my $reservation_set = $self->call('DescribeInstances',@params) or return;
+    return $reservation_set->instances;
 }
 
 sub describe_volumes {
@@ -194,6 +194,35 @@ sub describe_tags {
     my %args = @_;
     my @params = $self->tagfilter_parm(\%args);
     return $self->call('DescribeTags',@params);    
+}
+
+sub run_instances {
+    my $self = shift;
+    my %args = @_;
+    $args{-image_id}  or croak "run_instances(): -image_id argument missing";
+    $args{-min_count} ||= 1;
+    $args{-max_count} ||= $args{-min_count};
+
+    my @p  =$self->filter_parm('ImageId',\%args);
+    push @p,$self->filter_parm('MinCount',\%args);
+    push @p,$self->filter_parm('MaxCount',\%args);
+    push @p,$self->filter_parm('KeyName',\%args)                      if $args{-key_name};
+    push @p,$self->mfilter_parm('SecurityGroupId',\%args);
+    push @p,$self->mfilter_parm('SecurityGroup',\%args);
+    push @p,$self->filter_parm('InstanceType',\%args)                 if $args{-instance_type};
+    push @p,(UserData=>encode_base64($args{user_data}))               if $args{-user_data};
+    push @p,('Placement.AvailabilityZone'=>$args{-availability_zone}) if $args{-availability_zone};
+    push @p,('Placement.GroupName'=>$args{-group_name})               if $args{-group_name};
+    push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-tenancy};
+    push @p,$self->filter_parm('RamdiskId',\%args)                    if $args{-ramdisk_id};
+    push @p,$self->block_device_parm($args{-block_devices})           if $args{-block_devices};
+    push @p,('Monitoring.Enabled'=>'true')                            if $args{-monitoring};
+    push @p,('DisableApiTermination'=>'true')                         if $args{-termination_protection};
+    push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
+    push @p,('PrivateIpAddress'=>$args{-private_address})             if $args{-private_address};
+
+    my $instanceset = $self->call('RunInstances',@p);
+    return $instanceset->instances;
 }
 
 sub start_instances {
@@ -260,6 +289,13 @@ sub canonicalize {
     return '-'.lc $name;
 }
 
+sub filter_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    my $name = $self->canonicalize($argname);
+    return ($argname=>$args->{$name}) if exists $args->{$name};
+}
+
 sub mfilter_parm {
     my $self = shift;
     my ($argname,$args) = @_;
@@ -300,6 +336,36 @@ sub tagfilter_parm {
     return @params;
 }
 
+sub block_device_parm {
+    my $self    = shift;
+    my $devlist = shift;
+
+    my @dev     = ref $devlist ? @$devlist : $devlist;
+
+    my @p;
+    my $c = 1;
+    for my $d (@dev) {
+	$d =~ /^([^=]+)=([^=]+)$/ or croak "block device mapping must be in format /dev/sdXX=device-name";
+
+	my ($devicename,$blockdevice) = ($1,$2);
+	push @p,("BlockDeviceMapping.$c.DeviceName"=>$devicename);
+
+	if ($blockdevice eq 'none') {
+	    push @p,("BlockDeviceMapping.$c.NoDevice" => '');
+	} elsif ($blockdevice =~ /^ephemeral\d$/) {
+	    push @p,("BlockDeviceMapping.$c.VirtualName"=>$blockdevice);
+	} else {
+	    my ($snapshot,$size,$delete_on_term) = split ':',$blockdevice;
+	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId"=>$snapshot)                if $snapshot;
+	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeSize" =>$size)                   if $size;
+	    push @p,("BlockDeviceMapping.$c.Ebs.DeleteOnTermination"=>$delete_on_term) 
+		if $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/
+	}
+	$c++;
+    }
+    return @p;
+}
+
 sub id       { shift->{id}       }
 sub secret   { shift->{secret}   }
 sub endpoint { shift->{endpoint} }
@@ -327,7 +393,16 @@ sub call {
 	}
     }
     $self->error(undef);
-    return MyAWS::Object->response2objects($response,$self);
+    my @obj = MyAWS::Object->response2objects($response,$self);
+
+    # slight trick here so that we return 1 object in response to
+    # describe_images(-image_id=>'foo'), rather than the number "1"
+    if (!wantarray) { # scalar context
+	return $obj[0] if @obj == 1;
+	return         if @obj == 0;
+    } else {
+	return @obj;
+    }
 }
 
 sub make_request {
