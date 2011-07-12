@@ -6,12 +6,14 @@ use XML::Simple;
 use URI::Escape;
 
 use constant ObjectRegistration => {
+    Error             => 'MyAWS::Object::Error',
     DescribeSnapshots => 'MyAWS::Object::SnapshotSet',
     DescribeInstances => 'MyAWS::Object::InstanceSet',
     DescribeVolumes   => 'MyAWS::Object::VolumeSet',
     DescribeImages    => 'MyAWS::Object::ImageSet',
     StartInstances    => 'MyAWS::Object::InstanceStateChangeSet',
     StopInstances     => 'MyAWS::Object::InstanceStateChangeSet',
+    DescribeRegions   => 'fetch_items,regionInfo,MyAWS::Object::Region',
 };
 
 sub new {
@@ -26,11 +28,17 @@ sub response2objects {
     my $self     = shift;
     my ($response,$aws) = @_;
 
-    my $class    = $self->class_from_response($response);
-    eval "require $class; 1" || die $@ unless $class->can('new');
-    my $parser   = $self->new();
+    my $class    = $self->class_from_response($response) or return;
+    my $content  = $response->decoded_content;
 
-    $parser->parse($response->decoded_content,$aws,$class);
+    if ($class =~ /,/) {
+	my ($method,@params) = split /,/,$class;
+	return $self->$method($aws,$content,@params);
+    } else {
+	eval "require $class; 1" || die $@ unless $class->can('new');
+	my $parser   = $self->new();
+	$parser->parse($content,$aws,$class);
+    }
 }
 
 sub payload {shift->{payload}}
@@ -64,10 +72,28 @@ sub new_xml_parser {
 	);
 }
 
+sub fetch_items {
+    my $self = shift;
+    my ($aws,$content,$tag,$class) = @_;
+    eval "require $class; 1" || die $@ unless $class->can('new');
+    my $parsed = $self->new_xml_parser->XMLin($content);
+    my $list   = $parsed->{$tag}{item} or return;
+    return map {$class->new($_,$aws)} @$list;
+}
+
 sub create_objects {
     my $self   = shift;
     my ($parsed,$aws,$class) = @_;
     return $class->new($parsed,$aws);
+}
+
+sub create_error_object {
+    my $self = shift;
+    my ($content,$aws) = @_;
+    my $class   = ObjectRegistration->{Error};
+    eval "require $class; 1" || die $@ unless $class->can('new');
+    my $parsed = $self->new_xml_parser->XMLin($content);
+    return $class->new($parsed->{Errors}{Error},$aws);
 }
 
 sub requestId {

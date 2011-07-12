@@ -133,6 +133,21 @@ sub new {
     },ref $self || $self;
 }
 
+sub describe_regions {
+    my $self = shift;
+    my %args;
+    if ($_[0] =~ /^-/) {
+	%args = @_;
+    } else {
+	%args = (-region_name => \@_) if @_;
+    }
+
+    my @params = $self->mfilter_parm('RegionName',\%args);
+    push @params,$self->tagfilter_parm(\%args);
+    return $self->call('DescribeRegions',@params);
+    
+}
+
 sub describe_snapshots {
     my $self = shift;
     my %args = @_;
@@ -211,6 +226,17 @@ sub stop_instances {
 
 # ------------------------------------------------------------------------------------------
 
+sub is_error {
+    defined shift->error();
+}
+
+sub error {
+    my $self = shift;
+    my $d    = $self->{error};
+    $self->{error} = shift if @_;
+    $d;
+}
+
 sub canonicalize {
     my $self = shift;
     my $name = shift;
@@ -277,9 +303,16 @@ sub call {
     my $response  = $self->make_request(@_);
 
     unless ($response->is_success) {
-	print STDERR $response->request->as_string=~/Action=(\w+)/,': ',$response->status_line,"\n";
-	return;
+	if ($response->code == 400) {
+	    my $error = MyAWS::Object->create_error_object($response->decoded_content,$self);
+	    $self->error($error);
+	    return;
+	} else {
+	    print STDERR $response->request->as_string=~/Action=(\w+)/,': ',$response->status_line,"\n";
+	    return;
+	}
     }
+    $self->error(undef);
     return MyAWS::Object->response2objects($response,$self);
 }
 
