@@ -82,6 +82,7 @@ sub status {
     my $self = shift;
     my ($i)  = $self->aws->describe_instances(-instance_id=>$self->instanceId);
     $i or croak "invalid instance: ",$self->instanceId;
+    $self->refresh($i);
     return $i->instanceState;
 }
 
@@ -110,7 +111,7 @@ sub stop {
 
     my ($i) = $self->aws->stop_instances($self);
     unless ($nowait) {
-	while ($i->status eq 'stopping') {
+	while ($i->status ne 'stopped') {
 	    sleep 5;
 	}
 	$self->refresh;
@@ -120,8 +121,15 @@ sub stop {
 
 sub refresh {
     my $self = shift;
-    my ($i) = $self->aws->describe_instances(-instance_id=>$self->instanceId);
+    my $i   = shift;
+    ($i) = $self->aws->describe_instances(-instance_id=>$self->instanceId) unless $i;
     %$self  = %$i;
+}
+
+sub console_output {
+    my $self = shift;
+    my $output = $self->aws->get_console_output(-instance_id=>$self->instanceId);
+    return $output->output;
 }
 
 1;

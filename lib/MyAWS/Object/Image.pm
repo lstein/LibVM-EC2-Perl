@@ -5,6 +5,10 @@ use base 'MyAWS::Object::Base';
 use MyAWS::Object::BlockDevice;
 use MyAWS::Object::StateReason;
 
+use overload
+    '""'     => sub {shift->imageId},
+    fallback => 1;
+
 sub valid_fields {
     my $self = shift;
     return qw(imageId imageLocation imageState imageOwnerId isPublic

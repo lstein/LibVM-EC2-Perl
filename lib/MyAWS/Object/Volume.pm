@@ -10,6 +10,8 @@ sub valid_fields {
               createTime attachmentSet tagSet);
 }
 
+sub primary_id {shift->volumeId}
+
 sub attachment {
     my $self = shift;
     my $attachments = $self->attachmentSet or return;

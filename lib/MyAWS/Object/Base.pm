@@ -5,6 +5,10 @@ use Carp 'croak';
 
 our $AUTOLOAD;
 
+use overload
+    '""'     => sub {shift->primary_id},
+    fallback => 1;
+
 sub new {
     my $self = shift;
     @_ == 2 or croak "Usage: $self->new(\$data,\$aws)";
@@ -12,6 +16,11 @@ sub new {
     return bless {data => $data,
 		  aws  => $aws,
     },ref $self || $self;
+}
+
+sub primary_id {
+    my $self = shift;
+    return overload::StrVal($self);
 }
 
 sub aws {

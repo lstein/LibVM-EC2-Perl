@@ -7,13 +7,15 @@ use URI::Escape;
 
 use constant ObjectRegistration => {
     Error             => 'MyAWS::Object::Error',
-    DescribeSnapshots => 'MyAWS::Object::SnapshotSet',
     DescribeInstances => 'MyAWS::Object::InstanceSet',
-    DescribeVolumes   => 'MyAWS::Object::VolumeSet',
-    DescribeImages    => 'MyAWS::Object::ImageSet',
-    StartInstances    => 'MyAWS::Object::InstanceStateChangeSet',
-    StopInstances     => 'MyAWS::Object::InstanceStateChangeSet',
+    DescribeSnapshots => 'fetch_items,snapshotSet,MyAWS::Object::Snapshot',
+    DescribeVolumes   => 'fetch_items,volumeSet,MyAWS::Object::Volume',
+    DescribeImages    => 'fetch_items,imagesSet,MyAWS::Object::Image',
+    StartInstances    => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
+    StopInstances     => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
     DescribeRegions   => 'fetch_items,regionInfo,MyAWS::Object::Region',
+    DescribeTags      => 'fetch_items,tagSet,MyAWS::Object::Tag,nokey',
+    GetConsoleOutput  => 'fetch_one,MyAWS::Object::ConsoleOutput',
 };
 
 sub new {
@@ -65,18 +67,29 @@ sub parse {
 }
 
 sub new_xml_parser {
-    my $self = shift;
+    my $self  = shift;
+    my $nokey = shift;
     return XML::Simple->new(ForceArray    => ['item'],
-			    KeyAttr       => ['key'],
+			    KeyAttr       => $nokey ? [] : ['key'],
 			    SuppressEmpty => undef,
 	);
 }
 
+sub fetch_one {
+    my $self = shift;
+    my ($aws,$content,$class,$nokey) = @_;
+    eval "require $class; 1" || die $@ unless $class->can('new');    
+    my $parser = $self->new_xml_parser($nokey);
+    my $parsed = $parser->XMLin($content);
+    return $class->new($parsed,$aws);
+}
+
 sub fetch_items {
     my $self = shift;
-    my ($aws,$content,$tag,$class) = @_;
+    my ($aws,$content,$tag,$class,$nokey) = @_;
     eval "require $class; 1" || die $@ unless $class->can('new');
-    my $parsed = $self->new_xml_parser->XMLin($content);
+    my $parser = $self->new_xml_parser($nokey);
+    my $parsed = $parser->XMLin($content);
     my $list   = $parsed->{$tag}{item} or return;
     return map {$class->new($_,$aws)} @$list;
 }

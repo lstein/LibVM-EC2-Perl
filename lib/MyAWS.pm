@@ -145,7 +145,6 @@ sub describe_regions {
     my @params = $self->mfilter_parm('RegionName',\%args);
     push @params,$self->tagfilter_parm(\%args);
     return $self->call('DescribeRegions',@params);
-    
 }
 
 sub describe_snapshots {
@@ -157,8 +156,7 @@ sub describe_snapshots {
     push @params,$self->mfilter_parm('Owner',\%args);
     push @params,$self->mfilter_parm('RestorableBy',\%args);
     push @params,$self->tagfilter_parm(\%args);
-    my $snapshotset   = $self->call('DescribeSnapshots',@params) or return;
-    return $snapshotset->snapshots;
+    return $self->call('DescribeSnapshots',@params) or return;
 }
 
 sub describe_instances {
@@ -177,8 +175,7 @@ sub describe_volumes {
     my @params;
     push @params,$self->mfilter_parm('VolumeId',\%args);
     push @params,$self->tagfilter_parm(\%args);
-    my $vset  = $self->call('DescribeVolumes',@params) or return;
-    return $vset->volumes;
+    return $self->call('DescribeVolumes',@params) or return;
 }
 
 sub describe_images {
@@ -189,8 +186,14 @@ sub describe_images {
     push @params,$self->mfilter_parm('ImageId',\%args);
     push @params,$self->mfilter_parm('Owner',\%args);
     push @params,$self->tagfilter_parm(\%args);
-    my $iset  = $self->call('DescribeImages',@params) or return;
-    return $iset->images;
+    return $self->call('DescribeImages',@params) or return;
+}
+
+sub describe_tags {
+    my $self = shift;
+    my %args = @_;
+    my @params = $self->tagfilter_parm(\%args);
+    return $self->call('DescribeTags',@params);    
 }
 
 sub start_instances {
@@ -199,8 +202,7 @@ sub start_instances {
     @instance_ids or croak "usage: start_instances(@instance_ids)";
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
-    my $iset = $self->call('StartInstances',@params) or return;
-    return $iset->instances;
+    return $self->call('StartInstances',@params) or return;
 }
 
 sub stop_instances {
@@ -220,8 +222,20 @@ sub stop_instances {
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
     push @params,Force=>1 if $force;
-    my $iset = $self->call('StopInstances',@params) or return;
-    return $iset->instances;
+    return $self->call('StopInstances',@params) or return;
+}
+
+sub get_console_output {
+    my $self = shift;
+    my %args;
+    if ($_[0] =~ /^-/) {
+	%args = @_; 
+    } else {
+	%args = (-instance_id => shift);
+    }
+    $args{-instance_id} or croak "Usage: get_console_output(-instance_id=>\$id)";
+    my @params = $self->mfilter_parm('InstanceId',\%args);
+    return $self->call('GetConsoleOutput',@params) or return;
 }
 
 # ------------------------------------------------------------------------------------------
