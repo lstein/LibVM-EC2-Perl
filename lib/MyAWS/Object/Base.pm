@@ -9,7 +9,13 @@ $Data::Dumper::Terse++;
 $Data::Dumper::Indent=1;
 
 use overload
-    '""'     => sub {shift->primary_id},
+    '""'     => sub {my $self = shift;
+		     if ($self->can('primary_id')) {
+			 return $self->primary_id;
+		     } else {
+			 return overload::StrVal($self);
+		     }
+                  },
     fallback => 1;
 
 sub new {
@@ -21,16 +27,59 @@ sub new {
     },ref $self || $self;
 }
 
-sub primary_id {
-    my $self = shift;
-    return overload::StrVal($self);
-}
-
 sub aws {
     my $self = shift;
     my $d    = $self->{aws};
     $self->{aws} = shift if @_;
     $d;
+}
+
+sub add_tags {
+    my $self = shift;
+    my $taglist = ref $_[0] && ref $_[0] eq 'HASH' ? shift : {@_};
+    $self->can('primary_id') or croak "You cannot tag objects of type ",ref $self;
+    $self->aws->create_tags(-resource_id => $self->primary_id,
+			    -tag         => $taglist);
+}
+
+# various ways of deleting tags
+#
+# delete Foo tag if it has value "bar" and Buzz tag if it has value 'bazz'
+# $i->delete_tags({Foo=>'bar',Buzz=>'bazz'})  
+#
+# same as above
+# $i->delete_tags(Foo=>'bar',Buzz=>'bazz')  
+#
+# delete Foo tag if it has any value, Buzz if it has value 'bazz'
+# $i->delete_tags({Foo=>undef,Buzz=>'bazz'})
+#
+# delete Foo and Buzz tags unconditionally
+# $i->delete_tags(['Foo','Buzz'])
+#
+# delete Foo tag unconditionally
+# $i->delete_tags('Foo');
+
+sub delete_tags {
+    my $self = shift;
+    my $taglist;
+
+    if (ref $_[0]) {
+	if (ref $_[0] eq 'HASH') {
+	    $taglist = shift;
+	} elsif (ref $_[0] eq 'ARRAY') {
+	    $taglist = {map {$_=>undef} @{$_[0]} };
+	}
+    } else {
+	if (@_ == 1) {
+	    $taglist = {shift()=>undef};
+	} else {
+	    $taglist = {@_};
+	}
+    }
+
+    $self->can('primary_id') or croak "You cannot delete tags from objects of type ",ref $self;
+    $self->aws->delete_tags(-resource_id => $self->primary_id,
+			    -tag         => $taglist);
 }
 
 sub AUTOLOAD {

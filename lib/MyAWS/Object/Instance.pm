@@ -5,8 +5,6 @@ use base 'MyAWS::Object::Base';
 use MyAWS::Object::InstanceState;
 use MyAWS::Object::BlockDeviceMapping;
 use Carp 'croak';
-use overload '""' => sub {shift()->instanceId},
-    fallback      => 1;
 
 sub new {
     my $self = shift;
@@ -24,6 +22,7 @@ sub reservationId {shift->{reservation} }
 sub ownerId       {shift->{owner}       }
 sub groups        {@{shift->{groups}}   }
 sub group         {shift()->{groups}[0] }
+sub primary_id    {shift()->instanceId  }
 
 sub valid_fields {
     my $self  = shift;

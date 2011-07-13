@@ -5,6 +5,21 @@ use strict;
 use XML::Simple;
 use URI::Escape;
 
+# two formats recognized:
+# 1) A class name in form MyAWS::Object::...
+#     Will return MyAWS::Object::...->new($parsed_content,$aws)
+#
+# 2) A comma-delimited list in format "method_name,arg1,arg2,arg3..."
+#     Will call method method_name() with arguments ($content,$aws,arg1,arg2...)
+#
+# parsed_content is the result of calling XML::Simple->XMLin()
+#
+# Note that format (1) receives parsed contents (a hashref), whereas
+# format (2) receives unparsed XML text.
+#
+# The $aws object is the MyAWS used to generate the request. Can be stored
+# and used for additional requests.
+#
 use constant ObjectRegistration => {
     Error             => 'MyAWS::Object::Error',
     DescribeInstances => 'MyAWS::Object::ReservationSet',
@@ -13,6 +28,8 @@ use constant ObjectRegistration => {
     DescribeImages    => 'fetch_items,imagesSet,MyAWS::Object::Image',
     DescribeRegions   => 'fetch_items,regionInfo,MyAWS::Object::Region',
     DescribeTags      => 'fetch_items,tagSet,MyAWS::Object::Tag,nokey',
+    CreateTags        => 'boolean,return',
+    DeleteTags        => 'boolean,return',
     RunInstances      => 'MyAWS::Object::InstanceSet',
     StartInstances    => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
     StopInstances     => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
@@ -34,13 +51,13 @@ sub response2objects {
     my $class    = $self->class_from_response($response) or return;
     my $content  = $response->decoded_content;
 
-    if ($class =~ /,/) {
-	my ($method,@params) = split /,/,$class;
-	return $self->$method($aws,$content,@params);
-    } else {
+    if ($class =~ /^MyAWS::Object/) {
 	eval "require $class; 1" || die $@ unless $class->can('new');
 	my $parser   = $self->new();
 	$parser->parse($content,$aws,$class);
+    } else {
+	my ($method,@params) = split /,/,$class;
+	return $self->$method($content,$aws,@params);
     }
 }
 
@@ -78,16 +95,23 @@ sub new_xml_parser {
 
 sub fetch_one {
     my $self = shift;
-    my ($aws,$content,$class,$nokey) = @_;
+    my ($content,$aws,$class,$nokey) = @_;
     eval "require $class; 1" || die $@ unless $class->can('new');    
     my $parser = $self->new_xml_parser($nokey);
     my $parsed = $parser->XMLin($content);
     return $class->new($parsed,$aws);
 }
 
+sub boolean {
+    my $self = shift;
+    my ($content,$aws,$tag) = @_;
+    my $parsed = $self->new_xml_parser()->XMLin($content);
+    return $parsed->{return} eq 'true';
+}
+
 sub fetch_items {
     my $self = shift;
-    my ($aws,$content,$tag,$class,$nokey) = @_;
+    my ($content,$aws,$tag,$class,$nokey) = @_;
     eval "require $class; 1" || die $@ unless $class->can('new');
     my $parser = $self->new_xml_parser($nokey);
     my $parsed = $parser->XMLin($content);

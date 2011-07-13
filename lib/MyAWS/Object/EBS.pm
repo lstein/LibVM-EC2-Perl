@@ -8,6 +8,8 @@ sub valid_fields {
     return qw(attachTime deleteOnTermination status volumeId);
 }
 
+sub primary_id { shift->volumeId }
+
 sub volume {
     my $self = shift;
     return $self->{volume} if exists $self->{volume};

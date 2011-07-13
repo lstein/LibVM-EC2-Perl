@@ -166,7 +166,13 @@ sub describe_instances {
     push @params,$self->mfilter_parm('InstanceId',\%args);
     push @params,$self->tagfilter_parm(\%args);
     my $reservation_set = $self->call('DescribeInstances',@params) or return;
-    return $reservation_set->instances;
+    my @i = $reservation_set->instances;
+    if (!wantarray) { # scalar context
+	return       if @i == 0;
+	return $i[0] if @i == 1;
+    } else {
+	return @i
+    }
 }
 
 sub describe_volumes {
@@ -194,6 +200,26 @@ sub describe_tags {
     my %args = @_;
     my @params = $self->tagfilter_parm(\%args);
     return $self->call('DescribeTags',@params);    
+}
+
+sub create_tags {
+    my $self = shift;
+    my %args = @_;
+    $args{-resource_id} or croak "create_tags() -resource_id argument required";
+    $args{-tag}         or croak "create_tags() -tag argument required";
+    my @params = $self->mfilter_parm('ResourceId',\%args);
+    push @params,$self->tagcreate_parm(\%args);
+    return $self->call('CreateTags',@params);    
+}
+
+sub delete_tags {
+    my $self = shift;
+    my %args = @_;
+    $args{-resource_id} or croak "create_tags() -resource_id argument required";
+    $args{-tag}         or croak "create_tags() -tag argument required";
+    my @params = $self->mfilter_parm('ResourceId',\%args);
+    push @params,$self->tagdelete_parm(\%args);
+    return $self->call('DeleteTags',@params);    
 }
 
 sub run_instances {
@@ -304,7 +330,7 @@ sub mfilter_parm {
     my @params;
     if (my $a = $args->{$name}) {
 	my $c = 1;
-	for (ref $a ? @$a : $a) {
+	for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
 	    push @params,("$argname.".$c++ => $_);
 	}
     }
@@ -315,20 +341,44 @@ sub mfilter_parm {
 sub tagfilter_parm {
     my $self = shift;
     my $args = shift;
+    return $self->key_value_parameters('Filter','Name','Value',$args);
+}
 
+sub tagcreate_parm {
+    my $self = shift;
+    my $args = shift;
+    return $self->key_value_parameters('Tag','Key','Value',$args);
+}
+
+sub tagdelete_parm {
+    my $self = shift;
+    my $args = shift;
+    return $self->key_value_parameters('Tag','Key','Value',$args,1);
+}
+
+sub key_value_parameters {
+    my $self = shift;
+    # e.g. 'Filter', 'Name','Value',{-filter=>{a=>b}}
+    my ($parameter_name,$keyname,$valuename,$args,$skip_undef_values) = @_;  
+    my $arg_name     = $self->canonicalize($parameter_name);
+    
     my @params;
-    if (my $a = $args->{-filter}) {
+    if (my $a = $args->{$arg_name}) {
 	my $c = 1;
 	if (ref $a && ref $a eq 'HASH') {
 	    while (my ($name,$value) = each %$a) {
-		push @params,('Filter.'.$c.'.Name' => $name);
-		push @params,('Filter.'.$c++.'.Value' => $value);
+		push @params,("$parameter_name.$c.$keyname"   => $name);
+		push @params,("$parameter_name.$c.$valuename" => $value)
+		    unless !defined $value && $skip_undef_values;
+		$c++;
 	    }
 	} else {
 	    for (ref $a ? @$a : $a) {
 		my ($name,$value) = /([^=]+)\s*=\s*(.+)/;
-		push @params,('Filter.'.$c.'.Name' => $name);
-		push @params,('Filter.'.$c++.'.Value' => $value);
+		push @params,("$parameter_name.$c.$keyname"   => $name);
+		push @params,("$parameter_name.$c.$valuename" => $value)
+		    unless !defined $value && $skip_undef_values;
+		$c++;
 	    }
 	}
     }
@@ -395,7 +445,7 @@ sub call {
     $self->error(undef);
     my @obj = MyAWS::Object->response2objects($response,$self);
 
-    # slight trick here so that we return 1 object in response to
+    # slight trick here so that we return one object in response to
     # describe_images(-image_id=>'foo'), rather than the number "1"
     if (!wantarray) { # scalar context
 	return $obj[0] if @obj == 1;
