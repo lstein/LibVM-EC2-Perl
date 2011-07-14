@@ -13,10 +13,18 @@ MyAWS - Lincoln's simple AWS interface
                       -secret_key => 'aws_secret_key',
                       -endpoint   => 'http://ec2.us-east-1.amazonaws.com');
 
+ my ($image) = $aws->describe_images(-image_id=>'ami-12345');
+ $image->run_instances(-key_name      =>'My_key',
+                       -security_group=>'default',
+                       -min_count=>2,
+                       -instance_type => 't1.micro'
+
  my @snapshots = $aws->describe_snapshots(-snapshot_id => 'id',
                                           -owner         => 'ownerid',
                                           -restorable_by => 'userid',
                                           -filter        => ['tag:Name=Root','tag:Role=Server']);
+
+ foreach (@snapshots) { $_->add_tags('Version'=>'1.0') }
 
  my @instances = $aws->describe_instances(-instance_id => 'id',
                                           -filter      => ['architecture=i386',
@@ -30,6 +38,26 @@ This is a partial interface to the 2011-05-15 version of the Amazon AWS API. It 
 primarily to provide access to the new tag & metadata interface that is not currently supported
 by Net::Amazon::EC2.
 
+The main interface is the MyAWS object, which provides methods for
+interrogating the Amazon EC2, launching instances, and managing
+instance lifecycle. These methods return the following major object
+classes which act as specialized interfaces to AWS:
+
+ MyAWS::Object::Attachment          -- Attachment of a EBS volume to a machine instance
+ MyAWS::Object::BlockDevice         -- A block device
+ MyAWS::Object::BlockDeviceMapping  -- Mapping of a virtual storage device to a block device
+ MyAWS::Object::Instance            -- Virtual machine instances
+ MyAWS::Object::Image               -- Amazon Machine Images (AMIs)
+ MyAWS::Object::Snapshot            -- EBS snapshots
+ MyAWS::Object::EBS                 -- Elastic Block Store (EBS) disk volumes
+ MyAWS::Object::Group               -- Security groups
+ MyAWS::Object::Region              -- Availability regions
+ MyAWS::Object::Tag                 -- Metadata tags
+
+In addition, there are several utility classes:
+
+ M
+    
 =head1 METHODS
 
 =over 4

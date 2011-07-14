@@ -1,9 +1,9 @@
-package MyAWS::Object::InstanceStateChange;
+package MyAWS::Object::Instance::State::Change;
 
 use strict;
 use base 'MyAWS::Object::Base';
 use Carp 'croak';
-use MyAWS::Object::InstanceState;
+use MyAWS::Object::Instance::State;
 
 use overload '""' => sub {shift()->instanceId},
     fallback      => 1;
@@ -13,10 +13,10 @@ sub valid_fields {
     return qw(instanceId currentState previousState);
 }
 sub currentState {
-    return MyAWS::Object::InstanceState->new(shift->SUPER::currentState);
+    return MyAWS::Object::Instance::State->new(shift->SUPER::currentState);
 }
 sub previousState {
-    return MyAWS::Object::InstanceState->new(shift->SUPER::previousState);
+    return MyAWS::Object::Instance::State->new(shift->SUPER::previousState);
 }
 sub status {
     my $self = shift;

@@ -1,4 +1,4 @@
-package MyAWS::Object::EBSBlockDevice;
+package MyAWS::Object::BlockDevice::EBS;
 
 use strict;
 use base 'MyAWS::Object::Base';

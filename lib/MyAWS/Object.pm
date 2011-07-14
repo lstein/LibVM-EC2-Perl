@@ -30,9 +30,9 @@ use constant ObjectRegistration => {
     DescribeTags      => 'fetch_items,tagSet,MyAWS::Object::Tag,nokey',
     CreateTags        => 'boolean,return',
     DeleteTags        => 'boolean,return',
-    RunInstances      => 'MyAWS::Object::InstanceSet',
-    StartInstances    => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
-    StopInstances     => 'fetch_items,instancesSet,MyAWS::Object::InstanceStateChange',
+    RunInstances      => 'MyAWS::Object::Instance::Set',
+    StartInstances    => 'fetch_items,instancesSet,MyAWS::Object::Instance::State::Change',
+    StopInstances     => 'fetch_items,instancesSet,MyAWS::Object::Instance::State::Change',
     GetConsoleOutput  => 'fetch_one,MyAWS::Object::ConsoleOutput',
 };
 

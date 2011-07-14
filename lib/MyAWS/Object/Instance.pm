@@ -2,7 +2,7 @@ package MyAWS::Object::Instance;
 
 use strict;
 use base 'MyAWS::Object::Base';
-use MyAWS::Object::InstanceState;
+use MyAWS::Object::Instance::State;
 use MyAWS::Object::BlockDeviceMapping;
 use Carp 'croak';
 
@@ -60,7 +60,7 @@ sub valid_fields {
 sub instanceState {
     my $self = shift;
     my $state = $self->SUPER::instanceState;
-    return MyAWS::Object::InstanceState->new($state);
+    return MyAWS::Object::Instance::State->new($state);
 }
 
 sub placement {

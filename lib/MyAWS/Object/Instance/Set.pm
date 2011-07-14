@@ -1,4 +1,4 @@
-package MyAWS::Object::InstanceSet;
+package MyAWS::Object::Instance::Set;
 
 use strict;
 use base 'MyAWS::Object::Base';

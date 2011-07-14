@@ -1,4 +1,4 @@
-package MyAWS::Object::StateReason;
+package MyAWS::Object::State::Reason;
 
 use strict;
 use overload '""' => 'message',

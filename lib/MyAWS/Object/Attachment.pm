@@ -1,7 +1,7 @@
 package MyAWS::Object::Attachment;
 
 use strict;
-use base 'MyAWS::Object::EBSInstance';
+use base 'MyAWS::Object::EBS';
 
 sub valid_fields {
     my $self = shift;

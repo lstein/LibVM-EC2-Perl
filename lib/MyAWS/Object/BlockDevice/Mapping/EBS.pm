@@ -1,11 +1,11 @@
-package MyAWS::Object::EBSInstance;
+package MyAWS::Object::BlockDevice::Mapping::EBS;
 
 use strict;
 use base 'MyAWS::Object::Base';
 
 sub valid_fields {
     my $self = shift;
-    return qw(attachTime deleteOnTermination status volumeId);
+    return qw(volumeId status attachTime deleteOnTermination);
 }
 
 sub volume {

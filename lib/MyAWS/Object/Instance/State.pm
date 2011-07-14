@@ -1,4 +1,4 @@
-package MyAWS::Object::InstanceState;
+package MyAWS::Object::Instance::State;
 
 use strict;
 use overload '""'     => 'name',

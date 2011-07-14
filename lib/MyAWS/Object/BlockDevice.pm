@@ -2,7 +2,7 @@ package MyAWS::Object::BlockDevice;
 
 use strict;
 use base 'MyAWS::Object::Base';
-use MyAWS::Object::EBSBlockDevice;
+use MyAWS::Object::BlockDevice::EBS;
 
 use overload '""' => sub {shift()->as_string},
     fallback      => 1;
@@ -19,7 +19,7 @@ sub noDevice {
 
 sub ebs {
     my $self = shift;
-    return $self->{ebs} = MyAWS::Object::EBSBlockDevice->new($self->SUPER::ebs,$self->aws);
+    return $self->{ebs} = MyAWS::Object::BlockDevice::EBS->new($self->SUPER::ebs,$self->aws);
 }
 
 sub snapshotId { shift->ebs->snapshotId }

@@ -1,8 +1,8 @@
-package MyAWS::Object::BlockDeviceMapping;
+package MyAWS::Object::BlockDevice::Mapping;
 
 use strict;
 use base 'MyAWS::Object::Base';
-use MyAWS::Object::EBSInstance;
+use MyAWS::Object::BlockDevice::Mapping::EBS;
 
 use overload '""' => sub {shift()->deviceName},
     fallback      => 1;
@@ -14,7 +14,7 @@ sub valid_fields {
 
 sub ebs {
     my $self = shift;
-    return $self->{ebs} ||= MyAWS::Object::EBSInstance->new($self->SUPER::ebs,$self->aws);
+    return $self->{ebs} ||= MyAWS::Object::BlockDevice::Mapping::EBS->new($self->SUPER::ebs,$self->aws);
 }
 
 sub volumeId     { shift->ebs->volumeId }

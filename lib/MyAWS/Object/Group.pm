@@ -12,5 +12,8 @@ sub valid_fields {
            qw(groupId groupName);
 }
 
+sub primary_id { shift->groupId }
+
+
 1;
 
