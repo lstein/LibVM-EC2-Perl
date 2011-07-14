@@ -10,11 +10,7 @@ $Data::Dumper::Indent=1;
 
 use overload
     '""'     => sub {my $self = shift;
-		     if ($self->can('primary_id')) {
-			 return $self->primary_id;
-		     } else {
-			 return overload::StrVal($self);
-		     }
+		     return $self->short_name;
                   },
     fallback => 1;
 
@@ -107,6 +103,15 @@ sub can {
 
 sub payload { shift->{data} }
 
+sub short_name {
+    my $self = shift;
+    if ($self->can('primary_id')) {
+	return $self->primary_id;
+    } else {
+	return overload::StrVal($self);
+    }
+}
+
 sub valid_fields {
     return qw(xmlns requestId tagSet)
 }
@@ -114,8 +119,8 @@ sub valid_fields {
 sub tags {
     my $self = shift;
     my $result = {};
-    my $set  = $self->tagSet      or return $result;
-    my $innerhash = $set->{item} or return $result;
+    my $set  = eval{$self->tagSet}   or return $result;
+    my $innerhash = $set->{item}     or return $result;
     for my $key (keys %$innerhash) {
 	$result->{$key} = $innerhash->{$key}{value};
     }

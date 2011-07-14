@@ -14,4 +14,7 @@ sub valid_fields {
     return qw(Code Message);
 }
 
+sub code    {shift->Code}
+sub message {shift->message}
+
 1;

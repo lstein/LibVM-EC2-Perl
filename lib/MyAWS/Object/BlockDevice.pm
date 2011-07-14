@@ -1,5 +1,24 @@
 package MyAWS::Object::BlockDevice;
 
+=head1 NAME
+
+MyAWS::Object::BlockDevice - Object describing an EC2 block device
+
+=head1 SYNOPSIS
+
+  use MyAWS;
+
+  $image = MyAWS->describe_images(-image_id=>'ami-123456');
+  my @devices = $image->blockDeviceMapping;
+  for my $d (@devices) {
+    my $virtual_device = $d->deviceName;
+    my $snapshot_id    = $d->snapshotId;
+    my $delete         = $d->deleteOnTermination;
+  }
+
+=cut
+
+
 use strict;
 use base 'MyAWS::Object::Base';
 use MyAWS::Object::BlockDevice::EBS;

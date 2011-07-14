@@ -3,7 +3,7 @@ package MyAWS::Object::Instance;
 use strict;
 use base 'MyAWS::Object::Base';
 use MyAWS::Object::Instance::State;
-use MyAWS::Object::BlockDeviceMapping;
+use MyAWS::Object::BlockDevice::Mapping;
 use Carp 'croak';
 
 sub new {
@@ -12,6 +12,7 @@ sub new {
     return bless {
 	data        => $args{-instance},
 	reservation => $args{-reservation},
+	requester   => $args{-requester},
 	owner       => $args{-owner},
 	groups      => $args{-groups},
 	aws         => $args{-aws},
@@ -19,6 +20,7 @@ sub new {
 }
 
 sub reservationId {shift->{reservation} }
+sub requesterId   {shift->{requester}   }
 sub ownerId       {shift->{owner}       }
 sub groups        {@{shift->{groups}}   }
 sub group         {shift()->{groups}[0] }
@@ -74,7 +76,7 @@ sub monitoring {
 sub blockDeviceMapping {
     my $self = shift;
     my $mapping = $self->SUPER::blockDeviceMapping or return;
-    return map { MyAWS::Object::BlockDeviceMapping->new($_,$self->aws)} @{$mapping->{item}};
+    return map { MyAWS::Object::BlockDevice::Mapping->new($_,$self->aws)} @{$mapping->{item}};
 }
 
 sub status {
@@ -87,12 +89,12 @@ sub status {
 
 sub start {
     my $self = shift;
-    my $nowait = shift;
+    my $wait = shift;
 
     my $s    = $self->status;
     croak "Can't start $self: run state=$s" unless $s eq 'stopped';
     my ($i) = $self->aws->start_instances($self) or return;
-    unless ($nowait) {
+    if ($wait) {
 	while ($i->status eq 'pending') {
 	    sleep 5;
 	}
@@ -103,14 +105,32 @@ sub start {
 
 sub stop {
     my $self = shift;
-    my $nowait = shift;
+    my $wait = shift;
 
     my $s    = $self->status;
     croak "Can't stop $self: run state=$s" unless $s eq 'running';
 
     my ($i) = $self->aws->stop_instances($self);
-    unless ($nowait) {
+    if ($wait) {
 	while ($i->status ne 'stopped') {
+	    sleep 5;
+	}
+	$self->refresh;
+    }
+    return $i;
+}
+
+sub terminate {
+    my $self = shift;
+    my $nowait = shift;
+
+    my $s    = $self->status;
+    croak "Can't terminate $self: run state=$s"
+	unless $s eq 'running' or $s eq 'stopped';
+
+    my ($i) = $self->aws->terminate_instances($self);
+    unless ($nowait) {
+	while ($i->status ne 'terminated') {
 	    sleep 5;
 	}
 	$self->refresh;

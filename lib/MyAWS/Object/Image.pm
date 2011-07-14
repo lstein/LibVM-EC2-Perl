@@ -3,7 +3,7 @@ package MyAWS::Object::Image;
 use strict;
 use base 'MyAWS::Object::Base';
 use MyAWS::Object::BlockDevice;
-use MyAWS::Object::StateReason;
+use MyAWS::Object::Instance::State::Reason;
 
 sub valid_fields {
     my $self = shift;
@@ -19,7 +19,7 @@ sub primary_id { shift->imageId }
 sub stateReason {
     my $self  = shift;
     my $state = $self->SUPER::stateReason;
-    return MyAWS::Object::stateReason->new($state);
+    return MyAWS::Object::Instance::State::Reason->new($state);
 
 }
 

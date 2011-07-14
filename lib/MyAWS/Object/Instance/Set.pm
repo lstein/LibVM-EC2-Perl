@@ -11,6 +11,7 @@ sub instances {
     my $p = $self->payload;
     my $reservation_id = $p->{reservationId};
     my $owner_id       = $p->{ownerId};
+    my $requester_id   = $p->{requesterId};
     my @groups         = map {MyAWS::Object::Group->new($_,$self->aws)} @{$p->{groupSet}{item}};
 
     my $instances = $p->{instancesSet}{item};
@@ -18,6 +19,7 @@ sub instances {
 		    -instance    => $_,
 		    -aws         => $self->aws,
 		    -reservation => $reservation_id,
+		    -requester   => $requester_id,
 		    -owner       => $owner_id,
 		    -groups      => \@groups)
     } @$instances;
