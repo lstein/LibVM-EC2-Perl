@@ -808,7 +808,40 @@ sub get_console_output {
     }
     $args{-instance_id} or croak "Usage: get_console_output(-instance_id=>\$id)";
     my @params = $self->single_parm('InstanceId',\%args);
-    return $self->call('GetConsoleOutput',@params) or return;
+    return $self->call('GetConsoleOutput',@params);
+}
+
+=head2 $address_info = $aws->allocate_address([-vpc=>1])
+
+Request an elastic IP address. Pass -vpc=>1 to allocate a VPC elastic
+address. The return object is a MyAWS::Object::ElasticAddress.
+
+=cut
+
+sub allocate_address {
+    my $self = shift;
+    my %args = @_;
+    my @param = $args{-vpc} ? (Domain=>'vpc') : ();
+    return $self->call('AllocateAddress',@param);
+}
+
+=head2 $boolean = $aws->release_address($addr)
+
+Release an elastic IP address. For non-VPC addresses, you may provide
+either an IP address string, or a MyAWS::Object::ElasticAddress. For VPC
+addresses, you must obtain a MyAWS::Object::ElasticAddress first 
+(e.g. with describe_addresses) and then pass that to the method.
+
+=cut
+
+sub release_address {
+    my $self = shift;
+    my $addr = shift or croak "Usage: release_address(\$addr)";
+    my @param = (PublicIp=>$addr);
+    if (my $allocationId = eval {$addr->allocationId}) {
+	push @param,(AllocatonId=>$allocationId);
+    }
+    return $self->call('ReleaseAddress',@param);
 }
 
 # ------------------------------------------------------------------------------------------
