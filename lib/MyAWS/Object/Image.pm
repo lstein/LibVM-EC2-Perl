@@ -8,36 +8,79 @@ MyAWS::Object::Image - Object describing an Amazon Machine Image (AMI)
 
   use MyAWS;
 
-  $aws      = MyAWS->new(...);
-  $image    = $aws->describe_images(-image_id=>'ami-12345');
+  $aws     = MyAWS->new(...);
+  $image   = $aws->describe_images(-image_id=>'ami-12345');
 
+  $state   = $image->imageState;
+  $owner   = $image->imageOwnerId;
+  $rootdev = $image->rootDeviceName;
+  @devices = $image->blockDeviceMapping;
+  $tags    = $image->tags;
+
+  @instances = $image->run_instances(-min_count=>10);
 
 =head1 DESCRIPTION
 
-This object represents the name and ID of a security group. It is
-returned by an instance's groups() method. This object does not
-provide any of the details about the security group, but you can use
-it in a call to MyAWS->describe_security_group() to get details about
-the security group's allowed ports, etc.
+This object represents an Amazon Machine Image (AMI), and is returned
+by MyAWS->describe_images(). In addition to methods to query the
+image's attributes, the run_instances() method allows you to launch
+and configure EC2 instances based on the AMI.
 
 =head1 METHODS
 
 These object methods are supported:
 
- groupId   -- the group ID
- groupName -- the group's name
+ imageId       -- AMI ID
+ imageLocation -- Location of the AMI
+ imageState    -- Current state of the AMI. One of "available",
+                  "pending" or "failed". Only "available" AMIs
+                  can be launched.
+ imageOwnerId  -- AWS account ID of the image owner.
+ isPublic      -- Returns true if this image has public launch
+                  permissions. Note that this is a Perl boolean,
+                  and not the string "true".
+ productCodes  -- A list of product codes associated with the image.
+ architecture  -- The architecture of the image.
+ imageType     -- The image type (machine, kernel or RAM disk).
+ kernelId      -- The kernel associated with the image.
+ ramdiskId     -- The RAM disk associated with the image.
+ platform      -- "Windows" for Windows AMIs, otherwise undef.
+ stateReason   -- Explanation of a "failed" imageState. This is
+                  a MyAWS::Object::Instance::State::Reason
+                  object.
+ imageOwnerAlias -The AWS account alias (e.g. "self") or AWS
+                  account ID that owns the AMI.
+ name          -- Name of the AMI provided during image creation.
+ description   -- Description of the AMI provided during image
+                  creation.
+ rootDeviceType -- The root device type. One of "ebs" or
+                  "instance-store".
+ rootDeviceMape -- Name of the root device, e.g. "/dev/sda1"
+ blockDeviceMapping -- List of block devices attached to this
+                   image. Each element is a
+                   MyAWS::Object::BlockDevice.
+ virtualizationType -- One of "paravirtual" or "hvm".
+ hypervisor     -- One of "ovm" or "xen"
 
-For convenience, the object also provides a permissions() method that
-will return the fully detailed MyAWS::Object::SecurityGroup:
+In addition, the object supports the tags() method described in
+L<MyAWS::Object::Base>:
 
- $details = $group->permissions()
+ print "ready for production\n" if $image->tags->{Released};
 
-See L<MyAWS::Object::SecurityGroup>
+=head2 @instances = $image->run_instances(@params)
+
+The run_instance() method will launch one or more instances based on
+this AMI. The method takes all the arguments recognized by
+MyAWS->run_instances(), except for the -image_id argument. The method
+returns a list of MyAWS::Object::Instance objects, which you may
+monitor periodically until they are up and running.
+
+See L<MyAWS> for details.
 
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
-groupId.
+imageId.
 
 =head1 SEE ALSO
 
@@ -45,26 +88,9 @@ L<MyAWS>
 L<MyAWS::Object>
 L<MyAWS::Object::Base>
 L<MyAWS::Object::BlockDevice>
-L<MyAWS::Object::BlockDevice::Attachment>
-L<MyAWS::Object::BlockDevice::EBS>
-L<MyAWS::Object::BlockDevice::Mapping>
-L<MyAWS::Object::BlockDevice::Mapping::EBS>
-L<MyAWS::Object::ConsoleOutput>
-L<MyAWS::Object::Error>
-L<MyAWS::Object::Generic>
-L<MyAWS::Object::Group>
-L<MyAWS::Object::Image>
+L<MyAWS::Object::StateReason>
 L<MyAWS::Object::Instance>
-L<MyAWS::Object::Instance::Set>
-L<MyAWS::Object::Instance::State>
-L<MyAWS::Object::Instance::State::Change>
-L<MyAWS::Object::Instance::State::Reason>
-L<MyAWS::Object::Region>
-L<MyAWS::Object::ReservationSet>
-L<MyAWS::Object::SecurityGroup>
-L<MyAWS::Object::Snapshot>
 L<MyAWS::Object::Tag>
-L<MyAWS::Object::Volume>
 
 =head1 AUTHOR
 
@@ -84,6 +110,8 @@ use strict;
 use base 'MyAWS::Object::Base';
 use MyAWS::Object::BlockDevice;
 use MyAWS::Object::Instance::State::Reason;
+
+use Carp 'croak';
 
 sub valid_fields {
     my $self = shift;
@@ -115,10 +143,16 @@ sub blockDeviceMapping {
     return map { MyAWS::Object::BlockDevice->new($_,$self->aws)} @{$mapping->{item}};
 }
 
+sub isPublic {
+    my $self = shift;
+    return $self->SUPER::isPublic eq 'true';
+}
 
 sub run_instances {
     my $self = shift;
     my %args = @_;
+    croak "$self is unavailable for launching because its state is ",$self->imageState
+	      unless $self->imageState eq 'available';
     $args{-image_id} = $self->imageId;
     $self->aws->run_instances(%args);
 }

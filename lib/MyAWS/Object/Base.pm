@@ -96,10 +96,12 @@ the MyAWS object, return a new object.
 
 sub new {
     my $self = shift;
-    @_ == 2 or croak "Usage: $self->new(\$data,\$aws)";
-    my ($data,$aws) = @_;
+    @_ >= 2 or croak "Usage: $self->new(\$data,\$aws)";
+    my ($data,$aws,$xmlns,$requestid) = @_;
     return bless {data => $data,
 		  aws  => $aws,
+		  xmlns => $xmlns,
+		  requestId => $requestid
     },ref $self || $self;
 }
 
@@ -116,6 +118,8 @@ sub aws {
     $d;
 }
 
+sub xmlns     { shift->{xmlns}     }
+sub requestId { shift->{requestId} }
 
 =head2 $hashref = $object->payload
 
@@ -156,7 +160,7 @@ Internally, this method is called valid_fields()
 sub fields    { shift->valid_fields }
 
 sub valid_fields {
-    return qw(xmlns requestId tagSet)
+    return qw(xmlns requestId)
 }
 
 =head2 $text = $object->as_string
@@ -172,22 +176,28 @@ sub as_string {
 }
 
 =head2 $hashref = $object->tags
+=head2 $hashref = $object->tagSet
 
 Return the metadata tags assigned to this resource, if any, as a
-hashref.
+hashref. Both tags() and tagSet() work identically.
 
 =cut
 
 sub tags {
     my $self = shift;
     my $result = {};
-    my $set  = eval{$self->tagSet}   or return $result;
+    my $set  = $self->{data}{tagSet} or return $result;
     my $innerhash = $set->{item}     or return $result;
     for my $key (keys %$innerhash) {
 	$result->{$key} = $innerhash->{$key}{value};
     }
     return $result;
 }
+
+sub tagSet {
+    return shift->tags();
+}
+
 
 =head2 $boolean = $object->add_tags(Tag1=>'value1',Tag2=>'value2',...)
 =head2 $boolean = $object->add_tags(\%hash)
@@ -259,6 +269,11 @@ sub delete_tags {
 			    -tag         => $taglist);
 }
 
+sub _object_args {
+    my $self = shift;
+    return ($self->aws,$self->xmlns,$self->requestId);
+}
+
 =head1 STRING OVERLOADING
 
 This base class and its subclasses use string overloading so that the
@@ -272,11 +287,10 @@ usual way.
 =head1 SEE ALSO
 
 L<MyAWS>
-L<MyAWS::Object>
+L<MyAWS::ObjectDispatcher>
 L<MyAWS::Object::Base>
 L<MyAWS::Object::BlockDevice>
 L<MyAWS::Object::BlockDevice::Attachment>
-L<MyAWS::Object::BlockDevice::EBS>
 L<MyAWS::Object::BlockDevice::Mapping>
 L<MyAWS::Object::BlockDevice::Mapping::EBS>
 L<MyAWS::Object::ConsoleOutput>

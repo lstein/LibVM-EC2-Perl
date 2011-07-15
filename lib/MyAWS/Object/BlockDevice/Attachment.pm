@@ -1,5 +1,78 @@
 package MyAWS::Object::BlockDevice::Attachment;
 
+=head1 NAME
+
+MyAWS::Object::BlockDevice::Attachment - Object describing the attachment of an EBS volume to an instance
+
+=head1 SYNOPSIS
+
+  use MyAWS;
+
+  $aws         = MyAWS->new(...);
+  $volume      = $aws->describe_volumes(-volume_id=>'vol-12345');
+  $attachment  = $aws->attachment;
+
+  $volId       = $attachment->volumeId;
+  $instanceId  = $attachment->instanceId;
+  $status      = $attachment->status;
+  $time        = $attachment->attachTime;
+  $delete      = $attachment->deleteOnTermination;
+
+=head1 DESCRIPTION
+
+This object is used to describe the attachment of an Amazon EBS volume
+to an instance. It is returned by MyAWS::Object::Volume->attachment().
+
+=head1 METHODS
+
+The following object methods are supported:
+ 
+ volumeId         -- ID of the volume.
+ instanceId       -- ID of the instance
+ status           -- Attachment state, one of "attaching", "attached",
+                     "detaching", "detached".
+ attachTime       -- Timestamp for when volume was attached
+ deleteOnTermination -- True if the EBS volume will be deleted when its
+                     attached instance terminates. Note that this is a
+                     Perl true, and not the string "true".
+
+In addition, this class provides several convenience functions:
+
+=head2 $instance  = $attachment->instance
+
+Returns the MyAWS::Object::Instance corresponding to this attachment.
+
+=head2 $volume  = $attachment->volume
+
+Returns the MyAWS::Object::Volume object corresponding to this
+attachment.
+
+=head1 STRING OVERLOADING
+
+When used in a string context, this object will interpolate into a
+string of the format "volumeId=>instanceId".
+
+=head1 SEE ALSO
+
+L<MyAWS>
+L<MyAWS::Object::Base>
+L<MyAWS::Object::Instance>
+L<MyAWS::Object::Volume>
+
+=head1 AUTHOR
+
+Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
+
+Copyright (c) 2011 Ontario Institute for Cancer Research
+
+This package and its accompanying libraries is free software; you can
+redistribute it and/or modify it under the terms of the GPL (either
+version 1, or at your option, any later version) or the Artistic
+License 2.0.  Refer to LICENSE for the full license text. In addition,
+please see DISCLAIMER.txt for disclaimers of warranty.
+
+=cut
+
 use strict;
 use base 'MyAWS::Object::Base';
 
@@ -11,6 +84,11 @@ sub valid_fields {
 sub primary_id {
     my $self = shift;
     return join ('=>',$self->volumeId,$self->instanceId);
+}
+
+sub deleteOnTermination {
+    my $d = shift->SUPER::deleteOnTermination or return;
+    return $d eq 'true';
 }
 
 sub instance {

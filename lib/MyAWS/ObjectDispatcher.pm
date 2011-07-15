@@ -122,7 +122,8 @@ sub response2objects {
     my $content  = $response->decoded_content;
 
     if (ref $class eq 'CODE') {
-	$class->($self->new_xml_parser->XMLin($content),$aws);
+	my $parsed = $self->new_xml_parser->XMLin($content);
+	$class->($parsed,$aws,@{$parsed}{'xmlns','requestId'});
     }
     elsif ($class =~ /^MyAWS::Object/) {
 	load_module($class);
@@ -172,7 +173,7 @@ sub fetch_one {
     load_module($class);
     my $parser = $self->new_xml_parser($nokey);
     my $parsed = $parser->XMLin($content);
-    return $class->new($parsed,$aws);
+    return $class->new($parsed,$aws,@{$parsed}{'xmlns','requestId'});
 }
 
 sub boolean {
@@ -189,13 +190,13 @@ sub fetch_items {
     my $parser = $self->new_xml_parser($nokey);
     my $parsed = $parser->XMLin($content);
     my $list   = $parsed->{$tag}{item} or return;
-    return map {$class->new($_,$aws)} @$list;
+    return map {$class->new($_,$aws,@{$parsed}{'xmlns','requestId'})} @$list;
 }
 
 sub create_objects {
     my $self   = shift;
     my ($parsed,$aws,$class) = @_;
-    return $class->new($parsed,$aws);
+    return $class->new($parsed,$aws,@{$parsed}{'xmlns','requestId'});
 }
 
 sub create_error_object {
@@ -204,15 +205,7 @@ sub create_error_object {
     my $class   = ObjectRegistration->{Error};
     eval "require $class; 1" || die $@ unless $class->can('new');
     my $parsed = $self->new_xml_parser->XMLin($content);
-    return $class->new($parsed->{Errors}{Error},$aws);
-}
-
-sub requestId {
-    shift->payload->{requestId};
-}
-
-sub xmlns {
-    shift->payload->{xmlns};
+    return $class->new($parsed->{Errors}{Error},$aws,@{$parsed}{'xmlns','requestId'});
 }
 
 # not a method!
@@ -228,7 +221,6 @@ L<MyAWS::Object>
 L<MyAWS::Object::Base>
 L<MyAWS::Object::BlockDevice>
 L<MyAWS::Object::BlockDevice::Attachment>
-L<MyAWS::Object::BlockDevice::EBS>
 L<MyAWS::Object::BlockDevice::Mapping>
 L<MyAWS::Object::BlockDevice::Mapping::EBS>
 L<MyAWS::Object::ConsoleOutput>

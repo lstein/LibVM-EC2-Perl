@@ -5,7 +5,7 @@ use base 'MyAWS::Object::Base';
 use Carp 'croak';
 use MyAWS::Object::Instance::State;
 
-use overload '""' => sub {shift()->instanceId},
+use overload '""' => sub {shift()->currentState},
     fallback      => 1;
 
 sub valid_fields {

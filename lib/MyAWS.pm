@@ -1120,7 +1120,6 @@ L<MyAWS::Object>
 L<MyAWS::Object::Base>
 L<MyAWS::Object::BlockDevice>
 L<MyAWS::Object::BlockDevice::Attachment>
-L<MyAWS::Object::BlockDevice::EBS>
 L<MyAWS::Object::BlockDevice::Mapping>
 L<MyAWS::Object::BlockDevice::Mapping::EBS>
 L<MyAWS::Object::ConsoleOutput>

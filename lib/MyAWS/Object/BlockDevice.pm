@@ -2,7 +2,7 @@ package MyAWS::Object::BlockDevice;
 
 =head1 NAME
 
-MyAWS::Object::BlockDevice - Object describing an EC2 block device attached to an image
+MyAWS::Object::BlockDevice - Object describing how to construct an EC2 block device when launching an image
 
 =head1 SYNOPSIS
 
@@ -14,14 +14,15 @@ MyAWS::Object::BlockDevice - Object describing an EC2 block device attached to a
   for my $d (@devices) {
     my $virtual_device = $d->deviceName;
     my $snapshot_id    = $d->snapshotId;
+    my $volume_size    = $d->volumeSize;
     my $delete         = $d->deleteOnTermination;
   }
 
 =head1 DESCRIPTION
 
-This object represents an Amazon block device associated with an AMI;
-it is returned by MyAWS->describe_images(), MyAWS->run_instances(),
-and other image-related operations.
+This object represents an Amazon block device associated with an AMI.
+The information in it is used to create a new volume when the AMI is launched.
+The object is returned by MyAWS->describe_images().
 
 Please see L<MyAWS::Object::Base> for methods shared by all MyAWS
 objects.
@@ -62,28 +63,10 @@ mappings in run_instances(). See L<MyAWS>.
 =head1 SEE ALSO
 
 L<MyAWS>
-L<MyAWS::Object>
 L<MyAWS::Object::Base>
 L<MyAWS::Object::BlockDevice>
 L<MyAWS::Object::BlockDevice::Attachment>
 L<MyAWS::Object::BlockDevice::EBS>
-L<MyAWS::Object::BlockDevice::Mapping>
-L<MyAWS::Object::BlockDevice::Mapping::EBS>
-L<MyAWS::Object::ConsoleOutput>
-L<MyAWS::Object::Error>
-L<MyAWS::Object::Generic>
-L<MyAWS::Object::Group>
-L<MyAWS::Object::Image>
-L<MyAWS::Object::Instance>
-L<MyAWS::Object::Instance::Set>
-L<MyAWS::Object::Instance::State>
-L<MyAWS::Object::Instance::State::Change>
-L<MyAWS::Object::Instance::State::Reason>
-L<MyAWS::Object::Region>
-L<MyAWS::Object::ReservationSet>
-L<MyAWS::Object::SecurityGroup>
-L<MyAWS::Object::Snapshot>
-L<MyAWS::Object::Tag>
 L<MyAWS::Object::Volume>
 
 =head1 AUTHOR

@@ -52,27 +52,7 @@ groupId.
 L<MyAWS>
 L<MyAWS::Object>
 L<MyAWS::Object::Base>
-L<MyAWS::Object::BlockDevice>
-L<MyAWS::Object::BlockDevice::Attachment>
-L<MyAWS::Object::BlockDevice::EBS>
-L<MyAWS::Object::BlockDevice::Mapping>
-L<MyAWS::Object::BlockDevice::Mapping::EBS>
-L<MyAWS::Object::ConsoleOutput>
-L<MyAWS::Object::Error>
-L<MyAWS::Object::Generic>
-L<MyAWS::Object::Group>
-L<MyAWS::Object::Image>
-L<MyAWS::Object::Instance>
-L<MyAWS::Object::Instance::Set>
-L<MyAWS::Object::Instance::State>
-L<MyAWS::Object::Instance::State::Change>
-L<MyAWS::Object::Instance::State::Reason>
-L<MyAWS::Object::Region>
-L<MyAWS::Object::ReservationSet>
 L<MyAWS::Object::SecurityGroup>
-L<MyAWS::Object::Snapshot>
-L<MyAWS::Object::Tag>
-L<MyAWS::Object::Volume>
 
 =head1 AUTHOR
 
@@ -91,9 +71,6 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'MyAWS::Object::Base';
 
-use overload '""' => sub {shift()->groupName},
-    fallback      => 1;
-
 sub valid_fields {
     my $self  = shift;
     return $self->SUPER::valid_fields,
@@ -104,10 +81,11 @@ sub primary_id { shift->groupId }
 
 sub permissions {
     my $self = shift;
+    return $self->{perm} if exists $self->{perm};
     my @sg   = $self->aws->describe_security_groups(-group_id=>$self->groupId);
     return unless @sg;
     die "more than one security group returned?" if @sg > 1;
-    return $sg[0];
+    return $self->{perm} = $sg[0];
 }
 
 1;

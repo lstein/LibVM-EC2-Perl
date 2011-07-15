@@ -44,21 +44,9 @@ method was called, allowing it to be printed or searched directly.
 
 =head1 SEE ALSO
 
-L<MyAWS> L<MyAWS::Object> L<MyAWS::Object::Base>
-L<MyAWS::Object::BlockDevice>
-L<MyAWS::Object::BlockDevice::Attachment>
-L<MyAWS::Object::BlockDevice::EBS>
-L<MyAWS::Object::BlockDevice::Mapping>
-L<MyAWS::Object::BlockDevice::Mapping::EBS>
-L<MyAWS::Object::ConsoleOutput> L<MyAWS::Object::Error>
-L<MyAWS::Object::Generic> L<MyAWS::Object::Group>
-L<MyAWS::Object::Image> L<MyAWS::Object::Instance>
-L<MyAWS::Object::Instance::Set> L<MyAWS::Object::Instance::State>
-L<MyAWS::Object::Instance::State::Change>
-L<MyAWS::Object::Instance::State::Reason> L<MyAWS::Object::Region>
-L<MyAWS::Object::ReservationSet> L<MyAWS::Object::SecurityGroup>
-L<MyAWS::Object::Snapshot> L<MyAWS::Object::Tag>
-L<MyAWS::Object::Volume>
+L<MyAWS>
+L<MyAWS::Object::Base>
+L<MyAWS::Object::Instance>
 
 =head1 AUTHOR
 
