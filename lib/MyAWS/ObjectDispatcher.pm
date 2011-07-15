@@ -221,7 +221,6 @@ sub load_module {
     eval "require $class; 1" || die $@ unless $class->can('new');
 }
 
-
 =head1 SEE ALSO
 
 L<MyAWS>

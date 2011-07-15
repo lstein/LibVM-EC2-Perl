@@ -72,14 +72,21 @@ The AWS API is identical to that described at http://docs.amazonwebservices.com/
 with the following key differences:
 
  1) When passing arguments to Perl methods, the method names are
-     lower-cased and underscores inserted between consecutive
-     words. Similarly, the arguments are lowercased, separated by
-     underscores, and proceeded to a dash. In other words, if the AWS
-     API calls for an argument named "InstanceId" to be passed to the
-     "DescribeInstances" call, then the corresponding Perl function will
-     look like:
+    lower-cased and underscores inserted between consecutive
+    words. Similarly, the arguments are lowercased, separated by
+    underscores, and proceeded to a dash. In other words, if the AWS
+    API calls for an argument named "InstanceId" to be passed to the
+    "DescribeInstances" call, then the corresponding Perl function will
+    look like:
 
              @i = $aws->describe_instances(-instance_id=>'i-12345')
+
+    In a number of cases, when the parameter name was absurdly long,
+    it has been abbreviated. For example, the
+    Placement.AvailabilityZone parameter has been represented as
+    -placement_zone and not -placement_availability_zone. This is
+    uncommon; see the documentation for individual method calls for
+    cases when it has occurred.
 
  2) When the API calls for a list of arguments named Arg.1, Arg.2,
     then the Perl interface allows you to use an anonymous array for
