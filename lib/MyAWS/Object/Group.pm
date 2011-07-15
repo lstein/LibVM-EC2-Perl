@@ -35,6 +35,13 @@ These object methods are supported:
  groupId   -- the group ID
  groupName -- the group's name
 
+For convenience, the object also provides a permissions() method that
+will return the fully detailed MyAWS::Object::SecurityGroup:
+
+ $details = $group->permissions()
+
+See L<MyAWS::Object::SecurityGroup>
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
@@ -95,6 +102,13 @@ sub valid_fields {
 
 sub primary_id { shift->groupId }
 
+sub permissions {
+    my $self = shift;
+    my @sg   = $self->aws->describe_security_groups(-group_id=>$self->groupId);
+    return unless @sg;
+    die "more than one security group returned?" if @sg > 1;
+    return $sg[0];
+}
 
 1;
 
