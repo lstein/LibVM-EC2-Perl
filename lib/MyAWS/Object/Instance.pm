@@ -92,8 +92,9 @@ These object methods are supported:
                    indicates the reason for the instance's most recent
                    state change. See http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-ItemType-StateReasonType.html
  architecture   -- The architecture of the image. Either "i386" or "x86_64".
- rootDeviceType -- The type of the root device used by the instane. One of "ebs"
+ rootDeviceType -- The type of the root device used by the instance. One of "ebs"
                    or "instance-store".
+ rootDeviceName -- The name of the the device used by the instance, such as /dev/sda1.
  blockDeviceMapping -- The block device mappings for the instance, represented
                    as a list of MyAWS::Object::BlockDevice::Mapping objects.
  instanceLifeCycle-- "spot" if this instance is a spot instance, otherwise empty.
@@ -108,6 +109,27 @@ The object also supports the tags() method described in
 L<MyAWS::Object::Base>:
 
  print "ready for production\n" if $image->tags->{Released};
+
+The following methods make internal calls to
+MyAWS->describe_instance_attributes() to retrieve less-commonly needed
+information:
+
+=head2 $data = $instance->userData
+
+Return any user data passed to the instance at launch time. This has
+already been decoded from its Base64 representation.
+
+=head2 $boolean = $instance->disableApiTermination
+
+Return true if the instance is protected from API termination (via the
+console or a script).
+
+=head2 $result = $instance->instanceInitiatedShutdownBehavior
+
+Returns the behavior when the instance calls shutdown or halt. It is
+one of "stop" or "terminate".
+
+=head1 LIFECYCLE METHODS
 
 In addition, the following convenience functions are provided
 
@@ -134,7 +156,7 @@ Here's a polling example:
 
 Here's an example that will pause until the instance is running:
 
-  $instance->start('wait');
+  $instance->start(1);
 
 Attempting to start an already running instance, or one that is
 in transition, will throw a fatal error.
@@ -149,6 +171,35 @@ stop a running instance.
 This method is similar to start(), except that it can be used to
 terminate an instance. It can only be called on instances that
 are either "running" or "stopped".
+
+=head2 $state_change = $instance->reboot()
+
+Reboot the instance. Rebooting doesn't occur immediately; instead the
+request is queued by the Amazon system and may be satisfied several
+minutes later. For this reason, there is no "wait" argument.
+
+=head2 $result = $instance->associate_address($elastic_address)
+
+Associate an elastic address with this instance. If you are
+associating a VPC elastic IP address with the instance, the result
+code will indicate the associationId. Otherwise it will be a simple
+perl truth value ("1") if successful, undef if false.
+
+In the case of an ordinary EC2 Elastic IP address, the first argument may
+either be an ordinary string (xx.xx.xx.xx format) or a
+MyAWS::Object::ElasticAddress object. However, if it is a VPC elastic
+IP address, then the argument must be a MyAWS::Object::ElasticAddress
+as returned by describe_addresses(). The reason for this is that the
+allocationId must be retrieved from the object in order to use in the
+call.
+
+=head2 $bool = $aws->disassociate_address
+
+Disassociate an elastic IP address from this instance. if any. The
+result will be true if disassociation was successful. Note that for a
+short period of time (up to a few minutes) after disassociation, the
+instance will have no public IP address and will be unreachable from
+the internet.
 
 =head2 $instance->refresh
 
@@ -298,6 +349,23 @@ sub stateReason {
     return MyAWS::Object::Instance::State::Reason->new($reason,$self->_object_args);
 }
 
+sub userData {
+    my $self = shift;
+    my $data = $self->aws->describe_instance_attribute($self,'userData') or return;
+    MyAWS::ObjectDispatcher::load_module('MIME::Base64');
+    return decode_base64($data);
+}
+
+sub disableApiTermination {
+    my $self = shift;
+    return $self->aws->describe_instance_attribute($self,'disableApiTermination') eq 'true';
+}
+
+sub instanceInitiatedShutdownBehavior {
+    my $self = shift;
+    return $self->aws->describe_instance_attribute($self,'instanceInitiatedShutdownBehavior');
+}
+
 sub status {
     my $self = shift;
     my ($i)  = $self->aws->describe_instances(-instance_id=>$self->instanceId);
@@ -355,6 +423,31 @@ sub terminate {
 	$self->refresh;
     }
     return $i;
+}
+
+sub reboot {
+    my $self = shift;
+
+    my $s    = $self->status;
+    croak "Can't reboot $self: run state=$s"unless $s eq 'running';
+    return $self->aws->reboot_instances($self);
+}
+
+sub associate_address {
+    my $self = shift;
+    my $addr = shift or croak "Usage: \$instance->associate_address(\$elastic_address)";
+    my $r = $self->aws->associate_address($addr => $self->instanceId);
+    $r->{data}{ipAddress} = $addr if $r;
+    return $r;
+}
+
+sub disassociate_address {
+    my $self = shift;
+    my $addr = $self->aws->describe_addresses(-filter=>{'instance-id'=>$self->instanceId});
+    $addr or croak "Instance $self is not currently associated with an elastic IP address";
+    my $r = $self->aws->disassociate_address($addr);
+    delete $r->{data}{ipAddress};
+    return $r;
 }
 
 sub refresh {

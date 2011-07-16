@@ -79,7 +79,7 @@ with the following key differences:
     "DescribeInstances" call, then the corresponding Perl function will
     look like:
 
-             @i = $aws->describe_instances(-instance_id=>'i-12345')
+         @i = $aws->describe_instances(-instance_id=>'i-12345')
 
     In a number of cases, when the parameter name was absurdly long,
     it has been abbreviated. For example, the
@@ -88,22 +88,29 @@ with the following key differences:
     uncommon; see the documentation for individual method calls for
     cases when it has occurred.
 
- 2) When the API calls for a list of arguments named Arg.1, Arg.2,
+ 2) For each of the describe_foo() methods (where "foo" is a type of
+    resource such as "instance"), you can fetch the resource by using
+    their IDs either with the long form:
+          $aws->describe_foo(-foo_id=>['a','b','c']),
+    or a shortcut form: 
+          $aws->describe_foo('a','b','c');
+
+ 3) When the API calls for a list of arguments named Arg.1, Arg.2,
     then the Perl interface allows you to use an anonymous array for
     the consecutive values. For example to call describe_instances()
     with multiple instance IDs, use:
 
-            @i = $aws->describe_instances(-instance_id=>['i-12345','i-87654']
+       @i = $aws->describe_instances(-instance_id=>['i-12345','i-87654']
 
- 3) All Filter arguments are represented as a -filter argument whose value is
-    an anonymous hashe:
+ 4) All Filter arguments are represented as a -filter argument whose value is
+    an anonymous hash:
 
-           @i = $aws->describe_instances(-filter=>{architecture=>'i386',
+       @i = $aws->describe_instances(-filter=>{architecture=>'i386',
                                                    'tag:Name'  =>'WebServer'})
 
     When adding or removing tags, the -tag argument has the same syntax.
 
- 4) The tagnames of each XML object returned from AWS are converted into methods
+ 5) The tagnames of each XML object returned from AWS are converted into methods
     with the same name and typography. So the <privateIpAddress> tag in a
     DescribeInstancesResponse, becomes:
 
@@ -120,7 +127,7 @@ with the following key differences:
       @fields = sort $instance->fields;
       # 'amiLaunchIndex', 'architecture', 'blockDeviceMapping', ...
 
- 5) Whenever an object has a unique ID, string overloading is used so that 
+ 6) Whenever an object has a unique ID, string overloading is used so that 
     the object interpolates the ID into the string. For example, when you
     print a MyAWS::Object::Volume object, or use it in another string context,
     then it will appear as the string "vol-123456". Nevertheless, it will
@@ -130,7 +137,7 @@ with the following key differences:
          print $v,"\n";       # appears as "vol-123456"
          $size = $v->size;
 
- 6) Some objects have convenience methods that invoke the AWS API on your
+ 7) Some objects have convenience methods that invoke the AWS API on your
     behalf. For example, instance objects have a status() method that returns
     the run status of the object, as well as start(), stop() and terminate()
     methods that control the instance's lifecycle.
@@ -139,7 +146,7 @@ with the following key differences:
              $instance->stop;
          }
 
- 7) Calls to AWS that have failed for one reason or another (invalid
+ 8) Calls to AWS that have failed for one reason or another (invalid
     parameters, communications problems, service interruptions) will
     return undef and set the MyAWS->is_error() method to true. The
     error message and its code can be recovered by calling
@@ -177,9 +184,9 @@ EC2_SECRET_KEY and EC2_URL are defined.
 sub new {
     my $self = shift;
     my %args = @_;
-    my $id           = $args{-access_key} || $ENV{EC2_ACCESS_KEY} or croak "Please provide AccessKey parameter";
-    my $secret       = $args{-secret_key} || $ENV{EC2_SECRET_KEY} or croak "Please provide SecretKey parameter";
-    my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL}        or croak "Please provide EndPoint  parameter";  
+    my $id           = $args{-access_key} || $ENV{EC2_ACCESS_KEY} or croak "Please provide AccessKey parameter or define environment variable EC2_ACCESS_KEY";
+    my $secret       = $args{-secret_key} || $ENV{EC2_SECRET_KEY} or croak "Please provide SecretKey parameter or define environment variable EC2_SECRET_KEY";
+    my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL}        || 'http://ec2.amazonaws.com/';
     $endpoint_url   .= '/' unless $endpoint_url =~ m!/$!;
     return bless {
 	id              => $id,
@@ -202,23 +209,19 @@ returned. Glob-style wildcards, such as "*east") are allowed.
 
 sub describe_regions {
     my $self = shift;
-    my %args;
-    if ($_[0] =~ /^-/) {
-	%args = @_;
-    } else {
-	%args = (-region_name => \@_) if @_;
-    }
-
+    my %args = $self->args('-region_name',@_);
     my @params = $self->list_parm('RegionName',\%args);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeRegions',@params);
 }
 
-=head2 @instances = $aws->describe_instances(-instance_id=>$id,-filter=>\@filters)
+=head2 @instances = $aws->describe_instances(-instance_id=>\@ids,-filter=>\@filters)
+=head2 @instances = $aws->describe_instances(@instance_ids)
 
 Return a series of MyAWS::Object::Instance objects. Optional parameters are:
 
- -instance_id     ID of the instance to return information on
+ -instance_id     ID of the instance(s) to return information on. 
+                  This can be a string scalar, or an arrayref.
  -filter          Tags and other filters to apply.
 
 There are a large number of filters which can be specified. The filter
@@ -245,7 +248,7 @@ retrieved from each instance by calling its reservationId() method.
 
 sub describe_instances {
     my $self = shift;
-    my %args = @_;
+    my %args = $self->args('-instance_id',@_);
     my @params;
     push @params,$self->list_parm('InstanceId',\%args);
     push @params,$self->filter_parm(\%args);
@@ -258,7 +261,88 @@ sub describe_instances {
     }
 }
 
-=head2 @snaps = $aws->describe_snapshots(%param)
+=head2 @data = $aws->describe_instance_attribute($instance_id,$attribute)
+
+This method returns instance attributes. Only one attribute can be
+retrieved at a time. The following is the list of attributes that can be
+retrieved:
+
+ instanceType
+ kernel
+ ramdisk
+ userData
+ disableApiTermination
+ instanceInitiatedShutdownBehavior
+ rootDeviceName
+ blockDeviceMapping
+ sourceDestCheck
+ groupSet
+
+All of these values can be retrieved more conveniently from the
+MyAWS::Object::Instance object returned from describe_instances(), so
+there is no attempt to parse the results of this call into Perl
+objects. Therefore, some of the attributes, such as
+'blockDeviceMapping' will be returned as raw hashrefs.
+
+=cut
+
+sub describe_instance_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_instance_attribute(\$instance_id,\$attribute_name)";
+    my ($instance_id,$attribute) = @_;
+    my @param  = (InstanceId=>$instance_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeInstanceAttribute',@param);
+    return $result->attribute($attribute);
+}
+
+=head2 $boolean = $aws->modify_instance_attribute($instance_id,%param)
+
+
+This method sets instance attributes. The following is the list of attributes that can be
+set:
+
+ -instance_type
+ -kernel
+ -ramdisk
+ -user_data
+ -disable_api_termination
+ -termination_protection (same as above)
+ -instance_initiated_shutdown_behavior
+ -shutdown_behavior      (same as above)
+ -root_device_name
+ -source_dest_check   (VPC only)
+ -group_id            (VPC only)
+
+For example:
+
+  $aws->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2',-ramdisk=>'ard-21113')
+
+=cut
+
+sub modify_instance_attribute {
+    my $self = shift;
+    my $instance_id = shift or croak "Usage: modify_instance_attribute(\$instanceId,%param)";
+    my %args   = @_;
+
+    my @param  = (InstanceId=>$instance_id);
+    push @param,$self->value_parm('InstanceType',\%args);
+    push @param,$self->value_parm('Kernel',\%args);
+    push @param,$self->value_parm('Ramdisk',\%args);
+    push @param,$self->value_parm('UserData',\%args);
+    push @param,$self->value_parm('DisableApiTermination',\%args);
+    push @param,$self->value_parm('InstanceInitiatedShutdownBehavior',\%args);
+    push @param,$self->value_parm('SourceDestCheck',\%args);
+    push @param,$self->list_parm('GroupId',\%args);
+
+    push @param,('DisableApiTermination.Value'=>'true' if $args{-termination_protection};
+    push @param,('InstanceInitiatedShutdownBehavior.Value'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
+
+
+    return $self->call('ModifyInstanceAttribute',@param);
+}
+
+=head2 @snaps = $aws->describe_snapshots(-snapshot_id=>\@ids,%other_param)
+=head2 @snaps = $aws->describe_snapshots(@snapshot_ids)
 
 Returns a series of MyAWS::Object::Snapshot objects. All parameters
 are optional:
@@ -276,9 +360,9 @@ http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-qu
 
 sub describe_snapshots {
     my $self = shift;
-    my %args = @_;
-    my @params;
+    my %args = $self->args('-snapshot_id',@_);
 
+    my @params;
     push @params,$self->list_parm('SnapshotId',\%args);
     push @params,$self->list_parm('Owner',\%args);
     push @params,$self->list_parm('RestorableBy',\%args);
@@ -286,11 +370,13 @@ sub describe_snapshots {
     return $self->call('DescribeSnapshots',@params) or return;
 }
 
-=head2 @v = $aws->describe_volumes(-volume_id=>$id,-filter=>\%filters)
+=head2 @v = $aws->describe_volumes(-volume_id=>\@ids,-filter=>\%filters)
+=head2 @v = $aws->describe_volumes(@volume_ids)
 
 Return a series of MyAWS::Object::Volume objects. Optional parameters:
 
- -volume_id    The id of the volume to fetch
+ -volume_id    The id of the volume to fetch, either a string
+               scalar or an arrayref.
  -filter       One or more filters to apply to the search
 
 The full list of volume filters can be found at:
@@ -300,20 +386,22 @@ http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-qu
 
 sub describe_volumes {
     my $self = shift;
-    my %args = @_;
+    my %args = $self->args(-volume_id=>@_);
     my @params;
     push @params,$self->list_parm('VolumeId',\%args);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeVolumes',@params) or return;
 }
 
-=head2 @i = $aws->describe_images(-image_id=>$id,-executable_by=>$id,
+=head2 @i = $aws->describe_images(-image_id=>\@id,-executable_by=>$id,
                                   -owner=>$id, -filter=>\%filters)
+=head2 @i = $aws->describe_images(@image_ids)
 
 Return a series of MyAWS::Object::Image objects, each describing an
 AMI. Optional parameters:
 
- -image_id        The id of the image
+ -image_id        The id of the image, either a string scalar or an
+                  arrayref.
  -executable_by   Filter by images executable by the indicated user account
  -owner           Filter by owner account
  -filter          Tags and other filters to apply
@@ -325,7 +413,7 @@ http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-qu
 
 sub describe_images {
     my $self = shift;
-    my %args = @_;
+    my %args = $self->args(-image_id=>@_);
     my @params;
     push @params,$self->list_parm('ExecutableBy',\%args);
     push @params,$self->list_parm('ImageId',\%args);
@@ -351,9 +439,10 @@ sub describe_tags {
     return $self->call('DescribeTags',@params);    
 }
 
-=head2 @sg = $aws->describe_security_groups(-group_name=> \@names,
-                                            -group_id  => \@ids,
+=head2 @sg = $aws->describe_security_groups(-group_id  => \@ids,
+                                            -group_name=> \@names,
                                             -filter    => \%filters);
+=head2 @sg = $aws->describe_security_groups(@group_ids)
 
 Searches for security groups matching the provided filters and return
 a series of MyAWS::Object::SecurityGroup objects.
@@ -373,7 +462,7 @@ http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-qu
 
 sub describe_security_groups {
     my $self = shift;
-    my %args = @_;
+    my %args = $self->args(-group_id=>@_);
     my @params = $self->list_parm('GroupName',\%args);
     push @params,$self->list_parm('GroupId',\%args);
     push @params,$self->filter_parm(\%args);
@@ -764,6 +853,30 @@ sub terminate_instances {
     return $self->call('TerminateInstances',@params) or return;
 }
 
+=head2 @s = $aws->reboot_instances(-instance_id=>\@instance_ids)
+=head2 @s = $aws->reboot_instances(@instance_ids)
+
+Reboot the instances named by @instance_ids and return one or more
+MyAWS::Object::Instance::State::Change objects.
+
+To wait for the all the instances to reach their final state, call
+wait_for_instances().
+
+You can also reboot an instance by calling its terminate() method:
+
+    $instances[0]->reboot;
+
+=cut
+
+sub reboot_instances {
+    my $self = shift;
+    my @instance_ids = $self->instance_parm(@_)
+	or croak "Usage: reboot_instances(\@instance_ids)";
+    my $c = 1;
+    my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
+    return $self->call('RebootInstances',@params) or return;
+}
+
 =head2 $aws->wait_for_instances(-instance_id=>\@instances);
 =head2 $aws->wait_for_instances(@instances)
 
@@ -800,15 +913,38 @@ object it provides instanceId() and timestamp() methods.
 
 sub get_console_output {
     my $self = shift;
-    my %args;
-    if ($_[0] =~ /^-/) {
-	%args = @_; 
-    } else {
-	%args = (-instance_id => shift);
-    }
+    my %args = $self->args(-instance_id=>@_);
     $args{-instance_id} or croak "Usage: get_console_output(-instance_id=>\$id)";
     my @params = $self->single_parm('InstanceId',\%args);
     return $self->call('GetConsoleOutput',@params);
+}
+
+=head2 @addr = $aws->describe_addresses(-public_ip=>\@addr,-allocation_id=>\@id,-filter->\%filters)
+=head2 @addr = $aws->describe_addresses(@public_ips)
+
+Queries AWS for a list of elastic IP addresses already allocated to
+you. All parameters are optional:
+
+ -public_ip     -- An IP address (in dotted format) or an arrayref of
+                   addresses to return information about.
+ -allocation_id -- An allocation ID or arrayref of such IDs. Only 
+                   applicable to VPC addresses.
+ -filter        -- A hashref of tag=>value pairs to filter the response
+                   on.
+
+The list of applicable filters can be found at
+http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeAddresses.html.
+
+=cut
+
+sub describe_addresses {
+    my $self = shift;
+    my %args = $self->args(-public_ip=>@_);
+    my @param;
+    push @param,$self->list_parm('PublicIp',\%args);
+    push @param,$self->list_parm('AllocationId',\%args);
+    push @param,$self->filter_parm(\%args);
+    return $self->call('DescribeAddresses',@param);
 }
 
 =head2 $address_info = $aws->allocate_address([-vpc=>1])
@@ -844,6 +980,61 @@ sub release_address {
     return $self->call('ReleaseAddress',@param);
 }
 
+=head2 $result = $aws->associate_address($elastic_addr => $instance_id)
+
+Associate an elastic address with an instance id. Both arguments are
+mandatory. If you are associating a VPC elastic IP address with the
+instance, the result code will indicate the associationId. Otherwise
+it will be a simple perl truth value ("1") if successful, undef if
+false.
+
+If this is an ordinary EC2 Elastic IP address, the first argument may
+either be an ordinary string (xx.xx.xx.xx format) or a
+MyAWS::Object::ElasticAddress object. However, if it is a VPC elastic
+IP address, then the argument must be a MyAWS::Object::ElasticAddress
+as returned by describe_addresses(). The reason for this is that the
+allocationId must be retrieved from the object in order to use in the
+call.
+
+=cut
+
+sub associate_address {
+    my $self = shift;
+    @_ == 2 or croak "Usage: associate_address(\$elastic_addr => \$instance_id)";
+    my ($addr,$instance) = @_;
+
+    my @param = (InstanceId=>$instance);
+    push @param,eval {$addr->domain eq 'vpc'} ? (AllocationId => $addr->allocationId)
+	                                      : (PublicIp     => $addr);
+    return $self->call('AssociateAddress',@param);
+}
+
+=head2 $bool = $aws->disassociate_address($elastic_addr)
+
+Disassociate an elastic address from whatever instance it is currently
+associated with, if any. The result will be true if disassociation was
+successful.
+
+If this is an ordinary EC2 Elastic IP address, the argument may
+either be an ordinary string (xx.xx.xx.xx format) or a
+MyAWS::Object::ElasticAddress object. However, if it is a VPC elastic
+IP address, then the argument must be a MyAWS::Object::ElasticAddress
+as returned by describe_addresses(). The reason for this is that the
+allocationId must be retrieved from the object in order to use in the
+call.
+
+
+=cut
+
+sub disassociate_address {
+    my $self = shift;
+    @_ == 1 or croak "Usage: associate_address(\$elastic_addr)";
+    my $addr = shift;
+
+    my @param = eval {$addr->domain eq 'vpc'} ? (AssociationId => $addr->associationId)
+	                                      : (PublicIp      => $addr);
+    return $self->call('DisassociateAddress',@param);
+}
 # ------------------------------------------------------------------------------------------
 
 =head2 $boolean = $aws->is_error
@@ -904,6 +1095,14 @@ sub instance_parm {
     }
     my $id = $args{-instance_id};
     return ref $id && ref $id eq 'ARRAY' ? @$id : $id;
+}
+
+sub value_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    my $name = $self->canonicalize($argname);
+    return unless exists $args->{$name};
+    return ("$argname.Value"=>$args->{$name});
 }
 
 sub single_parm {
@@ -1084,6 +1283,14 @@ sub _sign {
     $uri->query_form(\%sign_hash);
 
     return POST $self->endpoint,[%sign_hash];
+}
+
+sub args {
+    my $self = shift;
+    my $default_param_name = shift;
+    return unless @_;
+    return @_ if $_[0] =~ /^-/;
+    return ($default_param_name => \@_);
 }
 
 sub token {

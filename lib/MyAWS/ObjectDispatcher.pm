@@ -92,6 +92,13 @@ use constant ObjectRegistration => {
     DescribeRegions   => 'fetch_items,regionInfo,MyAWS::Object::Region',
     DescribeSecurityGroups   => 'fetch_items,securityGroupInfo,MyAWS::Object::SecurityGroup',
     DescribeTags      => 'fetch_items,tagSet,MyAWS::Object::Tag,nokey',
+    ModifyInstanceAttribute => 'boolean,return',
+    DescribeAddresses => 'fetch_items,addressesSet,MyAWS::Object::ElasticAddress',
+    AssociateAddress  => sub {
+	my $data = shift;
+	return $data->{associationId} || ($data->{return} eq 'true');
+    },
+    DisassociateAddress => 'boolean,return',
     AllocateAddress   => 'MyAWS::Object::ElasticAddress',
     ReleaseAddress    => 'boolean,return',
     CreateTags        => 'boolean,return',
@@ -99,6 +106,7 @@ use constant ObjectRegistration => {
     StartInstances       => 'fetch_items,instancesSet,MyAWS::Object::Instance::State::Change',
     StopInstances        => 'fetch_items,instancesSet,MyAWS::Object::Instance::State::Change',
     TerminateInstances   => 'fetch_items,instancesSet,MyAWS::Object::Instance::State::Change',
+    RebootInstances      => 'boolean.return',
     GetConsoleOutput  => 'fetch_one,MyAWS::Object::ConsoleOutput',
 };
 

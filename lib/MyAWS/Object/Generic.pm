@@ -77,4 +77,14 @@ sub as_xml {
 	);
 }
 
+sub attribute {
+    my $self = shift;
+    my $attr = shift;
+    my $payload = $self->payload   or return;
+    my $hr      = $payload->{$attr} or return;
+    return $hr->{value}   if $hr->{value};
+    return @{$hr->{item}} if $hr->{item};
+    return $hr;
+}
+
 1;

@@ -27,6 +27,29 @@ These object methods are supported:
  publicIp      -- Public IP of the address
  domain        -- Type of address, either "standard" or "vpc"
  allocationId  -- For VPC addresses only, an allocation ID
+ instanceId    -- If the address is associated with an instance, the
+                  ID of that instance.
+ associationId -- If the address is a VPC elastic IP, and associated
+                  with an instance, then the ID of the association.
+
+In addition, the following convenience methods are provided:
+
+=head2 $result = $addr->associate($instance_id)
+
+Associate this address with the given instance ID or
+MyAWS::Object::Instance object. If successful, the result code will be
+true for an ordinary EC2 Elastic IP,or equal to the associationId for
+a VPC Elastic IP address.
+
+=head2 $result = $addr->disassociate()
+
+Disassociate this address with any instance it is already associated
+with. If successful, this method will return true.
+
+=head2 $addr->refresh()
+
+This is an internal function called after associate() and
+disassociate(), and is used to refresh the address object's contents.
 
 =head1 STRING OVERLOADING
 
@@ -60,7 +83,28 @@ sub primary_id {shift->publicIp}
 
 sub valid_fields {
     my $self = shift;
-    return qw(publicIp domain allocationId);
+    return qw(publicIp domain allocationId instanceId associationId);
+}
+
+sub associate {
+    my $self = shift;
+    my $instance = shift or die "Usage: \$elastic_addr->associate(\$instance)";
+    my $result = $self->aws->associate_address($self,$instance);
+    $self->refresh if $result;
+    $result;
+}
+
+sub disassociate {
+    my $self = shift;
+    my $result = $self->aws->disassociate_address($self);
+    $self->refresh if $result;
+    $result;
+}
+
+sub refresh {
+    my $self = shift;
+    my $i  = $self->aws->describe_addresses($self) or return;
+    %$self = %$i;
 }
 
 1;
