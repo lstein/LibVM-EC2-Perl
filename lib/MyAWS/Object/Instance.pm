@@ -47,87 +47,129 @@ this interface.
 These object methods are supported:
  
  instanceId     -- ID of this instance.
+
  imageId        -- ID of the image used to launch this instance.
+
  instanceState  -- The current state of the instance at the time
                    that describe_instances() was called, as a
                    MyAWS::Object::Instance::State object. Also
                    see the status() method, which re-queries EC2 for
                    the current state of the instance.
+
  privateDnsName -- The private DNS name assigned to the instance within
                    Amazon's EC2 network. This element is defined only
                    for running instances.
+
  dnsName        -- The public DNS name assigned to the instance, defined
                    only for running instances.
+
  reason         -- Reason for the most recent state transition, 
                    if applicable.
+
  keyName        -- Name of the associated key pair, if applicable.
+
  amiLaunchIndex -- The AMI launch index, which can be used to find
                    this instance within the launch group.
+
  productCodes   -- A list of product codes that apply to this instance.
- instanceType   -- The instance type, such as "t1.micro".
+
+ instanceType   -- The instance type, such as "t1.micro". CHANGEABLE.
+
  launchTime     -- The time the instance launched.
+
  placement      -- The placement of the instance. Returns a
                    MyAWS::Object::Placement object.
- kernelId       -- ID of the instance's kernel.
- ramdiskId      -- ID of the instance's RAM disk.
+
+ kernelId       -- ID of the instance's kernel. CHANGEABLE.
+
+ ramdiskId      -- ID of the instance's RAM disk. CHANGEABLE.
+
  platform       -- Platform of the instance, either "windows" or empty.
+
  monitoring     -- State of monitoring for the instance. One of 
-                   "disabled", "enabled", or "pending".
+                   "disabled", "enabled", or "pending". CHANGEABLE:
+                   pass true or "enabled" to turn on monitoring. Pass
+                   false or "disabled" to turn it off.
+
  subnetId       -- The Amazon VPC subnet ID in which the instance is 
                    running, for Virtual Private Cloud instances only.
+
  vpcId          -- The Virtual Private Cloud ID for VPC instances.
+
  privateIpAddress -- The private (internal Amazon) IP address assigned
                    to the instance.
+
  ipAddress      -- The public IP address of the instance.
+
  sourceDestCheck -- Whether source destination checking is enabled on
                    this instance. This returns a Perl boolean rather than
                    the string "true". This method is used in conjunction
                    with VPC NAT functionality. See the Amazon VPC User
-                   Guide for details.
+                   Guide for details. CHANGEABLE.
+
  groupSet       -- List of MyAWS::Object::Group objects indicating the VPC
                    security groups in which this instance resides. Not to be
                    confused with groups(), which returns the security groups
-                   of non-VPC instances.
+                   of non-VPC instances. 
+
  stateReason    -- A MyAWS::Object::Instance::State::Reason object which
                    indicates the reason for the instance's most recent
                    state change. See http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-ItemType-StateReasonType.html
+
  architecture   -- The architecture of the image. Either "i386" or "x86_64".
+
  rootDeviceType -- The type of the root device used by the instance. One of "ebs"
                    or "instance-store".
+
  rootDeviceName -- The name of the the device used by the instance, such as /dev/sda1.
+                   CHANGEABLE.
+
  blockDeviceMapping -- The block device mappings for the instance, represented
                    as a list of MyAWS::Object::BlockDevice::Mapping objects.
+
  instanceLifeCycle-- "spot" if this instance is a spot instance, otherwise empty.
+
  spotInstanceRequestId -- The ID of the spot instance request, if applicable.
+
  virtualizationType -- Either "paravirtual" or "hvm".
+
  clientToken    -- The idempotency token provided at the time of the AMI launch,
                    if any.
+
  hypervisor     -- The instance's hypervisor type, either "ovm" or "xen".
- tagSet         -- Tags for the instance as a hashref.
+
+ userData       -- User data passed to instance at launch. CHANGEABLE.
+
+ disableApiTermination -- True if the instance is protected from termination
+                   via the console or command-line APIs. CHANGEABLE.
+
+ instanceInitiatedShutdownBehavior -- Action to take when the instance calls
+                   shutdown or halt. One of "stop" or "terminate". CHANGEABLE.
+
+ tagSet         -- Tags for the instance as a hashref. CHANGEABLE via add_tags()
+                   and delete_tags().
 
 The object also supports the tags() method described in
 L<MyAWS::Object::Base>:
 
  print "ready for production\n" if $image->tags->{Released};
 
-The following methods make internal calls to
-MyAWS->describe_instance_attributes() to retrieve less-commonly needed
-information:
+All methods return read-only values except for those marked CHANGEABLE
+in the list above. For these, you can change the instance attribute on
+stopped instances by invoking the method with an appropriate new
+value. For example, to change the instance type from "t1.micro" to
+"m1.small", you can do this:
 
-=head2 $data = $instance->userData
+ my @tiny_instances = $aws->describe_instances(-filter=>{'instance-type'=>'t1.micro'});
+ for my $i (@tiny_instances) {
+    next unless $i->instanceState eq 'stopped';
+    $i->instanceType('m1.small') or die $aws->error;
+ }
 
-Return any user data passed to the instance at launch time. This has
-already been decoded from its Base64 representation.
-
-=head2 $boolean = $instance->disableApiTermination
-
-Return true if the instance is protected from API termination (via the
-console or a script).
-
-=head2 $result = $instance->instanceInitiatedShutdownBehavior
-
-Returns the behavior when the instance calls shutdown or halt. It is
-one of "stop" or "terminate".
+When you attempt to change an attribute of an instance, the method
+will return true on success, false on failure. On failure, the
+detailed error messages can be recovered from the MyAWS object's
+error() method.
 
 =head1 LIFECYCLE METHODS
 
@@ -251,6 +293,7 @@ use MyAWS::Object::Group;
 use MyAWS::Object::Instance::State;
 use MyAWS::Object::Instance::State::Reason;
 use MyAWS::Object::BlockDevice::Mapping;
+use MIME::Base64 qw(encode_base64 decode_base64);
 use Carp 'croak';
 
 sub new {
@@ -271,7 +314,15 @@ sub new {
 sub reservationId {shift->{reservation} }
 sub requesterId   {shift->{requester}   }
 sub ownerId       {shift->{owner}       }
-sub groups        {@{shift->{groups}}   }
+sub groups        {
+    my $self = shift;
+    my $groups = $self->{groups};
+    if (@_) {
+	return $self->aws->modify_instance_attribute($self,-group_id=>\@_);
+    } else {
+	return @$groups;
+    }
+}
 sub group         {shift()->{groups}[0] }
 sub primary_id    {shift()->instanceId  }
 
@@ -317,6 +368,10 @@ sub instanceState {
 sub sourceDestCheck {
     my $self = shift;
     my $check = $self->SUPER::sourceDestCheck;
+    if (@_) {
+	my $c = shift() ? 'true' : 'false';
+	return $self->aws->modify_instance_attribute($self,-source_dest_check=>$c);
+    }
     return $check eq 'true';
 }
 
@@ -334,7 +389,16 @@ sub placement {
 }
 
 sub monitoring {
-    return shift->monitoring->{state};
+    my $self = shift;
+    if (@_) {
+	my $enable = shift;
+	if ($enable && $enable ne 'disabled') {
+	    return $self->aws->monitor_instances($self);
+	} else {
+	    return $self->aws->unmonitor_instances($self);
+	}
+    }
+    return $self->SUPER::monitoring->{state};
 }
 
 sub blockDeviceMapping {
@@ -349,8 +413,51 @@ sub stateReason {
     return MyAWS::Object::Instance::State::Reason->new($reason,$self->_object_args);
 }
 
+sub kernelId {
+    my $self = shift;
+    my $kernel = $self->SUPER::kernelId;
+    if (@_) {
+	return $self->aws->modify_instance_attribute($self,-kernel=>shift());
+    } else {
+	return $kernel;
+    }
+}
+
+sub ramdiskId {
+    my $self = shift;
+    my $ramdisk = $self->SUPER::ramdiskId;
+    if (@_) {
+	return $self->aws->modify_instance_attribute($self,-ramdisk=>shift());
+    } else {
+	return $ramdisk;
+    }
+}
+
+sub rootDeviceName {
+    my $self = shift;
+    my $root = $self->SUPER::rootDeviceName;
+    if (@_) {
+	return $self->aws->modify_instance_attribute($self,-root_device_name => shift());
+    } else {
+	return $root;
+    }
+}
+
+sub instanceType {
+    my $self = shift;
+    return $self->aws->modify_instance_attribute($self, 
+						-instance_type=>shift()) if @_;
+    return $self->SUPER::instanceType;
+}
+
 sub userData {
     my $self = shift;
+
+    if (@_) {
+	my $encoded = encode_base64(shift);
+	return $self->aws->modify_instance_attribute($self,-user_data=>$encoded);
+    }
+
     my $data = $self->aws->describe_instance_attribute($self,'userData') or return;
     MyAWS::ObjectDispatcher::load_module('MIME::Base64');
     return decode_base64($data);
@@ -358,11 +465,15 @@ sub userData {
 
 sub disableApiTermination {
     my $self = shift;
+    return $self->aws->modify_instance_attribute($self, 
+						-disable_api_termination=>shift()) if @_;
     return $self->aws->describe_instance_attribute($self,'disableApiTermination') eq 'true';
 }
 
 sub instanceInitiatedShutdownBehavior {
     my $self = shift;
+    return $self->aws->modify_instance_attribute($self, 
+						-shutdown_behavior=>shift()) if @_;
     return $self->aws->describe_instance_attribute($self,'instanceInitiatedShutdownBehavior');
 }
 
@@ -415,7 +526,7 @@ sub terminate {
     croak "Can't terminate $self: run state=$s"
 	unless $s eq 'running' or $s eq 'stopped';
 
-    my ($i) = $self->aws->terminate_instances($self);
+    my $i = $self->aws->terminate_instances($self) or return;
     unless ($nowait) {
 	while ($i->status ne 'terminated') {
 	    sleep 5;

@@ -107,6 +107,8 @@ use constant ObjectRegistration => {
     StopInstances        => 'fetch_items,instancesSet,MyAWS::Object::Instance::State::Change',
     TerminateInstances   => 'fetch_items,instancesSet,MyAWS::Object::Instance::State::Change',
     RebootInstances      => 'boolean.return',
+    MonitorInstances     => 'fetch_items,instancesSet,MyAWS::Object::Instance::MonitoringState',
+    UnmonitorInstances   => 'fetch_items,instancesSet,MyAWS::Object::Instance::MonitoringState',
     GetConsoleOutput  => 'fetch_one,MyAWS::Object::ConsoleOutput',
 };
 

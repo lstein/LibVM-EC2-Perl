@@ -297,25 +297,28 @@ sub describe_instance_attribute {
 
 =head2 $boolean = $aws->modify_instance_attribute($instance_id,%param)
 
+This method changes instance attributes. It can only be applied to stopped instances.
+The following is the list of attributes that can be set:
 
-This method sets instance attributes. The following is the list of attributes that can be
-set:
-
- -instance_type
- -kernel
- -ramdisk
- -user_data
- -disable_api_termination
- -termination_protection (same as above)
- -instance_initiated_shutdown_behavior
- -shutdown_behavior      (same as above)
- -root_device_name
- -source_dest_check   (VPC only)
- -group_id            (VPC only)
+ -instance_type           -- type of instance, e.g. "m1.small"
+ -kernel                  -- kernel id
+ -ramdisk                 -- ramdisk id
+ -user_data               -- user data
+ -termination_protection  -- true to prevent termination from the console
+ -disable_api_termination -- same as the above
+ -shutdown_behavior       -- "stop" or "terminate"
+ -instance_initiated_shutdown_behavior -- same as above
+ -root_device_name        -- root device name
+ -source_dest_check       -- enable NAT (VPC only)
+ -group_id                -- VPC security group
 
 For example:
 
   $aws->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2',-ramdisk=>'ard-21113')
+
+The result code is true if the attribute was successfully modified,
+false otherwise. In the latter case, $aws->error() will provide the
+error message.
 
 =cut
 
@@ -325,20 +328,46 @@ sub modify_instance_attribute {
     my %args   = @_;
 
     my @param  = (InstanceId=>$instance_id);
-    push @param,$self->value_parm('InstanceType',\%args);
-    push @param,$self->value_parm('Kernel',\%args);
-    push @param,$self->value_parm('Ramdisk',\%args);
-    push @param,$self->value_parm('UserData',\%args);
-    push @param,$self->value_parm('DisableApiTermination',\%args);
-    push @param,$self->value_parm('InstanceInitiatedShutdownBehavior',\%args);
-    push @param,$self->value_parm('SourceDestCheck',\%args);
+    push @param,$self->value_parm($_,\%args) foreach 
+	qw(InstanceType Kernel Ramdisk UserData DisableApiTermination
+           InstanceInitiatedShutdownBehavior SourceDestCheck);
     push @param,$self->list_parm('GroupId',\%args);
-
-    push @param,('DisableApiTermination.Value'=>'true' if $args{-termination_protection};
+    push @param,('DisableApiTermination.Value'=>'true') if $args{-termination_protection};
     push @param,('InstanceInitiatedShutdownBehavior.Value'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
 
-
     return $self->call('ModifyInstanceAttribute',@param);
+}
+
+=head2 @monitoring_state = $aws->monitor_instances(@list_of_instanceIds)
+=head2 @monitoring_state = $aws->monitor_instances(-instance_id=>\@instanceIds)
+
+This method enables monitoring for the listed instances and returns a
+list of MyAWS::Object::Instance::MonitoringState objects. You can
+later use these objects to activate and inactivate monitoring.
+
+=cut
+
+sub monitor_instances {
+    my $self = shift;
+    my %args = $self->args('-instance_id',@_);
+    my @params = $self->list_parm('InstanceId',\%args);
+    return $self->call('MonitorInstances',@params);
+}
+
+=head2 @monitoring_state = $aws->unmonitor_instances(@list_of_instanceIds)
+=head2 @monitoring_state = $aws->unmonitor_instances(-instance_id=>\@instanceIds)
+
+This method disables monitoring for the listed instances and returns a
+list of MyAWS::Object::Instance::MonitoringState objects. You can
+later use these objects to activate and inactivate monitoring.
+
+=cut
+
+sub unmonitor_instances {
+    my $self = shift;
+    my %args = $self->args('-instance_id',@_);
+    my @params = $self->list_parm('InstanceId',\%args);
+    return $self->call('UnmonitorInstances',@params);
 }
 
 =head2 @snaps = $aws->describe_snapshots(-snapshot_id=>\@ids,%other_param)
@@ -415,9 +444,7 @@ sub describe_images {
     my $self = shift;
     my %args = $self->args(-image_id=>@_);
     my @params;
-    push @params,$self->list_parm('ExecutableBy',\%args);
-    push @params,$self->list_parm('ImageId',\%args);
-    push @params,$self->list_parm('Owner',\%args);
+    push @params,$self->list_parm($_,\%args) foreach qw(ExecutableBy ImageId Owner);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeImages',@params) or return;
 }
@@ -463,8 +490,7 @@ http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-qu
 sub describe_security_groups {
     my $self = shift;
     my %args = $self->args(-group_id=>@_);
-    my @params = $self->list_parm('GroupName',\%args);
-    push @params,$self->list_parm('GroupId',\%args);
+    my @params = map { $self->list_parm($_,\%args) } qw(GroupName GroupId);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeSecurityGroups',@params);
 }
@@ -582,12 +608,14 @@ MyAWS::Object::Instance objects.
                      cannot be terminated using the API. Use
                      modify_instance() to unset this if youu wish to
                      terminate the instance later.
+  -disable_api_termination -- Same as above.
   -shutdown_behavior Pass "stop" (the default) to stop the instance
                      and save its disk state when "shutdown" is called
                      from within the instance. Stopped instances can
                      be restarted later. Pass "terminate" to
                      instead terminate the instance and discard its
                      state completely.
+  -instance_initiated_shutdown_behavior -- Same as above.
   -private_ip_address Assign the instance to a specific IP address
                      from a VPC subnet (VPC only).
   -client_token      Unique identifier that you can provide to ensure
@@ -704,25 +732,18 @@ sub run_instances {
     $args{-min_count} ||= 1;
     $args{-max_count} ||= $args{-min_count};
 
-    my @p  =$self->single_parm('ImageId',\%args);
-    push @p,$self->single_parm('MinCount',\%args);
-    push @p,$self->single_parm('MaxCount',\%args);
-    push @p,$self->single_parm('KeyName',\%args)                      if $args{-key_name};
-    push @p,$self->list_parm('SecurityGroupId',\%args);
-    push @p,$self->list_parm('SecurityGroup',\%args);
-    push @p,$self->single_parm('InstanceType',\%args)                 if $args{-instance_type};
-    push @p,(UserData=>encode_base64($args{user_data}))               if $args{-user_data};
+    my @p = map {$self->single_parm($_,\%args) }
+       qw(ImageId MinCount MaxCount KeyName RamdiskId PrivateIPAddress
+          InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
+    push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
+    push @p,('UserData' =>encode_base64($args{user_data}))            if $args{-user_data};
     push @p,('Placement.AvailabilityZone'=>$args{-availability_zone}) if $args{-placement_zone};
     push @p,('Placement.GroupName'=>$args{-group_name})               if $args{-placement_group};
     push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-placement_tenancy};
-    push @p,$self->single_parm('RamdiskId',\%args)                    if $args{-ramdisk_id};
-    push @p,$self->block_device_parm($args{-block_devices})           if $args{-block_devices};
-    push @p,('Monitoring.Enabled'=>'true')                            if $args{-monitoring};
-    push @p,('SubnetId'=>$args{-subnet_id})                           if $args{-subnet_id};
+    push @p,('Monitoring.Enabled'   =>'true')                         if $args{-monitoring};
     push @p,('DisableApiTermination'=>'true')                         if $args{-termination_protection};
     push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
-    push @p,$self->single_parm('PrivateIPAddress',\%args);
-    push @p,$self->single_parm('ClientToken',\%args);
+    push @p,$self->block_device_parm($args{-block_devices})           if $args{-block_devices};
     return $self->call('RunInstances',@p);
 }
 
