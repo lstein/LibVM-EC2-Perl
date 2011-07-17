@@ -338,6 +338,24 @@ sub modify_instance_attribute {
     return $self->call('ModifyInstanceAttribute',@param);
 }
 
+=head2 $boolean = $aws->reset_instance_attribute($instance_id,$attribute)
+
+This method resets an attribute of the given instance to its default
+value. Valid attributes are "kernel", "ramdisk" and
+"sourceDestCheck". The result code is true if the reset was
+successful.
+
+=cut
+
+sub reset_instance_attribute {
+    my $self = shift;
+    @_      == 2 or croak "Usage: reset_instance_attribute(\$instanceId,\$attribute_name)";
+    my ($instanceId,$attribute) = @_;
+    my %valid = map {$_=>1} qw(kernel ramdisk sourceDestCheck);
+    $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
+    return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
+}
+
 =head2 @monitoring_state = $aws->monitor_instances(@list_of_instanceIds)
 =head2 @monitoring_state = $aws->monitor_instances(-instance_id=>\@instanceIds)
 

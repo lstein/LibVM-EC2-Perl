@@ -93,6 +93,7 @@ use constant ObjectRegistration => {
     DescribeSecurityGroups   => 'fetch_items,securityGroupInfo,MyAWS::Object::SecurityGroup',
     DescribeTags      => 'fetch_items,tagSet,MyAWS::Object::Tag,nokey',
     ModifyInstanceAttribute => 'boolean,return',
+    ResetInstanceAttribute => 'boolean,return',
     DescribeAddresses => 'fetch_items,addressesSet,MyAWS::Object::ElasticAddress',
     AssociateAddress  => sub {
 	my $data = shift;
