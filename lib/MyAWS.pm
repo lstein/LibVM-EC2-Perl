@@ -314,7 +314,7 @@ The following is the list of attributes that can be set:
 
 For example:
 
-  $aws->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2',-ramdisk=>'ard-21113')
+  $aws->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2',-ramdisk=>'ari-21113')
 
 The result code is true if the attribute was successfully modified,
 false otherwise. In the latter case, $aws->error() will provide the
@@ -350,7 +350,7 @@ successful.
 sub reset_instance_attribute {
     my $self = shift;
     @_      == 2 or croak "Usage: reset_instance_attribute(\$instanceId,\$attribute_name)";
-    my ($instanceId,$attribute) = @_;
+    my ($instance_id,$attribute) = @_;
     my %valid = map {$_=>1} qw(kernel ramdisk sourceDestCheck);
     $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
     return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
