@@ -13,7 +13,7 @@ my $build = Module::Build->new(
       'LWP' => 5.835,
       'MIME::Base64' => '3.08',
       'Digest::SHA'  => '5.48',
-      'URI'          => '1.54',
+      'URI::URL'     => '5.03',
       'XML::Simple'  => '2.18',
     },
     recommends        => {

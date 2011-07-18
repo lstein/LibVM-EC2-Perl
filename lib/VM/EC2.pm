@@ -454,7 +454,7 @@ AMI. Optional parameters:
  -filter          Tags and other filters to apply
 
 The full list of image filters can be found at:
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeVolumes.html
+http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeImages.html
 
 =cut
 

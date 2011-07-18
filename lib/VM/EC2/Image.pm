@@ -67,6 +67,12 @@ L<VM::EC2::Generic>:
 
  print "ready for production\n" if $image->tags->{Released};
 
+=head2 $image->refresh
+
+This method will refresh the object from AWS, updating all values to
+their current ones. You can call it after tagging or otherwise
+changing image attributes.
+
 =head2 @instances = $image->run_instances(@params)
 
 The run_instance() method will launch one or more instances based on
@@ -155,6 +161,13 @@ sub run_instances {
 	      unless $self->imageState eq 'available';
     $args{-image_id} = $self->imageId;
     $self->aws->run_instances(%args);
+}
+
+sub refresh {
+    my $self = shift;
+    my $i   = shift;
+    ($i) = $self->aws->describe_images(-image_id=>$self->imageId) unless $i;
+    %$self  = %$i;
 }
 
 1;
