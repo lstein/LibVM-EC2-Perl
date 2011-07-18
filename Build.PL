@@ -5,9 +5,9 @@ use warnings;
 use Module::Build;
 
 my $build = Module::Build->new(
-    module_name       => 'MyAWS',
+    module_name       => 'VM-EC2',
     license           => 'perl',
-    dist_version_from => 'lib/MyAWS.pm',
+    dist_version_from => 'lib/VM/EC2.pm',
     dist_author       => 'Lincoln Stein <lincoln.stein@oicr.on.ca>',
     requires          => {
       'LWP' => 5.835,
