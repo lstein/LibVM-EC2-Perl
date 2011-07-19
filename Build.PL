@@ -12,7 +12,7 @@ my $build = Module::Build->new(
     requires          => {
       'LWP' => 5.835,
       'MIME::Base64' => '3.08',
-      'Digest::SHA'  => '5.48',
+      'Digest::SHA'  => '5.47',
       'URI'          => '1.54',
       'XML::Simple'  => '2.18',
     },
