@@ -52,10 +52,18 @@ $natty->refresh;
 is($natty->tags->{Name},'MyLeastFavoriteImage','tag replacement');
 
 ok($natty->delete_tags(['Name','Description']),'tag deletion');
-sleep 1; # takes a while to register
+sleep 1; # takes a short while to register
 $natty->refresh;
 $tags = $natty->tags;  # should be no tags now
 is(scalar keys %$tags,0,'tag deletion');
+
+# exercise availability regions and keys
+my @regions = $ec2->describe_regions;
+ok(scalar @regions,'describe regions');
+
+# my @keys    = $ec2
+
+
 
 exit 0;
 

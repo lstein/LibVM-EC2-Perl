@@ -169,32 +169,77 @@ use VM::EC2::Dispatch;
 use Carp 'croak';
 our $VERSION = '0.1';
 
+our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
+                   VM::EC2::Snapshot VM::EC2::Instance);
+
 =head2 $ec2 = VM::EC2->new(-access_key=>$id,-secret_key=>$key,-endpoint=>$url)
 
 Create a new Amazon access object. Required parameters are:
 
  -access_key   Access ID for an authorized user
+
  -secret_key   Secret key corresponding to the Access ID
+
  -endpoint     The URL for making API requests
 
-One or more of these options can be omitted if the environment variables EC2_ACCESS_KEY,
-EC2_SECRET_KEY and EC2_URL are defined.
+ -raise_error  If true, throw an exception.
+
+One or more of -access_key, -secret_key and -endpoint can be omitted
+if the environment variables EC2_ACCESS_KEY, EC2_SECRET_KEY and
+EC2_URL are defined.
+
+By default, when the Amazon API reports an error, such as attempting
+to perform an invalid operation on an instance, the corresponding
+method will return empty and the error message can be recovered from
+$ec2->error(). However, if you pass -raise_error=>1 to new(), the module
+will instead raise a fatal error, which you can trap with eval{} and
+report with $@:
+
+  eval {
+     $ec2->some_dangerous_operation();
+     $ec2->another_dangerous_operation();
+  };
+  print STDERR "something bad happened: $@" if $@;
+
+The error object can be retrieved with $ec2->error() as before.
 
 =cut
 
 sub new {
     my $self = shift;
     my %args = @_;
-    my $id           = $args{-access_key} || $ENV{EC2_ACCESS_KEY} or croak "Please provide AccessKey parameter or define environment variable EC2_ACCESS_KEY";
-    my $secret       = $args{-secret_key} || $ENV{EC2_SECRET_KEY} or croak "Please provide SecretKey parameter or define environment variable EC2_SECRET_KEY";
-    my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL}        || 'http://ec2.amazonaws.com/';
+    my $id           = $args{-access_key} || $ENV{EC2_ACCESS_KEY}
+                       or croak "Please provide AccessKey parameter or define environment variable EC2_ACCESS_KEY";
+    my $secret       = $args{-secret_key} || $ENV{EC2_SECRET_KEY} 
+                       or croak "Please provide SecretKey parameter or define environment variable EC2_SECRET_KEY";
+    my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL} || 'http://ec2.amazonaws.com/';
     $endpoint_url   .= '/' unless $endpoint_url =~ m!/$!;
+
+    my $raise_error  = $args{-raise_error};
     return bless {
 	id              => $id,
 	secret          => $secret,
 	endpoint        => $endpoint_url,
 	idempotent_seed => sha1_hex(rand()),
+	raise_error     => $raise_error,
     },ref $self || $self;
+}
+
+=head2 $ec2->raise_error($boolean)
+
+Change the handling of error conditions. Pass a true value to cause
+Amazon API errors to raise a fatal error. Pass false to make methods
+return undef. In either case, you can detect the error condition
+by calling is_error() and fetch the error message using error(). This
+method will also return the current state of the raise error flag.
+
+=cut
+
+sub raise_error {
+    my $self = shift;
+    my $d    = $self->{raise_error};
+    $self->{raise_error} = shift if @_;
+    $d;
 }
 
 =head2 @instances = $ec2->describe_regions(-region_name=>\@list)
@@ -490,8 +535,8 @@ sub describe_tags {
                                             -filter    => \%filters);
 =head2 @sg = $ec2->describe_security_groups(@group_ids)
 
-Searches for security groups matching the provided filters and return
-a series of VM::EC2::SecurityGroup objects.
+Searches for security groups (firewall rules) matching the provided
+filters and return a series of VM::EC2::SecurityGroup objects.
 
 Optional parameters:
 
@@ -512,6 +557,125 @@ sub describe_security_groups {
     my @params = map { $self->list_parm($_,\%args) } qw(GroupName GroupId);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeSecurityGroups',@params);
+}
+
+=head2 @keys = $ec2->describe_key_pairs(-key_name => \@names,
+                                   -filter    => \%filters);
+=head2 @keys = $ec2->describe_key_pairs(@names);
+
+Searches for ssh key pairs matching the provided filters and return
+a series of VM::EC2::KeyPair objects.
+
+Optional parameters:
+
+ -key_name      A single key name or an arrayref containing a list
+                   of names
+ -filter          Filter on tags and other attributes.
+
+The full list of key filters can be found at:
+http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeKeyPairs.html
+
+=cut
+
+sub describe_key_pairs {
+    my $self = shift;
+    my %args = $self->args(-key_name=>@_);
+    my @params = $self->list_parm('KeyName',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeKeyPairs',@params);
+}
+
+=head2 $key = $ec2->create_key_pair($name)
+
+Create a new key pair with the specified name (required). If the key
+pair already exists, returns undef. The contents of the new keypair,
+including the PEM-encoded private key, is contained in the returned
+VM::EC2::KeyPair object:
+
+  my $key = $ec2->create_key_pair('My Keypair');
+  if ($key) {
+    print $key->fingerprint,"\n";
+    print $key->privateKey,"\n";
+  }
+
+=cut
+
+sub create_key_pair {
+    my $self = shift; 
+    my $name = shift or croak "Usage: create_key_pair(\$name)"; 
+    $name =~ /^[\w _-]+$/
+	or croak    "Invalid keypair name: must contain only alphanumerics, spaces, dashes and underscores";
+    my @params = (KeyName=>$name);
+    $self->call('CreateKeyPair',@params);
+}
+
+=head2 $key = $ec2->import_key_pair(-key_name=>$name,
+                                    -public_key_material=>$public_key)
+
+=head2 $key = $ec2->import_key_pair($name,$public_key)
+
+Imports a preexisting public key into AWS under the specified name.
+If successful, returns a VM::EC2::KeyPair. The public key must be an
+RSA key of length 1024, 2048 or 4096. The method can be called with
+two unnamed arguments consisting of the key name and the public key
+material, or in a named argument form with the following argument
+names:
+
+  -key_name     -- desired name for the imported key pair (required)
+  -name         -- shorter version of -key_name
+
+  -public_key_material -- public key data (required)
+  -public_key   -- shorter version of the above
+
+This example  uses Net::SSH::Perl::Key to generate a  new keypair, and
+then uploads the public key to Amazon.
+
+  use Net::SSH::Perl::Key;
+
+  my $newkey = Net::SSH::Perl::Key->keygen('RSA',1024);
+  $newkey->write_private('.ssh/MyKeypair.rsa');  # save private parts
+
+  my $key = $ec2->import_key_pair('My Keypair' => $newkey->dump_public)
+      or die $ec2->error;
+  print "My Keypair added with fingerprint ",$key->fingerprint,"\n";
+
+Note that the key will be base64 encoded for you by this module, and
+that it accepts the ssh "authorized_keys" file formats, as well as the
+standard PEM and DER encoded files. Also, the algorithm used by Amazon
+to calculate its key fingerprints differs from the one used by the ssh
+library, so don't try to compare the fingerprints to the ones produced
+by ssh-keygen or Net::SSH::Perl::Key.
+
+=cut
+
+sub import_key_pair {
+    my $self = shift; 
+    my %args;
+    if (@_ == 2 && $_[0] !~ /^-/) {
+	%args = (-key_name            => shift,
+		 -public_key_material => shift);
+    } else {
+	%args = @_;
+    }
+    my $name = $args{-key_name}           || $args{-name}        or croak "-key_name argument required";
+    my $pkm  = $args{-public_key_material}|| $args{-public_key}  or croak "-public_key_material argument required";
+    my @params = (KeyName => $name,PublicKeyMaterial=>encode_base64($pkm));
+    $self->call('ImportKeyPair',@params);
+}
+
+=head2 $result = $ec2->delete_key_pair($name)
+
+Deletes the key pair with the specified name (required). Returns true
+if successful.
+
+=cut
+
+sub delete_key_pair {
+    my $self = shift; my $name = shift or croak "Usage: create_key_pair(\$name)"; 
+    $name =~ /^[\w _-]+$/
+	or croak    "Invalid keypair name: must contain only alphanumerics, spaces, dashes and underscores";
+    my @params = (KeyName=>$name);
+    $self->call('DeleteKeyPair',@params);
 }
 
 =head2 $bool = $ec2->create_tags(-resource_id=>$id,-tag=>{key1=>value1...})
@@ -1286,6 +1450,7 @@ sub call {
 	if ($response->code == 400) {
 	    my $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self);
 	    $self->error($error);
+	    croak "$error" if $self->raise_error;
 	    return;
 	} else {
 	    print STDERR $response->request->as_string=~/Action=(\w+)/,': ',$response->status_line,"\n";

@@ -8,9 +8,10 @@ VM::EC2::Region - Object describing an Amazon availability region
 
   use VM::EC2;
 
-  $ec2     = VM::EC2->new(...);
-  $region  = $ec2->describe_regions();
+  $ec2       = VM::EC2->new(...);
+  @regions   = $ec2->describe_regions();
 
+  $region  = $regions[0];
   $name    = $region->regionName;
   $url     = $region->regionEndpoint;
 

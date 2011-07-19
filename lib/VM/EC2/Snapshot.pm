@@ -45,15 +45,16 @@ In addition, this class provides two convenience functions:
 
 =head2 $vol = $snap->from_volume
 
-Returns the VM::EC2::Volume object that this snapshot was
-originally derived from. If the original volume no longer exists,
-returns undef.
+Returns the VM::EC2::Volume object that this snapshot was originally
+derived from. If the original volume no longer exists because it has
+been deleted, this will return undef; if -raise_error was passed to
+the VM::EC2 object, this will raise an exception.
 
 =head2 @vol = $snap->to_volumes
 
 Returns all VM::EC2::Volume objects that were derived from this
 snapshot. If no volumes currently exist that satisfy this criteria,
-returns an empty list.
+returns an empty list, but will not raise an error.
 
 =head1 STRING OVERLOADING
 
@@ -103,6 +104,7 @@ sub primary_id { shift->snapshotId }
 sub from_volume {
     my $self = shift;
     my $vid = $self->volumeId or return;
+    # may throw an error if volume no longer exists
     return $self->aws->describe_volumes(-volume_id=>$vid);
 }
 

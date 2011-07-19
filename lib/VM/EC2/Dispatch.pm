@@ -92,25 +92,29 @@ use constant ObjectRegistration => {
     DescribeRegions   => 'fetch_items,regionInfo,VM::EC2::Region',
     DescribeSecurityGroups   => 'fetch_items,securityGroupInfo,VM::EC2::SecurityGroup',
     DescribeTags      => 'fetch_items,tagSet,VM::EC2::Tag,nokey',
-    ModifyInstanceAttribute => 'boolean,return',
-    ResetInstanceAttribute => 'boolean,return',
+    ModifyInstanceAttribute => 'boolean',
+    ResetInstanceAttribute => 'boolean',
     DescribeAddresses => 'fetch_items,addressesSet,VM::EC2::ElasticAddress',
     AssociateAddress  => sub {
 	my $data = shift;
 	return $data->{associationId} || ($data->{return} eq 'true');
     },
-    DisassociateAddress => 'boolean,return',
+    DisassociateAddress => 'boolean',
     AllocateAddress   => 'VM::EC2::ElasticAddress',
-    ReleaseAddress    => 'boolean,return',
-    CreateTags        => 'boolean,return',
-    DeleteTags        => 'boolean,return',
+    ReleaseAddress    => 'boolean',
+    CreateTags        => 'boolean',
+    DeleteTags        => 'boolean',
     StartInstances       => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
     StopInstances        => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
     TerminateInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
-    RebootInstances      => 'boolean.return',
+    RebootInstances      => 'boolean',
     MonitorInstances     => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
     UnmonitorInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
-    GetConsoleOutput  => 'fetch_one,VM::EC2::ConsoleOutput',
+    GetConsoleOutput     => 'fetch_one,VM::EC2::ConsoleOutput',
+    DescribeKeyPairs     => 'fetch_items,keySet,VM::EC2::KeyPair',
+    CreateKeyPair        => 'VM::EC2::KeyPair',
+    ImportKeyPair        => 'VM::EC2::KeyPair',
+    DeleteKeyPair        => 'boolean',
 };
 
 sub new {
@@ -138,7 +142,7 @@ sub response2objects {
 	my $parsed = $self->new_xml_parser->XMLin($content);
 	$class->($parsed,$ec2,@{$parsed}{'xmlns','requestId'});
     }
-    elsif ($class =~ /^VM::EC2::Object/) {
+    elsif ($class =~ /^VM::EC2/) {
 	load_module($class);
 	my $parser   = $self->new();
 	$parser->parse($content,$ec2,$class);
@@ -193,7 +197,8 @@ sub boolean {
     my $self = shift;
     my ($content,$ec2,$tag) = @_;
     my $parsed = $self->new_xml_parser()->XMLin($content);
-    return $parsed->{return} eq 'true';
+    $tag ||= 'return';
+    return $parsed->{$tag} eq 'true';
 }
 
 sub fetch_items {

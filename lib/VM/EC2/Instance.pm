@@ -68,6 +68,8 @@ These object methods are supported:
 
  keyName        -- Name of the associated key pair, if applicable.
 
+ keyPair        -- The VM::EC2::KeyPair object, derived from the keyName
+
  amiLaunchIndex -- The AMI launch index, which can be used to find
                    this instance within the launch group.
 
@@ -366,6 +368,12 @@ sub valid_fields {
               hypervisor
               tagSet
              );
+}
+
+sub keyPair {
+    my $self = shift;
+    my $name = $self->keyName or return;
+    return $self->aws->describe_key_pairs($name);
 }
 
 sub instanceState {
