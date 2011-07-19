@@ -286,7 +286,7 @@ sub interfaces {
     my @macs   = split /\s+/,$self->fetch('network/interfaces/macs');
     my %result;
     for my $m (@macs) {
-	$m =~ s/^\/$//; # get rid of hanging slash
+	$m =~ s/\/$//; # get rid of hanging slash
 	for my $pair ([localHostname     => 'local-hostname'],
 		      [localIpv4s        => 'local-ipv4s'],
 		      [mac               => 'mac'],
@@ -322,7 +322,7 @@ sub fetch {
     if ($response->is_success) {
 	return $cache->{$attribute} = $response->decoded_content;
     } else {
-	print STDERR $response->status_line,"\n";
+	print STDERR $response->status_line,"\n" unless $response->code == 404;
 	return;
     }
 }
