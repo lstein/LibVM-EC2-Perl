@@ -21,7 +21,7 @@ sub instanceAction   { shift->fetch('instance-action')   }
 sub instanceId       { shift->fetch('instance-id')       }
 sub instanceType     { shift->fetch('instance-type')     }
 sub localHostname    { shift->fetch('local-hostname')    }
-sub privateDnsNam    { shift->localHostname              }
+sub privateDnsName   { shift->localHostname              }
 sub localIpv4        { shift->fetch('local-ipv4')        }
 sub privateIpAddress { shift->localIpv4                  }
 sub kernelId         { shift->fetch('kernel-id')         }
@@ -49,6 +49,7 @@ sub interfaces {
     my @macs   = split /\s+/,$self->fetch('network/interfaces/macs');
     my %result;
     for my $m (@macs) {
+	$m =~ s/^\/$//; # get rid of hanging slash
 	for my $pair ([localHostname     => 'local-hostname',
 		       localIpv4s        => 'local-ipv4s',
 		       mac               => 'mac',
@@ -59,7 +60,7 @@ sub interfaces {
 		       vpcId             => 'vpc-id',
 		       vpcIpv4CidrBlock  => 'vpc-ipv4-cidr-block']) {
 	    my ($tag,$attribute) = @$pair;
-	    my $value = $self->fetch($attribute);
+	    my $value = $self->fetch("network/interfaces/macs/$m/$attribute");
 	    my @value = split /\s+/,$value;
 	    $result{$m}{$tag} = $attribute =~ /s$/ ? \@value : $value;
 	}
