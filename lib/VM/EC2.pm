@@ -52,6 +52,7 @@ classes which act as specialized interfaces to AWS:
  VM::EC2::Group                     -- Security groups
  VM::EC2::Image                     -- Amazon Machine Images (AMIs)
  VM::EC2::Instance                  -- Virtual machine instances
+ VM::EC2::Instance::Metadata        -- Access to runtime metadata from running instances
  VM::EC2::Region                    -- Availability regions
  VM::EC2::Snapshot                  -- EBS snapshots
  VM::EC2::Tag                       -- Metadata tags
@@ -1414,7 +1415,6 @@ has been parsed.
 
 L<Net::Amazon::EC2>
 L<VM::EC2::Dispatch>
-L<VM::EC2::Object>
 L<VM::EC2::Generic>
 L<VM::EC2::BlockDevice>
 L<VM::EC2::BlockDevice::Attachment>
@@ -1426,6 +1426,7 @@ L<VM::EC2::Generic>
 L<VM::EC2::Group>
 L<VM::EC2::Image>
 L<VM::EC2::Instance>
+L<VM::EC2::Instance::Metadata>
 L<VM::EC2::Instance::Set>
 L<VM::EC2::Instance::State>
 L<VM::EC2::Instance::State::Change>

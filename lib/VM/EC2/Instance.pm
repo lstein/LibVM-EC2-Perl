@@ -279,7 +279,7 @@ L<VM::EC2::Generic>
 L<VM::EC2::BlockDevice>
 L<VM::EC2::State::Reason>
 L<VM::EC2::State>
-L<VM::EC2::Instance>
+L<VM::EC2::Instance::Metadata>
 L<VM::EC2::Tag>
 
 =head1 AUTHOR
