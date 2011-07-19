@@ -7,7 +7,7 @@ use strict;
 use ExtUtils::MakeMaker;
 use File::Temp qw(tempfile);
 use FindBin '$Bin';
-use constant TEST_COUNT => 2;
+use constant TEST_COUNT => 17;
 
 use lib "$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
@@ -47,10 +47,12 @@ is($tags->{Name},'MyFavoriteImage','tag retrieval');
 is ($i[0],$natty,'retrieve by tags');
 
 ok($natty->add_tags(Name=>'MyLeastFavoriteImage'),'tag replacement');
+sleep 1; # takes a while to register
 $natty->refresh;
 is($natty->tags->{Name},'MyLeastFavoriteImage','tag replacement');
 
-ok($natty->delete_tags({Name=>undef,Description=>undef}),'tag deletion');
+ok($natty->delete_tags(['Name','Description']),'tag deletion');
+sleep 1; # takes a while to register
 $natty->refresh;
 $tags = $natty->tags;  # should be no tags now
 is(scalar keys %$tags,0,'tag deletion');
