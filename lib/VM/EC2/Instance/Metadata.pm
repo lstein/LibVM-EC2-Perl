@@ -78,7 +78,8 @@ sub fetch {
     my $attribute = shift or croak "Usage: VM::EC2::Instance::Metadata->get('attribute')";
     my $cache = $self->{cache} || $global_cache;  # protect against class invocation
     return $cache->{$attribute} if exists $cache->{$attribute};
-    return $cache->{$attribute} = chomp(get("http://169.254.169.254/latest/meta-data/$attribute"));
+    chomp (my $v = get("http://169.254.169.254/latest/meta-data/$attribute"));
+    return $cache->{$attribute} = $v;
 }
 
 1;
