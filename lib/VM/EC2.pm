@@ -1074,6 +1074,25 @@ sub disassociate_address {
 	                                      : (PublicIp      => $addr);
     return $self->call('DisassociateAddress',@param);
 }
+
+
+=head2 $meta = $ec2->instance_metadata
+
+B<For use on running EC2 instances only:> This method returns a
+VM::EC2::Instance::Metadata object that will return information about
+the currently running instance using the HTTP:// metadata fields
+described at
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?instancedata-data-categories.html. This
+is usually fastest way to get runtime information on the current
+instance.
+
+=cut
+
+sub instance_metadata {
+    VM::EC2::Dispatch::load_module('VM::EC2::Instance::Metadata');
+    return VM::EC2::Instance::Metadata->new();
+}
+
 # ------------------------------------------------------------------------------------------
 
 =head2 $boolean = $ec2->is_error

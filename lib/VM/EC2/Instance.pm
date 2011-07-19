@@ -257,6 +257,16 @@ Return the console output of the instance as a
 VM::EC2::ConsoleOutput object. This object can be treated as a
 string, or as an object with methods
 
+=head2 $meta = $instance->metadata
+
+B<For use on running EC2 instances only:> This method returns a
+VM::EC2::Instance::Metadata object that will return information about
+the currently running instance using the HTTP:// metadata fields
+described at
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?instancedata-data-categories.html. This
+is usually fastest way to get runtime information on the current
+instance.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
@@ -265,7 +275,6 @@ instanceId.
 =head1 SEE ALSO
 
 L<VM::EC2>
-L<VM::EC2::Object>
 L<VM::EC2::Generic>
 L<VM::EC2::BlockDevice>
 L<VM::EC2::State::Reason>
@@ -572,6 +581,11 @@ sub console_output {
     my $self = shift;
     my $output = $self->aws->get_console_output(-instance_id=>$self->instanceId);
     return $output->output;
+}
+
+sub metadata {
+    my $self = shift;
+    return $self->aws->instance_metadata;
 }
 
 sub productCodes {

@@ -91,7 +91,6 @@ imageId.
 =head1 SEE ALSO
 
 L<VM::EC2>
-L<VM::EC2::Object>
 L<VM::EC2::Generic>
 L<VM::EC2::BlockDevice>
 L<VM::EC2::StateReason>
