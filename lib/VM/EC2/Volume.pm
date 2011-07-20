@@ -57,16 +57,29 @@ the attachments.  Currently an EBS volume can only be attached to one
 instance at a time, but the Amazon call syntax supports multiple
 attachments and this method is provided for future compatibility.
 
-=head2 $snap = $snap->from_snapshot
+=head2 $snap = $vol->from_snapshot
 
 Returns the VM::EC2::Snapshot object that this volume was
 originally derived from. It will return undef if the resource no
 longer exists, or if the volume was created from scratch.
 
-=head2 @snap = $snap->to_snapshots
+=head2 @snap = $vol->to_snapshots
 
 If this volume has been used to create one or more snapshots, this
 method will return them as a list of VM::EC2::Snapshot objects.
+
+=head2 $vol->refresh
+
+Refresh the state of the volume from AWS. This lets you do the following:
+
+my $vol    = $ec2->create_volume(-zone=>$zone,-size=>4);
+
+ while ($vol->status ne 'available') {
+     print "$vol: ",$vol->status,"\n";
+     sleep 2;
+     $vol->refresh;
+ }
+ print "$vol: ",$vol->status,"\n";
 
 =head1 STRING OVERLOADING
 
@@ -131,6 +144,12 @@ sub from_snapshot {
 sub to_snapshots {
     my $self = shift;
     return $self->aws->describe_snapshots(-filter=>{'volume-id' => $self->volumeId});
+}
+
+sub refresh {
+    my $self = shift;
+    my $v    = $self->aws->describe_volumes($self->volumeId);
+    %$self   = %$v;
 }
 
 1;

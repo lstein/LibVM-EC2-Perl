@@ -27,6 +27,9 @@ These object methods are supported:
  regionName      -- Name of the region, e.g. "eu-west-1"
  regionEndpoint  -- URL endpoint for AWS API calls, e.g. 
                     "ec2.eu-west-1.amazonaws.com"
+ zones           -- List of availability zones within this
+                    region, as VM::EC2::AvailabilityZone
+                    objects.
 
 =head1 STRING OVERLOADING
 
@@ -55,13 +58,19 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-use overload 
-    '""'     => sub {shift()->regionName},
-    fallback => 1;
+sub primary_id {shift->regionName}
 
 sub valid_fields {
     my $self = shift;
     return qw(regionName regionEndpoint);
+}
+
+sub zones {
+    my $self = shift;
+    my $aws  = $self->aws;
+    # break encapsulation, but it is elegant this way
+    local $aws->{endpoint} = 'http://'.$self->regionEndpoint;
+    return $aws->describe_availability_zones(-filter=>{'region-name'=>$self});
 }
 
 1;

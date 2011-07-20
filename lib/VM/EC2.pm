@@ -242,6 +242,45 @@ sub raise_error {
     $d;
 }
 
+=head2 $id = $ec2->id(<$new_id>)
+
+Get or set the ACCESS KEY
+
+=cut
+
+sub id       { 
+    my $self = shift;
+    my $d    = $self->{id};
+    $self->{id} = shift if @_;
+    $d;
+}
+
+=head2 $secret = $ec2->secret(<$new_secret>)
+
+Get or set the SECRET KEY
+
+=cut
+
+sub secret   {
+    my $self = shift;
+    my $d    = $self->{secret};
+    $self->{secret} = shift if @_;
+    $d;
+}
+
+=head2 $endpoint = $ec2->endpoint(<$new_endpoint>)
+
+Get or set the ENDPOINT URL.
+
+=cut
+
+sub endpoint { 
+    my $self = shift;
+    my $d    = $self->{endpoint};
+    $self->{endpoint} = shift if @_;
+    $d;
+ }
+
 =head2 @instances = $ec2->describe_regions(-region_name=>\@list)
 =head2 @instances = $ec2->describe_regions(@list)
 
@@ -261,7 +300,29 @@ sub describe_regions {
     return $self->call('DescribeRegions',@params);
 }
 
-=head2 @instances = $ec2->describe_instances(-instance_id=>\@ids,-filter=>\@filters)
+=head2 @instances = $ec2->describe_availability_zones(-zone_name=>\@names,-filter=>\%filters)
+=head2 @instances = $ec2->describe_availability_zones(@names)
+
+Describe availability zones and return a list of
+VM::EC2::AvailabilityZone objects. Call with no arguments to return
+all availability regions. You may provide a list of regions in either
+of the two forms shown above in order to restrict the list
+returned. Glob-style wildcards, such as "*east") are allowed.
+
+Availability zone filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeAvailabilityZones.html
+
+=cut
+
+sub describe_availability_zones {
+    my $self = shift;
+    my %args = $self->args('-zone_name',@_);
+    my @params = $self->list_parm('ZoneName',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeAvailabilityZones',@params);
+}
+
+=head2 @instances = $ec2->describe_instances(-instance_id=>\@ids,-filter=>\%filters)
 =head2 @instances = $ec2->describe_instances(@instance_ids)
 
 Return a series of VM::EC2::Instance objects. Optional parameters are:
@@ -484,6 +545,39 @@ sub describe_volumes {
     push @params,$self->list_parm('VolumeId',\%args);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeVolumes',@params) or return;
+}
+
+=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size)
+
+Create a volume in the specified availability zone and return
+information about it.
+
+Arguments:
+
+ -availability_zone    -- An availability zone from
+                          describe_availability_zones (required)
+ -snapshot_id          -- ID of a snapshot to use to build volume from.
+ -size                 -- Size of the volume, in GB (between 1 and 1024).
+
+One or both of -snapshot_id or -size are required. For convenience,
+you may abbreviate -availability_zone as -zone, and -snapshot_id as
+-snapshot.
+
+The returned object is a VM::EC2::Volume object.
+
+=cut
+
+sub create_volume {
+    my $self = shift;
+    my %args = @_;
+    my $zone = $args{-availability_zone} || $args{-zone} or croak "-availability_zone argument is required";
+    my $snap = $args{-snapshot_id}       || $args{-snapshot};
+    my $size = $args{-size};
+    $snap || $size or croak "One or both of -snapshot_id or -size are required";
+    my @params = (AvailabilityZone => $zone);
+    push @params,(SnapshotId   => $snap) if $snap;
+    push @params,(Size => $size)         if $size;
+    return $self->call('CreateVolume',@params) or return;
 }
 
 =head2 @i = $ec2->describe_images(-image_id=>\@id,-executable_by=>$id,
@@ -1430,9 +1524,6 @@ sub block_device_parm {
     return @p;
 }
 
-sub id       { shift->{id}       }
-sub secret   { shift->{secret}   }
-sub endpoint { shift->{endpoint} }
 sub version  { '2011-05-15'      }
 sub timestamp {
     return strftime("%Y-%m-%dT%H:%M:%SZ",gmtime);
