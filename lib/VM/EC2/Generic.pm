@@ -69,9 +69,10 @@ sub AUTOLOAD {
     my ($pack,$func_name) = $AUTOLOAD=~/(.+)::([^:]+)$/;
     return if $func_name eq 'DESTROY';
     my %fields = map {$_=>1} $self->valid_fields;
+    my $proper = VM::EC2->uncanonicalize($func_name);
     croak "Can't locate object method \"$func_name\" via package \"$pack\""
-	unless $fields{$func_name};
-    return $self->{data}{$func_name};
+	unless $fields{$proper};
+    return $self->{data}{$proper};
 }
 
 sub can {

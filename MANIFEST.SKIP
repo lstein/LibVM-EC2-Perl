@@ -1,12 +1,13 @@
-^.+\.xml
-^.+\.pl
-^MYMETA.yml$
-^_build
-.+~$
-^\.+
-^Build$
+^blib
+foo.*
+rename_plan\.txt
+~$
+\.pl$
 \.bak$
-^MANIFEST.SKIP$
-
-
+_SKIP$
+^\.
+^_build
+^MYMETA.yml$
+^Build$
+\.xml$
 

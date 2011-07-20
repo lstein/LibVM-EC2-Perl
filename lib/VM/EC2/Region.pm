@@ -2,7 +2,7 @@ package VM::EC2::Region;
 
 =head1 NAME
 
-VM::EC2::Region - Object describing an Amazon availability region
+VM::EC2::Region - Object describing an Amazon region
 
 =head1 SYNOPSIS
 
@@ -17,7 +17,7 @@ VM::EC2::Region - Object describing an Amazon availability region
 
 =head1 DESCRIPTION
 
-This object represents an Amazon EC2 availability region, and is returned
+This object represents an Amazon EC2 region, and is returned
 by VM::EC2->describe_regions().
 
 =head1 METHODS

@@ -509,11 +509,11 @@ sub start {
     my $self = shift;
     my $wait = shift;
 
-    my $s    = $self->status;
+    my $s    = $self->current_status;
     croak "Can't start $self: run state=$s" unless $s eq 'stopped';
     my ($i) = $self->aws->start_instances($self) or return;
     if ($wait) {
-	while ($i->status eq 'pending') {
+	while ($i->current_status eq 'pending') {
 	    sleep 5;
 	}
 	$self->refresh;
@@ -525,12 +525,12 @@ sub stop {
     my $self = shift;
     my $wait = shift;
 
-    my $s    = $self->status;
+    my $s    = $self->current_status;
     croak "Can't stop $self: run state=$s" unless $s eq 'running';
 
     my ($i) = $self->aws->stop_instances($self);
     if ($wait) {
-	while ($i->status ne 'stopped') {
+	while ($i->current_status ne 'stopped') {
 	    sleep 5;
 	}
 	$self->refresh;
@@ -542,13 +542,13 @@ sub terminate {
     my $self = shift;
     my $nowait = shift;
 
-    my $s    = $self->status;
+    my $s    = $self->current_status;
     croak "Can't terminate $self: run state=$s"
 	unless $s eq 'running' or $s eq 'stopped';
 
     my $i = $self->aws->terminate_instances($self) or return;
     unless ($nowait) {
-	while ($i->status ne 'terminated') {
+	while ($i->current_status ne 'terminated') {
 	    sleep 5;
 	}
 	$self->refresh;
@@ -559,7 +559,7 @@ sub terminate {
 sub reboot {
     my $self = shift;
 
-    my $s    = $self->status;
+    my $s    = $self->current_status;
     croak "Can't reboot $self: run state=$s"unless $s eq 'running';
     return $self->aws->reboot_instances($self);
 }

@@ -7,7 +7,7 @@ use strict;
 use ExtUtils::MakeMaker;
 use File::Temp qw(tempfile);
 use FindBin '$Bin';
-use constant TEST_COUNT => 21;
+use constant TEST_COUNT => 25;
 
 use lib "$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
@@ -63,11 +63,12 @@ ok(scalar @regions,'describe regions');
 
 # make a key
 my $kn      = 'VM-EC2 Test Key';
+$ec2->delete_key_pair($kn);  # in case it was already there
 my $key     = $ec2->create_key_pair($kn);
 ok($key,'create key');
 is($key->name,$kn,'create key name matches');
 
-my @keys    = $ec2->describe_keys;
+my @keys    = $ec2->describe_key_pairs;
 ok(scalar @keys,'describe keys');
 
 my @i = grep {$_->name eq $key} @keys;
@@ -75,7 +76,7 @@ is(scalar @i,1,'get keys');
 is($i[0]->fingerprint,$key->fingerprint,'fingerprints match');
 ok($ec2->delete_key_pair($key),'delete key');
 
-@keys = $ec2->describe_keys($kn);
+@keys = $ec2->describe_key_pairs($kn);
 is(scalar @keys,0,'delete key works');
 
 exit 0;

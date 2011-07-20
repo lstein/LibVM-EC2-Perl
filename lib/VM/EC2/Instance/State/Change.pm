@@ -18,7 +18,7 @@ sub currentState {
 sub previousState {
     return VM::EC2::Instance::State->new(shift->SUPER::previousState);
 }
-sub status {
+sub current_status {
     my $self = shift;
     my $ec2  = $self->aws;
     my $id   = $self->instanceId;

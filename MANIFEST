@@ -1,6 +1,7 @@
 Build.PL
 Changes
 lib/VM/EC2.pm
+lib/VM/EC2/AvailabilityZone.pm
 lib/VM/EC2/BlockDevice.pm
 lib/VM/EC2/BlockDevice/Attachment.pm
 lib/VM/EC2/BlockDevice/EBS.pm
@@ -14,11 +15,13 @@ lib/VM/EC2/Generic.pm
 lib/VM/EC2/Group.pm
 lib/VM/EC2/Image.pm
 lib/VM/EC2/Instance.pm
+lib/VM/EC2/Instance/Metadata.pm
 lib/VM/EC2/Instance/MonitoringState.pm
 lib/VM/EC2/Instance/Set.pm
 lib/VM/EC2/Instance/State.pm
 lib/VM/EC2/Instance/State/Change.pm
 lib/VM/EC2/Instance/State/Reason.pm
+lib/VM/EC2/KeyPair.pm
 lib/VM/EC2/Placement.pm
 lib/VM/EC2/Region.pm
 lib/VM/EC2/ReservationSet.pm
@@ -29,5 +32,6 @@ lib/VM/EC2/Snapshot.pm
 lib/VM/EC2/Tag.pm
 lib/VM/EC2/Volume.pm
 MANIFEST			This list of files
+MANIFEST.SKIP
 README
 t/01.describe.t
