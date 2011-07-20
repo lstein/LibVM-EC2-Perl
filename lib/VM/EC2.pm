@@ -139,11 +139,11 @@ with the following key differences:
          $size = $v->size;
 
  7) Some objects have convenience methods that invoke the AWS API on your
-    behalf. For example, instance objects have a status() method that returns
+    behalf. For example, instance objects have a current_status() method that returns
     the run status of the object, as well as start(), stop() and terminate()
     methods that control the instance's lifecycle.
 
-         if ($instance->status eq 'running') {
+         if ($instance->current_status eq 'running') {
              $instance->stop;
          }
 
@@ -242,6 +242,45 @@ sub raise_error {
     $d;
 }
 
+=head2 $id = $ec2->id(<$new_id>)
+
+Get or set the ACCESS KEY
+
+=cut
+
+sub id       { 
+    my $self = shift;
+    my $d    = $self->{id};
+    $self->{id} = shift if @_;
+    $d;
+}
+
+=head2 $secret = $ec2->secret(<$new_secret>)
+
+Get or set the SECRET KEY
+
+=cut
+
+sub secret   {
+    my $self = shift;
+    my $d    = $self->{secret};
+    $self->{secret} = shift if @_;
+    $d;
+}
+
+=head2 $endpoint = $ec2->endpoint(<$new_endpoint>)
+
+Get or set the ENDPOINT URL.
+
+=cut
+
+sub endpoint { 
+    my $self = shift;
+    my $d    = $self->{endpoint};
+    $self->{endpoint} = shift if @_;
+    $d;
+ }
+
 =head2 @instances = $ec2->describe_regions(-region_name=>\@list)
 =head2 @instances = $ec2->describe_regions(@list)
 
@@ -261,7 +300,29 @@ sub describe_regions {
     return $self->call('DescribeRegions',@params);
 }
 
-=head2 @instances = $ec2->describe_instances(-instance_id=>\@ids,-filter=>\@filters)
+=head2 @instances = $ec2->describe_availability_zones(-zone_name=>\@names,-filter=>\%filters)
+=head2 @instances = $ec2->describe_availability_zones(@names)
+
+Describe availability zones and return a list of
+VM::EC2::AvailabilityZone objects. Call with no arguments to return
+all availability regions. You may provide a list of regions in either
+of the two forms shown above in order to restrict the list
+returned. Glob-style wildcards, such as "*east") are allowed.
+
+Availability zone filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeAvailabilityZones.html
+
+=cut
+
+sub describe_availability_zones {
+    my $self = shift;
+    my %args = $self->args('-zone_name',@_);
+    my @params = $self->list_parm('ZoneName',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeAvailabilityZones',@params);
+}
+
+=head2 @instances = $ec2->describe_instances(-instance_id=>\@ids,-filter=>\%filters)
 =head2 @instances = $ec2->describe_instances(@instance_ids)
 
 Return a series of VM::EC2::Instance objects. Optional parameters are:
@@ -484,6 +545,128 @@ sub describe_volumes {
     push @params,$self->list_parm('VolumeId',\%args);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeVolumes',@params) or return;
+}
+
+=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size)
+
+Create a volume in the specified availability zone and return
+information about it.
+
+Arguments:
+
+ -availability_zone    -- An availability zone from
+                          describe_availability_zones (required)
+ -snapshot_id          -- ID of a snapshot to use to build volume from.
+ -size                 -- Size of the volume, in GB (between 1 and 1024).
+
+One or both of -snapshot_id or -size are required. For convenience,
+you may abbreviate -availability_zone as -zone, and -snapshot_id as
+-snapshot.
+
+The returned object is a VM::EC2::Volume object.
+
+=cut
+
+sub create_volume {
+    my $self = shift;
+    my %args = @_;
+    my $zone = $args{-availability_zone} || $args{-zone} or croak "-availability_zone argument is required";
+    my $snap = $args{-snapshot_id}       || $args{-snapshot};
+    my $size = $args{-size};
+    $snap || $size or croak "One or both of -snapshot_id or -size are required";
+    my @params = (AvailabilityZone => $zone);
+    push @params,(SnapshotId   => $snap) if $snap;
+    push @params,(Size => $size)         if $size;
+    return $self->call('CreateVolume',@params) or return;
+}
+
+=head2 $result = $ec2->delete_volume($volume_id);
+
+Deletes the specified volume. Returns a boolean indicating success of
+the delete operation. Note that a volume will remain in the "deleting"
+state for some time after this call completes.
+
+=cut
+
+sub delete_volume {
+    my $self = shift;
+    my %args  = $self->args(-volume_id => @_);
+    my @param = $self->single_parm(VolumeId=>\%args);
+    return $self->call('DeleteVolume',@param) or return;
+}
+
+=head2 $attachment = $ec2->attach_volume($volume_id,$instance_id,$device);
+=head2 $attachment = $ec2->attach_volume(-volume_id=>$volume_id,-instance_id=>$instance_id,-device=>$device);
+
+Attaches the specified volume to the instance using the indicated
+device. All arguments are required:
+
+ -volume_id      -- ID of the volume to attach. The volume must be in
+                    "available" state.
+ -instance_id    -- ID of the instance to attach to. Both instance and
+                    attachment must be in the same availability zone.
+ -device         -- How the device is exposed to the instance, e.g.
+                    '/dev/sdg'.
+
+The result is a VM::EC2::BlockDevice::Attachment object which
+you can monitor by calling current_status():
+
+    my $a = $ec2->attach_volume('vol-12345','i-12345','/dev/sdg');
+    while ($a->current_status ne 'attached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+=cut
+
+sub attach_volume {
+    my $self = shift;
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 3) {
+	@args{qw(-volume_id -instance_id -device)} = @_;
+    } else {
+	%args = @_;
+    }
+    $args{-volume_id} && $args{-instance_id} && $args{-device}
+      or croak "-volume_id, -instance_id and -device arguments must all be specified";
+    my @param = $self->single_parm(VolumeId=>\%args);
+    push @param,$self->single_parm(InstanceId=>\%args);
+    push @param,$self->single_parm(Device=>\%args);
+    return $self->call('AttachVolume',@param) or return;
+}
+
+=head2 $attachment = $ec2->detach_volume($volume_id)
+=head2 $attachment = $ec2->detach_volume(-volume_id=>$volume_id,-instance_id=>$instance_id,
+                                         -device=>$device,      -force=>$force);
+
+Detaches the specified volume from an instance.
+
+ -volume_id      -- ID of the volume to detach. (required)
+ -instance_id    -- ID of the instance to detach from. (optional)
+ -device         -- How the device is exposed to the instance. (optional)
+ -force          -- Force detachment, even if previous attempts were
+                    unsuccessful. (optional)
+
+
+The result is a VM::EC2::BlockDevice::Attachment object which
+you can monitor by calling current_status():
+
+    my $a = $ec2->detach_volume('vol-12345');
+    while ($a->current_status ne 'detached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+=cut
+
+sub detach_volume {
+    my $self = shift;
+    my %args = $self->args(-volume_id => @_);
+    my @param = $self->single_parm(VolumeId=>\%args);
+    push @param,$self->single_parm(InstanceId=>\%args);
+    push @param,$self->single_parm(Device=>\%args);
+    push @param,$self->single_parm(Force=>\%args);
+    return $self->call('DetachVolume',@param) or return;
 }
 
 =head2 @i = $ec2->describe_images(-image_id=>\@id,-executable_by=>$id,
@@ -1333,7 +1516,8 @@ sub single_parm {
     my ($argname,$args) = @_;
     my $name = $self->canonicalize($argname);
     return unless exists $args->{$name};
-    return ($argname=>$args->{$name});
+    my $v = ref $args->{$name}  && ref $args->{$name} eq 'ARRAY' ? $args->{$name}[0] : $args->{$name};
+    return ($argname=>$v);
 }
 
 sub list_parm {
@@ -1430,9 +1614,6 @@ sub block_device_parm {
     return @p;
 }
 
-sub id       { shift->{id}       }
-sub secret   { shift->{secret}   }
-sub endpoint { shift->{endpoint} }
 sub version  { '2011-05-15'      }
 sub timestamp {
     return strftime("%Y-%m-%dT%H:%M:%SZ",gmtime);

@@ -7,7 +7,7 @@ use strict;
 use ExtUtils::MakeMaker;
 use File::Temp qw(tempfile);
 use FindBin '$Bin';
-use constant TEST_COUNT => 17;
+use constant TEST_COUNT => 21;
 
 use lib "$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
@@ -61,9 +61,22 @@ is(scalar keys %$tags,0,'tag deletion');
 my @regions = $ec2->describe_regions;
 ok(scalar @regions,'describe regions');
 
-# my @keys    = $ec2
+# make a key
+my $kn      = 'VM-EC2 Test Key';
+my $key     = $ec2->create_key_pair($kn);
+ok($key,'create key');
+is($key->name,$kn,'create key name matches');
 
+my @keys    = $ec2->describe_keys;
+ok(scalar @keys,'describe keys');
 
+my @i = grep {$_->name eq $key} @keys;
+is(scalar @i,1,'get keys');
+is($i[0]->fingerprint,$key->fingerprint,'fingerprints match');
+ok($ec2->delete_key_pair($key),'delete key');
+
+@keys = $ec2->describe_keys($kn);
+is(scalar @keys,0,'delete key works');
 
 exit 0;
 

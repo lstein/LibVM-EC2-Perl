@@ -22,7 +22,7 @@ VM::EC2::Instance - Object describing an Amazon EC2 instance
   $private_dns   = $instance->privateDnsName;
   $public_dns    = $instance->dnsName;
   $time          = $instance->runTime;
-  $status        = $instance->status;
+  $status        = $instance->current_status;
   $tags          = $instance->tags;
 
   $stateChange = $instance->start();
@@ -177,13 +177,13 @@ error() method.
 
 In addition, the following convenience functions are provided
 
-=head2 $state = $instance->status
+=head2 $state = $instance->current_status
 
 This method queries AWS for the instance's current state and returns
 it as a VM::EC2::Instance::State object. This enables you to 
 poll the instance until it is in the desired state:
 
- while ($instance->status eq 'pending') { sleep 5 }
+ while ($instance->current_status eq 'pending') { sleep 5 }
 
 =head2 $state_change = $instance->start([$wait])
 
@@ -304,6 +304,7 @@ use VM::EC2::Group;
 use VM::EC2::Instance::State;
 use VM::EC2::Instance::State::Reason;
 use VM::EC2::BlockDevice::Mapping;
+use VM::EC2::Placement;
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Carp 'croak';
 
@@ -401,7 +402,7 @@ sub groupSet {
 
 sub placement {
     my $self = shift;
-    my $p = $self->placement or return;
+    my $p = $self->SUPER::placement or return;
     return VM::EC2::Placement->new($p,$self->aws,$self->xmlns,$self->requestId);
 }
 
@@ -494,13 +495,15 @@ sub instanceInitiatedShutdownBehavior {
     return $self->aws->describe_instance_attribute($self,'instanceInitiatedShutdownBehavior');
 }
 
-sub status {
+sub current_status {
     my $self = shift;
     my ($i)  = $self->aws->describe_instances(-instance_id=>$self->instanceId);
     $i or croak "invalid instance: ",$self->instanceId;
     $self->refresh($i);
     return $i->instanceState;
 }
+
+sub status { shift->current_status } # legacy
 
 sub start {
     my $self = shift;
