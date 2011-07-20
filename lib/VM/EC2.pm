@@ -139,11 +139,11 @@ with the following key differences:
          $size = $v->size;
 
  7) Some objects have convenience methods that invoke the AWS API on your
-    behalf. For example, instance objects have a status() method that returns
+    behalf. For example, instance objects have a current_status() method that returns
     the run status of the object, as well as start(), stop() and terminate()
     methods that control the instance's lifecycle.
 
-         if ($instance->status eq 'running') {
+         if ($instance->current_status eq 'running') {
              $instance->stop;
          }
 
@@ -578,6 +578,95 @@ sub create_volume {
     push @params,(SnapshotId   => $snap) if $snap;
     push @params,(Size => $size)         if $size;
     return $self->call('CreateVolume',@params) or return;
+}
+
+=head2 $result = $ec2->delete_volume($volume_id);
+
+Deletes the specified volume. Returns a boolean indicating success of
+the delete operation. Note that a volume will remain in the "deleting"
+state for some time after this call completes.
+
+=cut
+
+sub delete_volume {
+    my $self = shift;
+    my %args  = $self->args(-volume_id => @_);
+    my @param = $self->single_parm(VolumeId=>\%args);
+    return $self->call('DeleteVolume',@param) or return;
+}
+
+=head2 $attachment = $ec2->attach_volume($volume_id,$instance_id,$device);
+=head2 $attachment = $ec2->attach_volume(-volume_id=>$volume_id,-instance_id=>$instance_id,-device=>$device);
+
+Attaches the specified volume to the instance using the indicated
+device. All arguments are required:
+
+ -volume_id      -- ID of the volume to attach. The volume must be in
+                    "available" state.
+ -instance_id    -- ID of the instance to attach to. Both instance and
+                    attachment must be in the same availability zone.
+ -device         -- How the device is exposed to the instance, e.g.
+                    '/dev/sdg'.
+
+The result is a VM::EC2::BlockDevice::Attachment object which
+you can monitor by calling current_status():
+
+    my $a = $ec2->attach_volume('vol-12345','i-12345','/dev/sdg');
+    while ($a->current_status ne 'attached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+=cut
+
+sub attach_volume {
+    my $self = shift;
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 3) {
+	@args{qw(-volume_id -instance_id -device)} = @_;
+    } else {
+	%args = @_;
+    }
+    $args{-volume_id} && $args{-instance_id} && $args{-device}
+      or croak "-volume_id, -instance_id and -device arguments must all be specified";
+    my @param = $self->single_parm(VolumeId=>\%args);
+    push @param,$self->single_parm(InstanceId=>\%args);
+    push @param,$self->single_parm(Device=>\%args);
+    return $self->call('AttachVolume',@param) or return;
+}
+
+=head2 $attachment = $ec2->detach_volume($volume_id)
+=head2 $attachment = $ec2->detach_volume(-volume_id=>$volume_id,-instance_id=>$instance_id,
+                                         -device=>$device,      -force=>$force);
+
+Detaches the specified volume from an instance.
+
+ -volume_id      -- ID of the volume to detach. (required)
+ -instance_id    -- ID of the instance to detach from. (optional)
+ -device         -- How the device is exposed to the instance. (optional)
+ -force          -- Force detachment, even if previous attempts were
+                    unsuccessful. (optional)
+
+
+The result is a VM::EC2::BlockDevice::Attachment object which
+you can monitor by calling current_status():
+
+    my $a = $ec2->detach_volume('vol-12345');
+    while ($a->current_status ne 'detached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+=cut
+
+sub detach_volume {
+    my $self = shift;
+    my %args = $self->args(-volume_id => @_);
+    my @param = $self->single_parm(VolumeId=>\%args);
+    push @param,$self->single_parm(InstanceId=>\%args);
+    push @param,$self->single_parm(Device=>\%args);
+    push @param,$self->single_parm(Force=>\%args);
+    return $self->call('DetachVolume',@param) or return;
 }
 
 =head2 @i = $ec2->describe_images(-image_id=>\@id,-executable_by=>$id,
@@ -1427,7 +1516,8 @@ sub single_parm {
     my ($argname,$args) = @_;
     my $name = $self->canonicalize($argname);
     return unless exists $args->{$name};
-    return ($argname=>$args->{$name});
+    my $v = ref $args->{$name}  && ref $args->{$name} eq 'ARRAY' ? $args->{$name}[0] : $args->{$name};
+    return ($argname=>$v);
 }
 
 sub list_parm {

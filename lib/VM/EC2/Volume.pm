@@ -68,18 +68,10 @@ longer exists, or if the volume was created from scratch.
 If this volume has been used to create one or more snapshots, this
 method will return them as a list of VM::EC2::Snapshot objects.
 
-=head2 $vol->refresh
+=head2 $status = $vol->current_status
 
-Refresh the state of the volume from AWS. This lets you do the following:
-
-my $vol    = $ec2->create_volume(-zone=>$zone,-size=>4);
-
- while ($vol->status ne 'available') {
-     print "$vol: ",$vol->status,"\n";
-     sleep 2;
-     $vol->refresh;
- }
- print "$vol: ",$vol->status,"\n";
+This returns the up-to-date status of the volume. It works by calling
+refresh() and then returning status().
 
 =head1 STRING OVERLOADING
 
@@ -144,6 +136,12 @@ sub from_snapshot {
 sub to_snapshots {
     my $self = shift;
     return $self->aws->describe_snapshots(-filter=>{'volume-id' => $self->volumeId});
+}
+
+sub current_status {
+    my $self = shift;
+    $self->refresh;
+    $self->status;
 }
 
 sub refresh {

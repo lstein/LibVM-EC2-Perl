@@ -47,6 +47,14 @@ Returns the VM::EC2::Instance corresponding to this attachment.
 Returns the VM::EC2::Volume object corresponding to this
 attachment.
 
+=head2 $status = $attachment->current_status
+
+Refreshes the information in the object and returns status().
+
+=head2 $attachment->refresh
+
+Calls AWS to refresh the attachment information.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate into a
@@ -84,6 +92,13 @@ sub valid_fields {
 sub primary_id {
     my $self = shift;
     return join ('=>',$self->volumeId,$self->instanceId);
+}
+
+sub current_status {
+    my $self = shift;
+    my $v    = $self->aws->describe_volumes($self->volumeId) or return;
+    my $a    = $v->attachment or return 'detached';
+    return $a->status;
 }
 
 sub deleteOnTermination {
