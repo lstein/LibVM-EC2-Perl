@@ -71,7 +71,7 @@ is($key->name,$kn,'create key name matches');
 my @keys    = $ec2->describe_key_pairs;
 ok(scalar @keys,'describe keys');
 
-my @i = grep {$_->name eq $key} @keys;
+@i = grep {$_->name eq $key} @keys;
 is(scalar @i,1,'get keys');
 is($i[0]->fingerprint,$key->fingerprint,'fingerprints match');
 ok($ec2->delete_key_pair($key),'delete key');
