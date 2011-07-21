@@ -73,6 +73,42 @@ method will return them as a list of VM::EC2::Snapshot objects.
 This returns the up-to-date status of the volume. It works by calling
 refresh() and then returning status().
 
+=head2 $attachment = $vol->attach($instance,$device)
+
+=head2 $attachment = $vol->attach(-instance_id=>$instance,-device=>$device)
+
+Attach this volume to an instance using virtual device $device. The
+result is a VM::EC2::BlockDevice::Attachment object which you can
+monitor by calling current_status():
+
+    my $a = $ec2->attach_volume('vol-12345','i-12345','/dev/sdg');
+    while ($a->current_status ne 'attached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+=head2 $attachment = $ec2->detach()
+
+=head2 $attachment = $ec2->detach(-instance_id=>$instance_id,
+                                  -device=>$device,
+                                  -force=>$force);
+
+Detaches the specified volume from an instance.
+
+ -instance_id    -- ID of the instance to detach from. (optional)
+ -device         -- How the device is exposed to the instance. (optional)
+ -force          -- Force detachment, even if previous attempts were
+                    unsuccessful. (optional)
+
+The result is a VM::EC2::BlockDevice::Attachment object which
+you can monitor by calling current_status():
+
+    my $a = $ec2->detach_volume('vol-12345');
+    while ($a->current_status ne 'detached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
@@ -103,6 +139,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 use VM::EC2::BlockDevice::Attachment;
+use Carp 'croak';
 
 sub valid_fields {
     my $self = shift;
@@ -136,6 +173,25 @@ sub from_snapshot {
 sub to_snapshots {
     my $self = shift;
     return $self->aws->describe_snapshots(-filter=>{'volume-id' => $self->volumeId});
+}
+
+sub attach {
+    my $self = shift;
+    my %args;
+    if (@_==2 && $_[0] !~ /^-/) {
+	@args{'-instance_id','-device'} = @_;
+    } else {
+	%args = @_;
+    }
+    $args{-instance_id} && $args{-device}
+       or croak "usage: \$vol->attach(\$instance_id,\$device)";
+    $args{-volume_id} = $self->volumeId;
+    return $self->aws->attach_volume(%args);
+}
+
+sub detach {
+    my $self = shift;
+    return $self->aws->detach_volume(-volume_id=>$self->volumeId,@_);
 }
 
 sub current_status {
