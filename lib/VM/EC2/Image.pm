@@ -67,12 +67,6 @@ L<VM::EC2::Generic>:
 
  print "ready for production\n" if $image->tags->{Released};
 
-=head2 $image->refresh
-
-This method will refresh the object from AWS, updating all values to
-their current ones. You can call it after tagging or otherwise
-changing image attributes.
-
 =head2 @instances = $image->run_instances(@params)
 
 The run_instance() method will launch one or more instances based on
@@ -82,6 +76,43 @@ returns a list of VM::EC2::Instance objects, which you may
 monitor periodically until they are up and running.
 
 See L<VM::EC2> for details.
+
+=head2 $boolean = $image->make_public($public)
+
+Change the isPublic flag. Provide a true value to make the image
+public, a false one to make it private.
+
+=head2 $state  = $image->current_status
+
+Refreshes the object and then calls imageState() to return one of
+"pending", "available" or "failed." You can use this to monitor an
+image_creation process in progress.
+
+=head2 @user_ids = $image->launchPermissions
+
+Returns a list of user IDs with launch permission for this
+image. Note that the AWS API calls this
+"launchPermission", but this module makes it plural to emphasize that
+the result is a list.
+
+=head2 @user_ids = $image->authorized_permissions
+
+The same as launchPermissions.
+
+=head2 $boolean = $image->add_authorized_users($id1,$id2,...)
+
+=head2 $boolean = $image->remove_authorized_users($id1,$id2,...)
+
+These methods add and remove user accounts which have launch
+permissions for the image. The result code indicates whether the list
+of user IDs were successfully added or removed. See also
+launchPermissions().
+
+=head2 $image->refresh
+
+This method will refresh the object from AWS, updating all values to
+their current ones. You can call it after tagging or otherwise
+changing image attributes.
 
 =head1 STRING OVERLOADING
 
@@ -114,6 +145,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 use VM::EC2::BlockDevice;
+use VM::EC2::LaunchPermission;
 use VM::EC2::Instance::State::Reason;
 
 use Carp 'croak';
@@ -148,9 +180,39 @@ sub blockDeviceMapping {
     return map { VM::EC2::BlockDevice->new($_,$self->aws)} @{$mapping->{item}};
 }
 
+sub launchPermissions {
+    my $self = shift;
+    return map {VM::EC2::LaunchPermission->new($_,$self->aws)}
+        $self->aws->describe_image_attribute($self->imageId,'launchPermission');
+}
+
 sub isPublic {
     my $self = shift;
     return $self->SUPER::isPublic eq 'true';
+}
+
+sub make_public {
+    my $self = shift;
+    @_ == 1 or croak "Usage: VM::EC2::Image->make_public(\$boolean)";
+    my $public = shift;
+    my @arg    = $public ? (-launch_add_group=>'all') : (-launch_remove_group=>'all');
+    my $result = $self->aws->modify_image_attribute($self->imageId,@arg) or return;
+    $self->payload->{isPublic} = $public ? 'true' : 'false';
+    return $result
+}
+
+sub authorized_users { shift->launchPermissions }
+
+sub add_authorized_users {
+    my $self = shift;
+    @_ or croak "Usage: VM::EC2::Image->add_authorized_users(\@userIds)";
+    return $self->aws->modify_image_attribute($self->imageId,-launch_add_user=>\@_);
+}
+
+sub remove_authorized_users {
+    my $self = shift;
+    @_ or croak "Usage: VM::EC2::Image->remove_authorized_users(\@userIds)";
+    return $self->aws->modify_image_attribute($self->imageId,-launch_remove_user=>\@_);
 }
 
 sub run_instances {
@@ -160,6 +222,12 @@ sub run_instances {
 	      unless $self->imageState eq 'available';
     $args{-image_id} = $self->imageId;
     $self->aws->run_instances(%args);
+}
+
+sub current_status {
+    my $self = shift;
+    $self->refresh;
+    return $self->imageState;
 }
 
 sub refresh {

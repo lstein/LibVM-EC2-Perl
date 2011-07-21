@@ -81,6 +81,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 =cut
 
 use strict;
+use base 'VM::EC2::Generic';
+
 use overload '""' => 'message',
     fallback      => 1;
 

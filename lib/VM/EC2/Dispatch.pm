@@ -97,8 +97,19 @@ use constant ObjectRegistration => {
     DeleteVolume      => 'boolean',
     AttachVolume      => 'VM::EC2::BlockDevice::Attachment',
     DetachVolume      => 'VM::EC2::BlockDevice::Attachment',
+    CreateSnapshot    => 'VM::EC2::Snapshot',
+    DeleteSnapshot    => 'boolean',
     ModifyInstanceAttribute => 'boolean',
-    ResetInstanceAttribute => 'boolean',
+    ModifyImageAttribute    => 'boolean',
+    ResetInstanceAttribute  => 'boolean',
+    ResetImageAttribute     => 'boolean',
+    CreateImage             => sub { 
+	my ($data,$aws) = @_;
+	my $image_id = $data->{imageId} or return;
+	warn "The describe_images() step may interfere with AMI creation?!!";
+	return $aws->describe_images($image_id);
+#	return $image_id;
+    },
     DescribeAddresses => 'fetch_items,addressesSet,VM::EC2::ElasticAddress',
     AssociateAddress  => sub {
 	my $data = shift;
@@ -124,10 +135,7 @@ use constant ObjectRegistration => {
 
 sub new {
     my $self    = shift;
-    my $payload = shift;
-    return bless {
-	payload => $payload,
-    },ref $self || $self;
+    return bless {},ref $self || $self;
 }
 
 sub add_override {
@@ -156,8 +164,6 @@ sub response2objects {
 	return $self->$method($content,$ec2,@params);
     }
 }
-
-sub payload {shift->{payload}}
 
 sub class_from_response {
     my $self     = shift;

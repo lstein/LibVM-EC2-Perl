@@ -41,7 +41,7 @@ The following object methods are supported:
  tags             -- Hashref containing tags associated with this group.
                      See L<VM::EC2::Generic>.
 
-In addition, this class provides two convenience functions:
+In addition, this class provides several convenience functions:
 
 =head2 $vol = $snap->from_volume
 
@@ -55,6 +55,15 @@ the VM::EC2 object, this will raise an exception.
 Returns all VM::EC2::Volume objects that were derived from this
 snapshot. If no volumes currently exist that satisfy this criteria,
 returns an empty list, but will not raise an error.
+
+=head2 $status = $snap->current_status
+
+Refreshes the snapshot and returns its current status.
+
+=head2 $snap->refresh
+
+Refreshes the snapshot from information provided by AWS. Use before
+checking progress or other changeable elements.
 
 =head1 STRING OVERLOADING
 
@@ -113,4 +122,15 @@ sub to_volumes {
     return $self->aws->describe_volumes(-filter=>{'snapshot-id'=>$self->snapshotId});
 }
 
+sub refresh {
+    my $self = shift;
+    my $s = $self->aws->describe_snapshots($self);
+    %$self  = %$s;
+}
+
+sub current_status {
+    my $self = shift;
+    $self->refresh;
+    return $self->status;
+}
 1;

@@ -68,8 +68,9 @@ In addition, there are several utility classes:
                                                The reservation Ids are copied into the Instance
                                                object.
 
-The AWS API is identical to that described at http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/
-with the following differences:
+The interface provided by these modules is based on that described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ with the
+following differences:
 
  1) For consistency with Perl standards, method names are in
     lowercase and words in long method names are separated
@@ -78,8 +79,8 @@ with the following differences:
     is "DescribeInstances", while in VM::EC2, the method is
     describe_instances(). To avoid annoyance, if you use the mixed
     case form for a method name, the Perl autoloader will
-    automatically translate it to underscores for you, so you can
-    call either $ec2->describe_instances() or
+    automatically translate it to underscores for you, and vice-versa
+    which means you can call either $ec2->describe_instances() or
     $ec2->DescribeInstances().
 
  2) Named arguments passed to methods are all lowercase, use
@@ -89,6 +90,8 @@ with the following differences:
     the corresponding Perl function will look like:
 
          $instance = $ec2->describe_instances(-instance_id=>'i-12345')
+
+    No automatic translation is provided for argument names (sorry).
 
     In a small number of cases, when the parameter name was absurdly
     long, it has been abbreviated. For example, the
@@ -465,9 +468,8 @@ sub describe_instances {
     if (!wantarray) { # scalar context
 	return       if @i == 0;
 	return $i[0] if @i == 1;
-    } else {
-	return @i
     }
+    return @i
 }
 
 =head2 @i = $ec2->run_instances(%param)
@@ -922,21 +924,21 @@ This method returns instance attributes. Only one attribute can be
 retrieved at a time. The following is the list of attributes that can be
 retrieved:
 
- instanceType
- kernel
- ramdisk
- userData
- disableApiTermination
- instanceInitiatedShutdownBehavior
- rootDeviceName
- blockDeviceMapping
- sourceDestCheck
- groupSet
+ instanceType                      -- scalar
+ kernel                            -- scalar
+ ramdisk                           -- scalar
+ userData                          -- scalar
+ disableApiTermination             -- scalar
+ instanceInitiatedShutdownBehavior -- scalar
+ rootDeviceName                    -- scalar
+ blockDeviceMapping                -- list of hashref
+ sourceDestCheck                   -- scalar
+ groupSet                          -- list of scalar
 
 All of these values can be retrieved more conveniently from the
 L<VM::EC2::Instance> object returned from describe_instances(), so
 there is no attempt to parse the results of this call into Perl
-objects. Therefore, some of the attributes, such as
+objects. Therefore, some of the attributes, in particular
 'blockDeviceMapping' will be returned as raw hashrefs.
 
 =cut
@@ -947,7 +949,7 @@ sub describe_instance_attribute {
     my ($instance_id,$attribute) = @_;
     my @param  = (InstanceId=>$instance_id,Attribute=>$attribute);
     my $result = $self->call('DescribeInstanceAttribute',@param);
-    return $result->attribute($attribute);
+    return $result && $result->attribute($attribute);
 }
 
 =head2 $boolean = $ec2->modify_instance_attribute($instance_id,%param)
@@ -967,9 +969,9 @@ The following is the list of attributes that can be set:
  -source_dest_check       -- enable NAT (VPC only)
  -group_id                -- VPC security group
 
-For example:
+Only one attribute can be changed in a single request. For example:
 
-  $ec2->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2',-ramdisk=>'ari-21113')
+  $ec2->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2');
 
 The result code is true if the attribute was successfully modified,
 false otherwise. In the latter case, $ec2->error() will provide the
@@ -1044,6 +1046,117 @@ sub describe_images {
     return $self->call('DescribeImages',@params) or return;
 }
 
+=head2 $image = $ec2->create_image(%args)
+
+Create an image from an EBS-backed instance and return a
+VM::EC2::Image object. The instance must be in the "stopped" or
+"running" state. In the latter case, Amazon will stop the instance,
+create the image, and then restart it unless the -no_reboot argument
+is provided.
+
+Arguments:
+
+ -instance_id    ID of the instance to create an image from. (required)
+ -name           Name for the image that will be created. (required)
+ -description    Description of the new image.
+ -no_reboot      If true, don't reboot the instance.
+
+=cut
+
+sub create_image {
+    my $self = shift;
+    my %args = @_;
+    $args{-instance_id} && $args{-name}
+      or croak "Usage: create_image(-instance_id=>\$id,-name=>\$name)";
+    my @param = $self->single_parm('InstanceId',\%args);
+    push @param,$self->single_parm('Name',\%args);
+    push @param,$self->single_parm('Description',\%args);
+    push @param,$self->boolean_parm('NoReboot',\%args);
+    return $self->call('CreateImage',@param);
+}
+
+=head2 @data = $ec2->describe_image_attribute($image_id,$attribute)
+
+
+This method returns image attributes. Only one attribute can be
+retrieved at a time. The following is the list of attributes that can be
+retrieved:
+
+ description            -- scalar
+ kernel                 -- scalar
+ ramdisk                -- scalar
+ launchPermission       -- list of scalar
+ productCodes           -- array
+ blockDeviceMapping     -- list of hashref
+
+All of these values can be retrieved more conveniently from the
+L<VM::EC2::Image> object returned from describe_images(), so there is
+no attempt to parse the results of this call into Perl objects. In
+particular, 'blockDeviceMapping' is returned as a raw hashrefs (there
+also seems to be an AWS bug that causes fetching this attribute to return an
+AuthFailure error).
+
+Please see the VM::EC2::Image launchPermissions() and
+blockDeviceMapping() methods for more convenient ways to get this
+data.
+
+=cut
+
+sub describe_image_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_image_attribute(\$instance_id,\$attribute_name)";
+    my ($instance_id,$attribute) = @_;
+    my @param  = (ImageId=>$instance_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeImageAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+=head2 $boolean = $ec2->modify_image_attribute($image_id,%param)
+
+This method changes image attributes. The following is the list of
+attributes that can be set:
+
+ -launch_add_user         -- scalar or arrayref of UserIds to grant launch permissions to
+ -launch_add_group        -- scalar or arrayref of Groups to remove launch permissions from
+                               (only currently valid value is "all")
+ -launch_remove_user      -- scalar or arrayref of UserIds to remove from launch permissions
+ -launch_remove_group     -- scalar or arrayref of Groups to remove from launch permissions
+ -product_code            -- scalar or array of product codes to add
+ -description             -- scalar new description
+
+Only one attribute can be changed in a single request.
+
+For example:
+
+  $ec2->modify_image_attribute('i-12345',-product_code=>['abcde','ghijk']);
+
+The result code is true if the attribute was successfully modified,
+false otherwise. In the latter case, $ec2->error() will provide the
+error message.
+
+To make an image public, specify -launch_add_group=>'all':
+
+  $ec2->modify_image_attribute('i-12345',-launch_add_group=>'all');
+
+Also see L<VM::EC2::Image> for shortcut methods. For example:
+
+ $image->add_authorized_users(1234567,999991);
+
+=cut
+
+sub modify_image_attribute {
+    my $self = shift;
+    my $instance_id = shift or croak "Usage: modify_image_attribute(\$instanceId,%param)";
+    my %args   = @_;
+    my @param  = (ImageId=>$instance_id);
+    push @param,$self->value_parm('Description',\%args);
+    push @param,$self->list_parm('ProductCode',\%args);
+    push @param,$self->launch_perm_parm('Add','UserId',$args{-launch_add_user});
+    push @param,$self->launch_perm_parm('Remove','UserId',$args{-launch_remove_user});
+    push @param,$self->launch_perm_parm('Add','Group',$args{-launch_add_group});
+    push @param,$self->launch_perm_parm('Remove','Group',$args{-launch_remove_group});
+    return $self->call('ModifyImageAttribute',@param);
+}
 
 =head1 EC2 VOLUMES AND SNAPSHOTS
 
@@ -1226,7 +1339,58 @@ sub describe_snapshots {
     push @params,$self->list_parm('Owner',\%args);
     push @params,$self->list_parm('RestorableBy',\%args);
     push @params,$self->filter_parm(\%args);
-    return $self->call('DescribeSnapshots',@params) or return;
+    return $self->call('DescribeSnapshots',@params);
+}
+
+=head2 $snapshot = $ec2->create_snapshot($volume_id)
+
+=head2 $snapshot = $ec2->create_snapshot(-volume_id=>$vol,-description=>$desc)
+
+Snapshot the EBS volume and store it to S3 storage. To ensure a
+consistent snapshot, the volume should be unmounted prior to
+initiating this operation.
+
+Arguments:
+
+ -volume_id    -- ID of the volume to snapshot (required)
+ -description  -- A description to add to the snapshot (optional)
+
+The return value is a VM::EC2::Snapshot object that can be queried
+through its current_status() interface to follow the progress of the
+snapshot operation.
+
+Another way to accomplish the same thing is through the
+VM::EC2::Volume interface:
+
+  my $volume = $ec2->describe_volumes(-filter=>{'tag:Name'=>'AccountingData'});
+  $s = $volume->create_snapshot("Backed up at ".localtime);
+  while ($s->current_status eq 'pending') {
+     print "Progress: ",$s->progress,"% done\n";
+  }
+  print "Snapshot status: ",$s->current_status,"\n";
+
+=cut
+
+sub create_snapshot {
+    my $self = shift;
+    my %args = $self->args('-volume_id',@_);
+    my @params   = $self->single_parm('VolumeId',\%args);
+    push @params,$self->single_parm('Description',\%args);
+    return $self->call('CreateSnapshot',@params);
+}
+
+=head2 $boolean = $ec2->delete_snapshot($snapshot_id) 
+
+Delete the indicated snapshot and return true if the request was
+successful.
+
+=cut
+
+sub delete_snapshot {
+    my $self = shift;
+    my %args = $self->args('-snapshot_id',@_);
+    my @params   = $self->single_parm('SnapshotId',\%args);
+    return $self->call('DeleteSnapshot',@params);
 }
 
 =head1 SECURITY GROUPS AND KEY PAIRS
@@ -1780,6 +1944,25 @@ sub key_value_parameters {
     return @params;
 }
 
+=head2 @parameters = $ec2->launch_perm_parm($prefix,$suffix,$value)
+
+=cut
+
+sub launch_perm_parm {
+    my $self = shift;
+    my ($prefix,$suffix,$value) = @_;
+    return unless defined $value;
+    my @list = ref $value && ref $value eq 'ARRAY' ? @$value : $value;
+    my $c = 1;
+    my @param;
+    for my $v (@list) {
+	push @param,("LaunchPermission.$prefix.$c.$suffix" => $v);
+	$c++;
+    }
+    return @param;
+}
+
+
 =head2 @parameters = $ec2->block_device_parm($block_device_mapping_string)
 
 =cut
@@ -1812,6 +1995,14 @@ sub block_device_parm {
 	$c++;
     }
     return @p;
+}
+
+sub boolean_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    my $name = $self->canonicalize($argname);
+    return unless exists $args->{$name};
+    return ($argname => $args->{$name} ? 'true' : 'false');
 }
 
 =head2 $version = $ec2->version()

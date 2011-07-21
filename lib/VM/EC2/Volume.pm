@@ -112,6 +112,20 @@ longer exists, or if the volume was created from scratch.
 If this volume has been used to create one or more snapshots, this
 method will return them as a list of VM::EC2::Snapshot objects.
 
+=head2 $snapshot = $vol->create_snapshot('Description')
+
+Create a snapshot of the volume and return a VM::EC2::Snapshot
+object. To ensure a consistent snapshot, you should unmount the volume
+before snapshotting it. The optional argument allows you to add a description to the snapshot.
+
+Here is an example:
+
+  $s = $volume->create_snapshot("Backed up at ".localtime);
+  while ($s->current_status eq 'pending') {
+     print "Progress: ",$s->progress,"% done\n";
+  }
+  print "Snapshot status: ",$s->current_status,"\n";
+
 =head2 $status = $vol->current_status
 
 This returns the up-to-date status of the volume. It works by calling
@@ -181,6 +195,14 @@ sub from_snapshot {
 sub to_snapshots {
     my $self = shift;
     return $self->aws->describe_snapshots(-filter=>{'volume-id' => $self->volumeId});
+}
+
+sub create_snapshot {
+    my $self = shift;
+    my $description = shift;
+    my @param = (-volume_id=>$self->volumeId);
+    push @param,(-description=>$description) if defined $description;
+    return $self->aws->create_snapshot(@param);
 }
 
 sub attach {

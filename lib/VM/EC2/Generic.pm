@@ -69,10 +69,24 @@ sub AUTOLOAD {
     my ($pack,$func_name) = $AUTOLOAD=~/(.+)::([^:]+)$/;
     return if $func_name eq 'DESTROY';
     my %fields = map {$_=>1} $self->valid_fields;
-    my $proper = VM::EC2->uncanonicalize($func_name);
-    croak "Can't locate object method \"$func_name\" via package \"$pack\""
-	unless $fields{$proper};
-    return $self->{data}{$proper};
+    my $mixed  = VM::EC2->uncanonicalize($func_name);# mixedCase
+    my $flat   = VM::EC2->canonicalize($func_name);  # underscore_style
+    $flat =~ s/^-//;
+
+    if ($mixed eq $flat) {
+	return $self->{data}{$mixed} if $fields{$mixed};
+	croak "Can't locate object method \"$func_name\" via package \"$pack\"";
+    }
+
+    if ($func_name eq $flat && $self->can($mixed)) {
+	return $self->$mixed(@_);
+    } elsif ($func_name eq $mixed && $self->can($flat)) {
+	return $self->$flat(@_);
+    } elsif ($fields{$mixed}) {
+	return $self->{data}{$mixed} if $fields{$mixed};
+    } else {
+	croak "Can't locate object method \"$func_name\" via package \"$pack\"";
+    }
 }
 
 sub can {

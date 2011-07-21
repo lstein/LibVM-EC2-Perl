@@ -259,6 +259,35 @@ Return the console output of the instance as a
 VM::EC2::ConsoleOutput object. This object can be treated as a
 string, or as an object with methods
 
+=head1 CREATING IMAGES
+
+The create_image() method provides a handy way of creating and
+registering an AMI based on the current state of the instance. All
+currently-associated block devices will be snapshotted and associated
+with the image.
+
+Note that this operation can take a long time to complete. You may
+follow its progress by calling the returned image object's
+current_status() method.
+
+=head2 $imageId = $instance->create_image($name [,$description])
+
+=head2 $imageId = $instance->create_image(-name=>$name,-description=>$description,-no_reboot=>$boolean)
+
+Create an image from this instance and return a VM::EC2::Image object.
+The instance must be in the "stopped" or "running" state. In the
+latter case, Amazon will stop the instance, create the image, and then
+restart it unless the -no_reboot argument is provided.
+
+Arguments:
+
+ -name           Name for the image that will be created. (required)
+ -description    Description of the new image.
+ -no_reboot      If true, don't reboot the instance.
+
+In the unnamed argument version you can provide the name and
+optionally the description of the resulting image.
+
 =head1 VOLUME MANAGEMENT
 
 =head2 $attachment = $instance->attach_volume($volume_id,$device)
@@ -640,6 +669,18 @@ sub console_output {
     my $self = shift;
     my $output = $self->aws->get_console_output(-instance_id=>$self->instanceId);
     return $output->output;
+}
+
+sub create_image {
+    my $self = shift;
+    my %args;
+    if ($_[0] !~ /^-/) {
+	my ($name,$description) = @_;
+	$args{-name}         = $name;
+	$args{-description}  = $description if defined $description;
+    }
+    $args{-name} or croak "Usage: create_image(\$image_name)";
+    return $self->aws->create_image(%args,-instance_id=>$self->instanceId);
 }
 
 sub attach_volume {
