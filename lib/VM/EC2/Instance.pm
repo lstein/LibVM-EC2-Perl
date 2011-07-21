@@ -127,7 +127,7 @@ These object methods are supported:
                    CHANGEABLE.
 
  blockDeviceMapping -- The block device mappings for the instance, represented
-                   as a list of VM::EC2::BlockDevice::Mapping objects.
+                   as a list of L<VM::EC2::BlockDevice::Mapping> objects.
 
  instanceLifeCycle-- "spot" if this instance is a spot instance, otherwise empty.
 
@@ -258,6 +258,52 @@ a true $wait argument.
 Return the console output of the instance as a
 VM::EC2::ConsoleOutput object. This object can be treated as a
 string, or as an object with methods
+
+=head1 VOLUME MANAGEMENT
+
+=head2 $attachment = $instance->attach_volume($volume_id,$device)
+
+    =head2 $attachment = $instance->attach_volume(-volume_id=>$volume_id,-device=>$device)
+
+Attach volume $volume_id to this instance using virtual device
+$device. Both arguments are required. The result is a
+VM::EC2::BlockDevice::Attachment object which you can monitor by
+calling current_status():
+
+    my $a = $instance->attach_volume('vol-12345'=>'/dev/sdg');
+    while ($a->current_status ne 'attached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+=head2 $attachment = $instance->detach_volume($vol_or_device)
+
+=head2 $attachment = $instance->detach_volume(-volume_id => $volume_id
+                                              -device    => $device,
+                                              -force     => $force);
+
+Detaches the specified volume. In the single-argument form, you may
+provide either a volume or a device name. In the named-argument form,
+you may provide both the volume and the device as a check that you are
+detaching exactly the volume you think you are.
+
+Optional arguments:
+
+ -volume_id      -- ID of the instance to detach from.
+ -device         -- How the device is exposed to the instance.
+ -force          -- Force detachment, even if previous attempts were
+                    unsuccessful.
+
+The result is a VM::EC2::BlockDevice::Attachment object which
+you can monitor by calling current_status():
+
+    my $a = $instance->detach_volume('/dev/sdg');
+    while ($a->current_status ne 'detached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+=head1 ACCESSING INSTANCE METADATA
 
 =head2 $meta = $instance->metadata
 
@@ -424,6 +470,8 @@ sub blockDeviceMapping {
     my $mapping = $self->SUPER::blockDeviceMapping or return;
     return map { VM::EC2::BlockDevice::Mapping->new($_,$self->aws)} @{$mapping->{item}};
 }
+
+sub blockDeviceMappings {shift->blockDeviceMapping}
 
 sub stateReason {
     my $self = shift;
@@ -592,6 +640,44 @@ sub console_output {
     my $self = shift;
     my $output = $self->aws->get_console_output(-instance_id=>$self->instanceId);
     return $output->output;
+}
+
+sub attach_volume {
+    my $self = shift;
+    my %args;
+    if (@_==2 && $_[0] !~ /^-/) {
+	my ($volume,$device) = @_;
+	$args{-volume_id} = $volume;
+	$args{-device}    = $device;
+    } else {
+	%args = @_;
+    }
+    $args{-volume_id} && $args{-device}
+       or croak "usage: \$vol->attach(\$instance_id,\$device)";
+    $args{-instance_id} = $self->instanceId;
+    return $self->aws->attach_volume(%args);
+}
+
+sub detach_volume {
+    my $self = shift;
+    my %args;
+
+    if (@_ == 1 && $_[0] !~ /^-/) {
+	my $vol_or_device = shift;
+	$self->refresh;
+	my @mappings   = $self->blockDeviceMapping;
+	my ($mapping)  = grep {$_->deviceName eq $vol_or_device} @mappings;
+	if ($mapping) {
+	    $args{-volume_id} = $mapping->volumeId;
+	    $args{-device}    = $mapping->deviceName;
+	} else {
+	    $args{-volume_id} = $vol_or_device;
+	}
+    } else {
+	%args = @_;
+    }
+    $args{-instance_id} = $self->instanceId;
+    return $self->aws->detach_volume(%args);
 }
 
 sub metadata {

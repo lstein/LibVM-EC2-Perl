@@ -22,6 +22,7 @@ VM::EC2::Volume - Object describing an Amazon EBS volume
     $origin      = $vol->from_snapshot;
     @snapshots   = $vol->to_snapshots;
   }
+  $vols[0]->attach('i-12345','/dev/sdg1');
 
 =head1 DESCRIPTION
 
@@ -45,6 +46,7 @@ The following object methods are supported:
 In addition, this class provides several convenience functions:
 
 =head2 $attachment  = $vol->attachment
+
 =head2 @attachments = $vol->attachments
 
 The attachment() method returns a
@@ -56,6 +58,48 @@ The attachments() method is similar, except that it returns a list of
 the attachments.  Currently an EBS volume can only be attached to one
 instance at a time, but the Amazon call syntax supports multiple
 attachments and this method is provided for future compatibility.
+
+=head2 $attachment = $vol->attach($instance,$device)
+
+=head2 $attachment = $vol->attach(-instance_id=>$instance,-device=>$device)
+
+Attach this volume to an instance using virtual device $device. Both
+arguments are required. The result is a
+VM::EC2::BlockDevice::Attachment object which you can monitor by
+calling current_status():
+
+    my $a = $volume->attach('i-12345','/dev/sdg');
+    while ($a->current_status ne 'attached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+=head2 $attachment = $volume->detach()
+
+=head2 $attachment = $volume->detach(-instance_id=>$instance_id,
+                                  -device=>$device,
+                                  -force=>$force);
+
+Detaches this volume. With no arguments, will detach the volume from
+whatever instance it is currently attached to. Provide -instance_id
+and/or -device as a check that you are detaching the volume from the
+expected instance and device.
+
+Optional arguments:
+
+ -instance_id    -- ID of the instance to detach from.
+ -device         -- How the device is exposed to the instance.
+ -force          -- Force detachment, even if previous attempts were
+                    unsuccessful.
+
+The result is a VM::EC2::BlockDevice::Attachment object which
+you can monitor by calling current_status():
+
+    my $a = $volume->detach;
+    while ($a->current_status ne 'detached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
 
 =head2 $snap = $vol->from_snapshot
 
@@ -72,42 +116,6 @@ method will return them as a list of VM::EC2::Snapshot objects.
 
 This returns the up-to-date status of the volume. It works by calling
 refresh() and then returning status().
-
-=head2 $attachment = $vol->attach($instance,$device)
-
-=head2 $attachment = $vol->attach(-instance_id=>$instance,-device=>$device)
-
-Attach this volume to an instance using virtual device $device. The
-result is a VM::EC2::BlockDevice::Attachment object which you can
-monitor by calling current_status():
-
-    my $a = $ec2->attach_volume('vol-12345','i-12345','/dev/sdg');
-    while ($a->current_status ne 'attached') {
-       sleep 2;
-    }
-    print "volume is ready to go\n";
-
-=head2 $attachment = $ec2->detach()
-
-=head2 $attachment = $ec2->detach(-instance_id=>$instance_id,
-                                  -device=>$device,
-                                  -force=>$force);
-
-Detaches the specified volume from an instance.
-
- -instance_id    -- ID of the instance to detach from. (optional)
- -device         -- How the device is exposed to the instance. (optional)
- -force          -- Force detachment, even if previous attempts were
-                    unsuccessful. (optional)
-
-The result is a VM::EC2::BlockDevice::Attachment object which
-you can monitor by calling current_status():
-
-    my $a = $ec2->detach_volume('vol-12345');
-    while ($a->current_status ne 'detached') {
-       sleep 2;
-    }
-    print "volume is ready to go\n";
 
 =head1 STRING OVERLOADING
 
