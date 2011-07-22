@@ -14,6 +14,7 @@ VM::EC2::Region - Object describing an Amazon region
   $region  = $regions[0];
   $name    = $region->regionName;
   $url     = $region->regionEndpoint;
+  @zones   = $region->zones;
 
 =head1 DESCRIPTION
 

@@ -72,4 +72,10 @@ sub valid_fields {
     return qw(Code Message);
 }
 
+# because the darn Error XML doesn't adhere
+# to the conventions elsewhere, in which
+# the initial letter of the tag is lowercase
+sub code    {shift->payload->{Code}}   
+sub message {shift->payload->{Message}}
+
 1;

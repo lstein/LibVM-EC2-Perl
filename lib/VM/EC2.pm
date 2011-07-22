@@ -388,9 +388,9 @@ This section describes methods that allow you to fetch information on
 EC2 regions and availability zones. These methods return objects of
 type L<VM::EC2::Region> and L<VM::EC2::AvailabilityZone>.
 
-=head2 @instances = $ec2->describe_regions(-region_name=>\@list)
+=head2 @regions = $ec2->describe_regions(-region_name=>\@list)
 
-=head2 @instances = $ec2->describe_regions(@list)
+=head2 @regionss = $ec2->describe_regions(@list)
 
 Describe regions and return a list of VM::EC2::Region objects. Call
 with no arguments to return all regions. You may provide a list of
@@ -407,13 +407,13 @@ sub describe_regions {
     return $self->call('DescribeRegions',@params);
 }
 
-=head2 @instances = $ec2->describe_availability_zones(-zone_name=>\@names,-filter=>\%filters)
+=head2 @zones = $ec2->describe_availability_zones(-zone_name=>\@names,-filter=>\%filters)
 
-=head2 @instances = $ec2->describe_availability_zones(@names)
+=head2 @zones = $ec2->describe_availability_zones(@names)
 
 Describe availability zones and return a list of
 VM::EC2::AvailabilityZone objects. Call with no arguments to return
-all availability regions. You may provide a list of regions in either
+all availability regions. You may provide a list of zones in either
 of the two forms shown above in order to restrict the list
 returned. Glob-style wildcards, such as "*east") are allowed.
 
@@ -634,19 +634,25 @@ reservationId(), ownerId(), requesterId() and groups() methods.
                                            '/dev/sdc=:100:true']
     )
 
-2. Each instance object has a current_status() method which will
+2. It may take a short while for the instance to be returned by
+   describe_instances(). You may wish to sleep for 1-2 seconds
+   before calling current_status() or wait_for_instances().
+
+3. Each instance object has a current_status() method which will
    return the current run state of the instance. You may poll this
    method to wait until the instance is running:
 
-   my ($instance) = $ec2->run_instances(...);
+   my $instance = $ec2->run_instances(...);
+   sleep 1;
    while ($instance->current_status ne 'running') {
       sleep 5;
    }
 
-3. The utility method wait_for_instances() will wait until all
+4. The utility method wait_for_instances() will wait until all
    passed instances are in 'running' state.
 
    my @instances = $ec2->run_instances(...);
+   sleep 1;
    $ec2->wait_for_instances(@instances);
 
 =back
@@ -664,7 +670,7 @@ sub run_instances {
        qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIPAddress
           InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
     push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
-    push @p,('UserData' =>encode_base64($args{user_data}))            if $args{-user_data};
+    push @p,('UserData' =>encode_base64($args{-user_data}))            if $args{-user_data};
     push @p,('Placement.AvailabilityZone'=>$args{-availability_zone}) if $args{-placement_zone};
     push @p,('Placement.GroupName'=>$args{-group_name})               if $args{-placement_group};
     push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-placement_tenancy};
@@ -805,6 +811,7 @@ sub terminate_instances {
 }
 
 =head2 @s = $ec2->reboot_instances(-instance_id=>\@instance_ids)
+
 =head2 @s = $ec2->reboot_instances(@instance_ids)
 
 Reboot the instances named by @instance_ids and return one or more
@@ -1625,7 +1632,7 @@ if successful.
 =cut
 
 sub delete_key_pair {
-    my $self = shift; my $name = shift or croak "Usage: create_key_pair(\$name)"; 
+    my $self = shift; my $name = shift or croak "Usage: delete_key_pair(\$name)"; 
     $name =~ /^[\w _-]+$/
 	or croak    "Invalid keypair name: must contain only alphanumerics, spaces, dashes and underscores";
     my @params = (KeyName=>$name);
@@ -2124,16 +2131,20 @@ sub call {
     my $response  = $self->make_request(@_);
 
     unless ($response->is_success) {
-	if ($response->code == 400) {
-	    my $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self);
-	    $self->error($error);
-	    croak "$error" if $self->raise_error;
-	    return;
+	my $content = $response->decoded_content;
+	my $error;
+	if ($content =~ /<Response>/) {
+	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self);
 	} else {
-	    print STDERR $response->request->as_string=~/Action=(\w+)/,': ',$response->status_line,"\n";
-	    return;
+	    my $code = $response->status_line;
+	    my $msg  = $response->decoded_content;
+	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg});
 	}
+	$self->error($error);
+	croak "$error" if $self->raise_error;
+	return;
     }
+
     $self->error(undef);
     my @obj = VM::EC2::Dispatch->response2objects($response,$self);
 

@@ -129,7 +129,9 @@ more information.
                      $ec2->token() to generate a suitable identifier.
                      See http://docs.amazonwebservices.com/AWSEC2/
                          latest/UserGuide/Run_Instance_Idempotency.html
- 
+
+Note that after launching an instance, you may need to wait a few
+seconds before adding tags to it or performing other operations.
 
 See L<VM::EC2> for details.
 

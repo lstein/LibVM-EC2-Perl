@@ -80,7 +80,9 @@ These object methods are supported:
  launchTime     -- The time the instance launched.
 
  placement      -- The placement of the instance. Returns a
-                   VM::EC2::Placement object.
+                   VM::EC2::Placement object, which when used
+                   as a string is equal to the instance's
+                   availability zone.
 
  kernelId       -- ID of the instance's kernel. CHANGEABLE.
 
@@ -645,7 +647,6 @@ sub associate_address {
     my $self = shift;
     my $addr = shift or croak "Usage: \$instance->associate_address(\$elastic_address)";
     my $r = $self->aws->associate_address($addr => $self->instanceId);
-    $r->{data}{ipAddress} = $addr if $r;
     return $r;
 }
 
@@ -654,7 +655,6 @@ sub disassociate_address {
     my $addr = $self->aws->describe_addresses(-filter=>{'instance-id'=>$self->instanceId});
     $addr or croak "Instance $self is not currently associated with an elastic IP address";
     my $r = $self->aws->disassociate_address($addr);
-    delete $r->{data}{ipAddress};
     return $r;
 }
 

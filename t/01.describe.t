@@ -7,12 +7,14 @@ use strict;
 use ExtUtils::MakeMaker;
 use File::Temp qw(tempfile);
 use FindBin '$Bin';
-use constant TEST_COUNT => 25;
+use constant TEST_COUNT => 33;
 
-use lib "$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
+use lib "$Bin/lib","$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
 use Test::More tests => TEST_COUNT;
-use constant UBUNTU  => 'ami-4a936a23'; # Nano natty - only 1 GB in size!
+use EC2TestSupport;
+
+# this script tests all the describe() functions and associated features such as tags.
 
 setup_environment();
 
@@ -20,7 +22,12 @@ require_ok('VM::EC2');
 my $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
 ok($ec2,'VM::EC2->new');
 
-my $natty = $ec2->describe_images(UBUNTU);
+my $natty = $ec2->describe_images(TEST_IMAGE);  # defined in t/EC2TestSupport
+
+if ($ec2->error_str =~ /SignatureDoesNotMatch/) {
+    BAIL_OUT($ec2->error_str);
+}
+
 ok($natty,'describe image by id');
 
 is($natty->imageLocation,'755060610258/ebs/ubuntu-images/ubuntu-natty-11.04-i386-server-20110426-nano','$image->imageLocation');
@@ -61,50 +68,50 @@ is(scalar keys %$tags,0,'tag deletion');
 my @regions = $ec2->describe_regions;
 ok(scalar @regions,'describe regions');
 
-# make a key
-my $kn      = 'VM-EC2 Test Key';
-$ec2->delete_key_pair($kn);  # in case it was already there
-my $key     = $ec2->create_key_pair($kn);
-ok($key,'create key');
-is($key->name,$kn,'create key name matches');
+my $r       = $ec2->describe_regions($regions[0]);
+is ($r,$regions[0],'describe regions by name');
+
+my @zones = $ec2->describe_availability_zones();
+ok(scalar @zones,'describe zones');
+
+my $z = $ec2->describe_availability_zones($zones[0]);
+is ($z,$zones[0],'describe zones by name');
+
+# make sure that we can get zones from each region
+my $cnt;
+foreach (@regions) {
+    @zones = $_->zones;
+    $cnt++ if @zones;
+}
+is ($cnt,scalar @regions,'each region has availability zones');
 
 my @keys    = $ec2->describe_key_pairs;
 ok(scalar @keys,'describe keys');
 
-@i = grep {$_->name eq $key} @keys;
-is(scalar @i,1,'get keys');
-is($i[0]->fingerprint,$key->fingerprint,'fingerprints match');
-ok($ec2->delete_key_pair($key),'delete key');
+# security groups
+my @sg = $ec2->describe_security_groups();
+ok(@sg>0,'describe_security_groups');
+ok(scalar(grep {$_->name =~ /default/} @sg),'default security group present');
 
-@keys = $ec2->describe_key_pairs($kn);
-is(scalar @keys,0,'delete key works');
+# error handling
+is($ec2->call('IncorrectAction'),undef,'errors return undef');
+my $error = $ec2->error;
+is($error->code,'InvalidAction','error code on invalid action');
+
+is($ec2->call('RunInstances',(Foo=>'bar')),undef,'errors return undef');
+is($ec2->error->code,'UnknownParameter','error code on invalid parameter');
+my $msg = $ec2->error->message;
+like($ec2->error_str,qr/UnknownParameter/,'error code interpolation');
+like($ec2->error_str,qr/$msg/,'error message interpolation');
+my $e = $ec2->error;
+is($ec2->error_str,"$e",'error object interpolation');
+
+$ec2->raise_error(1);
+eval {
+    $ec2->call('RunInstances',(Foo=>'bar'));
+};
+like($@,qr/UnknownParameter/,'raise error mode');
+$ec2->raise_error(0);
 
 exit 0;
 
-sub setup_environment {
-    unless ($ENV{EC2_ACCESS_KEY} && $ENV{EC2_SECRET_KEY}) {
-	print STDERR <<END;
-To run this test script, you must have an Amazon EC2 Access and
-Secret key pair. Please define the environment variables:
-
-  EC2_ACCESS_KEY
-  EC2_SECRET_KEY
-
-If these variables are not defined, you will be prompted for them.
-
-Press <enter> to continue, or ^C to abort.
-END
-;
-	scalar <>;
-    }
-    $ENV{EC2_ACCESS_KEY} ||= msg('Enter your EC2 access key: ');
-    $ENV{EC2_SECRET_KEY} ||= msg('Enter your EC2 secret key: ');
-}
-
-sub msg {
-    my $msg = shift;
-    print STDERR $msg;
-    chomp (my $result = <>);
-    die "aborted" unless $result;
-    $result;
-}
