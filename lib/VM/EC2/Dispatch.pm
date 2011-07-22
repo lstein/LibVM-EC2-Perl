@@ -106,9 +106,12 @@ use constant ObjectRegistration => {
     CreateImage             => sub { 
 	my ($data,$aws) = @_;
 	my $image_id = $data->{imageId} or return;
-	warn "The describe_images() step may interfere with AMI creation?!!";
 	return $aws->describe_images($image_id);
-#	return $image_id;
+    },
+    RegisterImage             => sub { 
+	my ($data,$aws) = @_;
+	my $image_id = $data->{imageId} or return;
+	return $aws->describe_images($image_id);
     },
     DescribeAddresses => 'fetch_items,addressesSet,VM::EC2::ElasticAddress',
     AssociateAddress  => sub {

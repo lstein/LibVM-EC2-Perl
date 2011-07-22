@@ -617,14 +617,14 @@ sub stop {
 
 sub terminate {
     my $self = shift;
-    my $nowait = shift;
+    my $wait = shift;
 
     my $s    = $self->current_status;
     croak "Can't terminate $self: run state=$s"
 	unless $s eq 'running' or $s eq 'stopped';
 
     my $i = $self->aws->terminate_instances($self) or return;
-    unless ($nowait) {
+    if ($wait) {
 	while ($i->current_status ne 'terminated') {
 	    sleep 5;
 	}

@@ -67,13 +67,69 @@ L<VM::EC2::Generic>:
 
  print "ready for production\n" if $image->tags->{Released};
 
-=head2 @instances = $image->run_instances(@params)
+=head2 @instances = $image->run_instances(%args)
 
 The run_instance() method will launch one or more instances based on
 this AMI. The method takes all the arguments recognized by
-VM::EC2->run_instances(), except for the -image_id argument. The method
-returns a list of VM::EC2::Instance objects, which you may
+VM::EC2->run_instances(), except for the -image_id argument. The
+method returns a list of VM::EC2::Instance objects, which you may
 monitor periodically until they are up and running.
+
+All arguments are optional. See run_instances() in L<VM::EC2> for 
+more information.
+
+  -min_count         Minimum number of instances to launch [1]
+  -max_count         Maximum number of instances to launch [1]
+  -key_name          Name of the keypair to use
+  -security_group_id Security group ID to use for this instance.
+                     Use an arrayref for multiple group IDs
+  -security_group    Security group name to use for this instance.
+                     Use an arrayref for multiple values.
+  -user_data         User data to pass to the instances. Do NOT base64
+                     encode this. It will be done for you.
+  -instance_type     Type of the instance to use. See below for a
+                     list.
+  -placement_zone    The availability zone you want to launch the
+                     instance into. Call $ec2->regions for a list.
+  -placement_group   An existing placement group to launch the
+                     instance into. Applicable to cluster instances
+                     only.
+  -placement_tenancy Specify 'dedicated' to launch the instance on a
+                     dedicated server. Only applicable for VPC
+                     instances.
+  -kernel_id         ID of the kernel to use for the instances,
+                     overriding the kernel specified in the image.
+  -ramdisk_id        ID of the ramdisk to use for the instances,
+                     overriding the ramdisk specified in the image.
+  -block_devices     Specify block devices to map onto the instances,
+                     overriding the values specified in the image.
+                     This can be a scalar string or an arrayref for
+                     multiple mappings:
+                     Example: 
+                     ['/dev/sdb=ephemeral0','/dev/sdc=snap-12345:80:false']
+  -monitoring        Pass a true value to enable detailed monitoring.
+  -subnet_id         ID of the subnet to launch the instance
+                     into. Only applicable for VPC instances.
+  -termination_protection  Pass true to lock the instance so that it
+                     cannot be terminated using the API. Use
+                     modify_instance() to unset this if youu wish to
+                     terminate the instance later.
+  -disable_api_termination -- Same as above.
+  -shutdown_behavior Pass "stop" (the default) to stop the instance
+                     and save its disk state when "shutdown" is called
+                     from within the instance. Stopped instances can
+                     be restarted later. Pass "terminate" to
+                     instead terminate the instance and discard its
+                     state completely.
+  -instance_initiated_shutdown_behavior -- Same as above.
+  -private_ip_address Assign the instance to a specific IP address
+                     from a VPC subnet (VPC only).
+  -client_token      Unique identifier that you can provide to ensure
+                     idempotency of the request. You can use
+                     $ec2->token() to generate a suitable identifier.
+                     See http://docs.amazonwebservices.com/AWSEC2/
+                         latest/UserGuide/Run_Instance_Idempotency.html
+ 
 
 See L<VM::EC2> for details.
 

@@ -215,6 +215,7 @@ sub tagSet {
 
 
 =head2 $boolean = $object->add_tags(Tag1=>'value1',Tag2=>'value2',...)
+
 =head2 $boolean = $object->add_tags(\%hash)
 
 Add one or more tags to the object. You may provide either a list of
@@ -226,6 +227,8 @@ resource was successfully updated.
 Also see VM::EC2->add_tags() for a way of tagging multiple resources
 simultaneously.
 
+The alias add_tag() is also provided as a convenience.
+
 =cut
 
 sub add_tags {
@@ -235,6 +238,8 @@ sub add_tags {
     $self->aws->create_tags(-resource_id => $self->primary_id,
 			    -tag         => $taglist);
 }
+
+sub add_tag { shift->add_tags(@_) }
 
 =head2 $boolean = $object->delete_tags(@args)
 

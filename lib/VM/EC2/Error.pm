@@ -61,7 +61,10 @@ use base 'VM::EC2::Generic';
 use overload 
     '""'     => sub {
 	my $self = shift;
-	return $self->Message. ' [' .$self->Code.']'},
+	my $msg = $self->Message;
+	$msg   =~ s/\.$//;
+	my $code = $self->Code;
+	return "[$code] $msg]";},
     fallback => 1;
 
 sub valid_fields {

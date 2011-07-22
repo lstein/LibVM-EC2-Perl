@@ -18,7 +18,8 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
  $image->run_instances(-key_name      =>'My_key',
                        -security_group=>'default',
                        -min_count=>2,
-                       -instance_type => 't1.micro'
+                       -instance_type => 't1.micro')
+           or die $ec2->error_str;
 
  my @snapshots = $ec2->describe_snapshots(-snapshot_id => 'id',
                                           -owner         => 'ownerid',
@@ -30,9 +31,12 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
  my @instances = $ec2->describe_instances(-instance_id => 'id',
                                           -filter      => {architecture=>'i386',
-                                                           'tag:Role'=>'Server'});
+                                                           'tag:Role'=>'Server'})
+    or die $ec2->error_str;
+
  my @volumes = $ec2->describe_volumes(-volume_id => 'id',
-                                      -filter    => {'tag:Role'=>'Server'});
+                                      -filter    => {'tag:Role'=>'Server'})
+    or die $ec2->error_str;
 
 =head1 DESCRIPTION
 
@@ -366,6 +370,18 @@ sub error {
     $d;
 }
 
+=head2 $err = $ec2->error_str
+
+Same as error() except it returns the string representation, not the
+object. This works better in debuggers and exception handlers.
+
+=cut
+
+sub error_str { 
+    my $e = shift->{error};
+    return "$e";
+}
+
 =head1 EC2 REGIONS AND AVAILABILITY ZONES
 
 This section describes methods that allow you to fetch information on
@@ -505,11 +521,14 @@ VM::EC2::Instance objects.
   -placement_tenancy Specify 'dedicated' to launch the instance on a
                      dedicated server. Only applicable for VPC
                      instances.
+  -kernel_id         ID of the kernel to use for the instances,
+                     overriding the kernel specified in the image.
   -ramdisk_id        ID of the ramdisk to use for the instances,
                      overriding the ramdisk specified in the image.
   -block_devices     Specify block devices to map onto the instances,
                      overriding the values specified in the image.
                      See below for the syntax of this argument.
+  -block_device_mapping  Alias for -block_devices.
   -monitoring        Pass a true value to enable detailed monitoring.
   -subnet_id         ID of the subnet to launch the instance
                      into. Only applicable for VPC instances.
@@ -577,9 +596,9 @@ following:
             specified, this will default to 'true' and the volume will be
             deleted.
           
-         For example: -block_devices => '/dev/sdb=snap-7eb96d16'
-                      -block_devices => '/dev/sdc=snap-7eb96d16:80:false'
-                      -block_devices => '/dev/sdd=:120'
+         Examples: -block_devices => '/dev/sdb=snap-7eb96d16'
+                   -block_devices => '/dev/sdc=snap-7eb96d16:80:false'
+                   -block_devices => '/dev/sdd=:120'
 
 To provide multiple mappings, use an array reference. In this example,
 we launch two 'm1.small' instance in which /dev/sdb is mapped to
@@ -607,7 +626,7 @@ reservationId(), ownerId(), requesterId() and groups() methods.
 =item Tips
 
 1. If you have a VM::EC2::Image object returned from
-   describe_images(), you may run it using run_instances():
+   Describe_images(), you may run it using run_instances():
 
  my $image = $ec2->describe_images(-image_id  => 'ami-12345');
  $image->run_instances( -min_count => 10,
@@ -642,7 +661,7 @@ sub run_instances {
     $args{-max_count} ||= $args{-min_count};
 
     my @p = map {$self->single_parm($_,\%args) }
-       qw(ImageId MinCount MaxCount KeyName RamdiskId PrivateIPAddress
+       qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIPAddress
           InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
     push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
     push @p,('UserData' =>encode_base64($args{user_data}))            if $args{-user_data};
@@ -652,7 +671,7 @@ sub run_instances {
     push @p,('Monitoring.Enabled'   =>'true')                         if $args{-monitoring};
     push @p,('DisableApiTermination'=>'true')                         if $args{-termination_protection};
     push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
-    push @p,$self->block_device_parm($args{-block_devices})           if $args{-block_devices};
+    push @p,$self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
     return $self->call('RunInstances',@p);
 }
 
@@ -1073,6 +1092,66 @@ sub create_image {
     push @param,$self->single_parm('Description',\%args);
     push @param,$self->boolean_parm('NoReboot',\%args);
     return $self->call('CreateImage',@param);
+}
+
+=head2 $image = $ec2->register_image(%args)
+
+Register an image, creating an AMI. This can be used to create an AMI
+from a S3-backed instance-store bundle, or to create an AMI from a
+snapshot of an EBS-backed root volume.
+
+Required arguments:
+
+ -name                 Name for the image that will be created.
+
+Arguments required for an EBS-backed image:
+
+ -root_device_name     The root device name, e.g. /dev/sda1
+ -block_device_mapping The block device mapping strings, including the
+                       snapshot ID for the root volume. This can
+                       be either a scalar string or an arrayref.
+                       See run_instances() for a description of the
+                       syntax.
+ -block_devices        Alias of the above.
+
+Arguments required for an instance-store image:
+
+ -image_location      Full path to the AMI manifest in Amazon S3 storage.
+
+Common optional arguments:
+
+ -description         Description of the AMI
+ -architecture        Architecture of the image ("i386" or "x86_64")
+ -kernel_id           ID fo the kernel to use
+ -ramdisk_id          ID of the RAM disk to use
+ 
+While you do not have to specify the kernel ID, it is strongly
+recommended that you do so. Otherwise the kernel will have to be
+specified for run_instances().
+
+Note: Immediately after registering the image you can add tags to it
+and use modify_image_attributes to change launch permissions, etc.
+
+=cut
+
+sub register_image {
+    my $self = shift;
+    my %args = @_;
+
+    $args{-name} or croak "register_image(): -name argument required";
+    if (!$args{-image_location}) {
+	$args{-root_device_name} && $args{-block_device_mapping}
+	or croak "register_image(): either provide -image_location to create an instance-store AMI\nor both the -root_device_name && -block_device_mapping arguments to create an EBS-backed AMI.";
+    }
+
+    my @param;
+    for my $a (qw(Name RootDeviceName ImageLocation Description
+                  Architecture KernelId RamdiskId)) {
+	push @param,$self->single_parm($a,\%args);
+    }
+    push @param,$self->block_device_parm($args{-block_devices} || $args{-block_device_mapping});
+
+    return $self->call('RegisterImage',@param);
 }
 
 =head2 @data = $ec2->describe_image_attribute($image_id,$attribute)
@@ -1969,9 +2048,9 @@ sub launch_perm_parm {
 
 sub block_device_parm {
     my $self    = shift;
-    my $devlist = shift;
+    my $devlist = shift or return;
 
-    my @dev     = ref $devlist ? @$devlist : $devlist;
+    my @dev     = ref $devlist && ref $devlist eq 'ARRAY' ? @$devlist : $devlist;
 
     my @p;
     my $c = 1;

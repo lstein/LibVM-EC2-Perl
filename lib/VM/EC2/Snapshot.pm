@@ -21,6 +21,11 @@ VM::EC2::Snapshot - Object describing an Amazon EBS snapshot
       $tags  = $snap->tags;
   }
 
+  # use a snapshot as the root device for a new AMI
+  $ami = $snap->register_image(-name         => 'My new image',
+                               -kernel_id    => 'aki-407d9529',
+                               -architecture => 'i386');
+
 =head1 DESCRIPTION
 
 This object is used to describe an Amazon EBS snapshot.
@@ -55,6 +60,65 @@ the VM::EC2 object, this will raise an exception.
 Returns all VM::EC2::Volume objects that were derived from this
 snapshot. If no volumes currently exist that satisfy this criteria,
 returns an empty list, but will not raise an error.
+
+=head2 $image = $snap->register_image(%args)
+
+Register a new AMI using this snapshot as the root device. By default,
+the root device will be mapped to /dev/sda1 and will delete on
+instance termination. You can modify this behavior and add additional
+block devices.
+
+Arguments:
+
+ -name                 Name for this image (required)
+
+ -description          Description of this image
+
+ -kernel_id            Kernel for this image (recommended)
+
+ -ramdisk_id           Ramdisk for this image
+
+ -architecture         Architecture ("i386" or "x86_64")
+
+ -root_device_name     Specify the root device based
+                       on this snapshot (/dev/sda1).
+
+ -root_size            Size of the root volume (defaults
+                       to size of the snapshot).
+
+ -root_delete_on_termination   True value (default) to delete
+                       the root volume after the instance
+                       terminates. False value to keep the
+                       EBS volume available.
+
+ -block_device_mapping Additional block devices you wish to
+                       incorporate into the image.
+
+ -block_devices        Same as above.
+
+See L<VM::EC2> for information on the syntax of the
+-block_device_mapping argument. If the root device is explicitly
+included in the block device mapping argument, then the arguments
+specified in -root_size, and -root_delete_on_termination will be
+ignored, and the current snapshot will not automatically be used as
+the root device.
+
+The return value is a L<VM::EC2::Image>. You can call its
+current_status() method to poll its availability:
+
+  $snap = $ec2->describe_snapshots('snap-123456');
+  $ami = $snap->register_image(-name          => 'My new image',
+                               -kernel_id     => 'aki-407d9529',
+                               -architecture  => 'i386',
+                               -block_devices => '/dev/sdc=ephemeral0'
+  ) or die $ec2->error_str;
+
+  while ($ami->current_status eq 'pending') {
+    print "$ami: ",$ami->current_status,"\n"
+    sleep 30;  # takes a long time to register some images
+  }
+
+  print "$ami is ready to go\n";
 
 =head2 $status = $snap->current_status
 
@@ -93,6 +157,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
+use Carp 'croak';
 
 sub valid_fields {
     my $self  = shift;
@@ -126,6 +191,33 @@ sub refresh {
     my $self = shift;
     my $s = $self->aws->describe_snapshots($self);
     %$self  = %$s;
+}
+
+sub register_image {
+    my $self = shift;
+    my %args = @_;
+    $args{-name}               or croak "register_image(): -name argument required";
+    $args{-root_device_name}   ||= '/dev/sda1';
+
+    my $block_devices = $args{-block_devices} || $args{-block_device_mapping} || [];
+    $block_devices    = [$block_devices] unless ref $block_devices && ref $block_devices eq 'ARRAY';
+
+    # See if the root device is on the block device mapping list.
+    # If it is not, then create a /dev/sda1 entry for it from this snapshot.
+    my $rd = $args{-root_device_name};
+    unless (grep {/^$rd=/} @$block_devices) {
+	my $root_size   = $args{-root_size}   || '';
+	$args{-root_delete_on_termination} = 1 unless defined $args{-root_delete_on_termination};
+	my $root_delete = $args{-root_delete_on_termination} ? 'true' : 'false';
+	my $snap_id     = $self->snapshotId;
+	unshift @$block_devices,"$rd=$snap_id:$root_size:$root_delete"
+    }
+
+    # just cleaning up, not really necessary
+    delete $args{-root_size};
+    delete $args(-root_delete_on_termination};
+
+    return $self->aws->register_image(%args);
 }
 
 sub current_status {
