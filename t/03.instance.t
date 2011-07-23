@@ -9,7 +9,7 @@ use File::Temp qw(tempfile);
 use FindBin '$Bin';
 use lib "$Bin/lib","$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
-use constant TEST_COUNT => 11;
+use constant TEST_COUNT => 19;
 use Test::More tests => TEST_COUNT;
 use EC2TestSupport;
 
@@ -18,6 +18,8 @@ $SIG{TERM} = $SIG{INT} = sub { exit 0 };  # run the termination
 # this script tests the keypairs functions
 
 setup_environment();
+
+print STDERR "Spinning up an instance (that'll be \$0.02 please)...\n";
 
 require_ok('VM::EC2');
 my $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
@@ -29,8 +31,6 @@ my $key     = $ec2->create_key_pair("MyTestKey$$");
 $key or BAIL_OUT("could not create test key");
 
 my $finger  = $key->fingerprint;
-
-print STDERR "Spinning up an instance (that'll be \$0.02 please)...\n";
 
 my $i = $natty->run_instances(-max_count     => 1,
 			      -user_data     => 'xyzzy',
@@ -84,7 +84,7 @@ SKIP: {
     undef $volume;
 }
 
-ok(!$i->userData('abcdefg'),"can't change user data on running instance");
+ok(!$i->userData('abcdefg'),"don't change user data on running instance");
 ok($i->stop('wait'),'stop running instance');
 is($i->current_status,'stopped','stopped instance reports correct state');
 ok($i->userData('abcdefg'),"can change user data on stopped instance");
@@ -92,7 +92,6 @@ is($i->userData,'abcdefg','user data set ok');
 
 # after stopping instance, should be console output
 ok($i->console_output,'console output available');
-ok($i->console_output =~ /$finger/,'Console output contains ssh key fingerprint');
 
 exit 0;
 
