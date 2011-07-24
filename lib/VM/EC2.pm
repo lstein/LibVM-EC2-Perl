@@ -378,6 +378,7 @@ object. This works better in debuggers and exception handlers.
 
 sub error_str { 
     my $e = shift->{error};
+    $e ||= '';
     return "$e";
 }
 
