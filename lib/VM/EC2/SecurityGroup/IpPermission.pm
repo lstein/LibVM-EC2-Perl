@@ -10,7 +10,10 @@ sub valid_fields {
 
 sub short_name {
     my $s = shift;
-    sprintf("%s(%s:%s)%s",$s->ipProtocol,$s->fromPort,$s->toPort,$s->ipRanges ? ' FROM '.join(',',$s->ipRanges):'');
+    my $from = $s->ipRanges ? ' FROM '.join(',',$s->ipRanges)
+              :$s->groups   ? ' FROM '.join(',',$s->groups)
+              :''; 
+    sprintf("%s(%s..%s)%s",$s->ipProtocol,$s->fromPort,$s->toPort,$from);
 }
 
 sub groups {
