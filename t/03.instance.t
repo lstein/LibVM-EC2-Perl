@@ -15,37 +15,40 @@ use EC2TestSupport;
 
 $SIG{TERM} = $SIG{INT} = sub { exit 0 };  # run the termination
 
-# this script tests the keypairs functions
+# this script exercises instances and volumes
+my($ec2, $instance,$key,$address,$deallocate_address,$volume);
 
+SKIP: {
+
+skip "instance tests declined",TEST_COUNT unless confirm_payment();
 setup_environment();
 
 print STDERR "Spinning up an instance (that'll be \$0.02 please)...\n";
 
 require_ok('VM::EC2');
-my $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
+$ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
 
 my $natty = $ec2->describe_images(TEST_IMAGE);  # defined in t/EC2TestSupport
 BAIL_OUT($ec2->error_str) unless $natty;			
 
-my $key     = $ec2->create_key_pair("MyTestKey$$");
+$key     = $ec2->create_key_pair("MyTestKey$$");
 $key or BAIL_OUT("could not create test key");
 
 my $finger  = $key->fingerprint;
 
-my $i = $natty->run_instances(-max_count     => 1,
-			      -user_data     => 'xyzzy',
-			      -key_name      => $key,
-			      -instance_type => 't1.micro');
+$instance = $natty->run_instances(-max_count     => 1,
+				  -user_data     => 'xyzzy',
+				  -key_name      => $key,
+				  -instance_type => 't1.micro');
 sleep 1;
-ok($i,'run_instances()');
-$i->add_tags(Name=>'test instance created by VM::EC2');
-$ec2->wait_for_instances($i);
-is($i->current_status,'running','instance is running');
-is($i->userData,'xyzzy','user data is available to instance');
+ok($instance,'run_instances()');
+$instance->add_tags(Name=>'test instance created by VM::EC2');
+$ec2->wait_for_instances($instance);
+is($instance->current_status,'running','instance is running');
+is($instance->userData,'xyzzy','user data is available to instance');
 
 # allocate or reuse an elastic IP address to test association
 my @addresses = grep {!$_->instanceId} $ec2->describe_addresses();
-my ($address,$deallocate_address);
 if (@addresses) {
     $address = $addresses[0];
 } else {
@@ -54,15 +57,15 @@ if (@addresses) {
 }
 SKIP: {
     skip "no elastic addresses available for testing",2 unless $address;
-    ok($i->associate_address($address),'elastic address association');
+    ok($instance->associate_address($address),'elastic address association');
     sleep 2;
-    $i->refresh;
-    ok($i->disassociate_address($address),'address disassociation');
+    $instance->refresh;
+    ok($instance->disassociate_address($address),'address disassociation');
 }
 
 # volume management
-my $zone   = $i->placement;
-my $volume = $ec2->create_volume(-size=>1,-availability_zone=>$zone);
+my $zone   = $instance->placement;
+$volume = $ec2->create_volume(-size=>1,-availability_zone=>$zone);
 ok($volume,'volume creation');
 
 my $cnt = 0;
@@ -70,7 +73,7 @@ while ($cnt++ < 10 && $volume->current_status eq 'creating') { sleep 2 }
 SKIP: {
     skip "could not create a new volume, status was ".$volume->current_status,6
 	unless $volume->current_status eq 'available';
-    my $a = $i->attach_volume($volume => '/dev/sdg1');
+    my $a = $instance->attach_volume($volume => '/dev/sdg1');
     ok($a,'attach()');
     $cnt = 0;
     while ($cnt++ < 10 && $a->current_status ne 'attached') { sleep 2 }
@@ -84,21 +87,24 @@ SKIP: {
     undef $volume;
 }
 
-ok(!$i->userData('abcdefg'),"don't change user data on running instance");
-ok($i->stop('wait'),'stop running instance');
-is($i->current_status,'stopped','stopped instance reports correct state');
-ok($i->userData('abcdefg'),"can change user data on stopped instance");
-is($i->userData,'abcdefg','user data set ok');
+ok(!$instance->userData('abcdefg'),"don't change user data on running instance");
+ok($instance->stop('wait'),'stop running instance');
+is($instance->current_status,'stopped','stopped instance reports correct state');
+ok($instance->userData('abcdefg'),"can change user data on stopped instance");
+is($instance->userData,'abcdefg','user data set ok');
 
 # after stopping instance, should be console output
-ok($i->console_output,'console output available');
+ok($instance->console_output,'console output available');
+
+}  # SKIP
+
 
 exit 0;
 
 END {
-    if ($i) {
-	print STDERR "Terminating $i...\n";
-	$i->terminate();
+    if ($instance) {
+	print STDERR "Terminating $instance...\n";
+	$instance->terminate();
     }
     if ($key) {
 	print STDERR "Removing test key...\n";
@@ -113,4 +119,18 @@ END {
 	$volume->disassociate();
 	$ec2->delete_volume($volume);
     }
+}
+
+sub confirm_payment {
+    print STDERR <<END;
+This test will launch one "micro" instance under your Amazon account
+and then terminate it, incurring a one hour runtime charge. This will
+incur a charge of \$0.02 (as of July 2011), which may be covered under 
+the AWS free tier.
+END
+;
+    print STDERR "Do you want to proceed? [Y/n] ";
+    chomp(my $input = <>);
+    $input ||= 'y';
+    return $input =~ /^[yY]/;
 }

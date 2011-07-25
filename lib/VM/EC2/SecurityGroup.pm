@@ -25,6 +25,16 @@ VM::EC2::SecurityGroup - Object describing an Amazon EC2 security group
       }
   }
 
+ $sg = $sg[0];
+
+ # Add a new security rule
+ $sg->authorize_incoming(-protocol  => 'tcp',
+                         -port      => 80,
+                         -source_ip => ['192.168.2.0/24','192.168.2.1/24'});
+
+ # write it to AWS.
+ $sg->update();
+
 =head1 DESCRIPTION
 
 This object is used to describe an Amazon EC2 security group. It is
@@ -335,24 +345,27 @@ sub _new_permission {
     $data->{fromPort} = $from_port;
     $data->{toPort}   = $to_port;
     
-    my $group  = $args{-group};
+    my $group  = $args{-groups} || $args{-group};
     my @groups = ref $group && ref $group eq 'ARRAY' ? @$group :$group ? ($group) : ();
     for my $g (@groups) {
 	if ($g =~ /^sg-[a-f0-9]+$/) {
-	    push @{$data->{groups}{items}},{groupId=>$g};
-	} elsif (my ($userid,$groupname) = split ('/',$g)) {
-	    push @{$data->{groups}{items}},{userId=>$userid,groupName=>$groupname};
+	    push @{$data->{groups}{item}},{groupId=>$g};
+	} elsif (my ($userid,$groupname) = $g =~ m!(\d+)/(.+)!) {
+	    push @{$data->{groups}{item}},{userId=>$userid,groupName=>$groupname};
 	} else {
 	    my $userid = $self->aws->account_id;
-	    push @{$data->{groups}{items}},{userId=>$userid,groupName=>$g};
+	    push @{$data->{groups}{item}},{userId=>$userid,groupName=>$g};
 	}
     }
 
     my $address = $args{-source_ip};
     $address && $group and croak "the -source_ip and -group arguments are mutually exclusive";
-    $address ||= '0.0.0.0/0' unless $args{-group};
+    $address ||= '0.0.0.0/0' unless $group;
 
-    my @addresses = ref $address && ref $address eq 'ARRAY' ? @$address :$address ? ($address) : ();
+    my @addresses = ref $address && ref $address eq 'ARRAY' ? @$address 
+                   :$address ? ($address) 
+		   : ();
+    foreach (@addresses) { $_ = '0.0.0.0/0' if $_ eq 'any' }
     $data->{ipRanges}{item} = [map {{cidrIp=>$_}} @addresses] if @addresses;
 
     return VM::EC2::SecurityGroup::IpPermission->new($data,$self->aws);

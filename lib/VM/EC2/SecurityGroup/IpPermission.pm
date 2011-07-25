@@ -10,8 +10,8 @@ sub valid_fields {
 
 sub short_name {
     my $s = shift;
-    my $from = $s->ipRanges ? ' FROM '.join(',',$s->ipRanges)
-              :$s->groups   ? ' FROM '.join(',',$s->groups)
+    my $from = $s->ipRanges ? ' FROM '.join(',',sort $s->ipRanges)
+              :$s->groups   ? ' FROM '.join(',',sort $s->groups)
               :''; 
     sprintf("%s(%s..%s)%s",$s->ipProtocol,$s->fromPort,$s->toPort,$from);
 }
@@ -19,7 +19,7 @@ sub short_name {
 sub groups {
     my $self = shift;
     my $g    = $self->SUPER::groups or return;
-    return map { VM::EC2::SecurityGroup::UserIdGroup->new($_->$self->aws) } @{$g->{item}};
+    return map { VM::EC2::SecurityGroup::UserIdGroup->new($_,$self->aws) } @{$g->{item}};
 }
 
 sub ipRanges {

@@ -1499,8 +1499,12 @@ Optional parameters:
 
  -group_name      A single group name or an arrayref containing a list
                    of names
+
+ -name            Shorter version of -group_name
+
  -group_id        A single group id (i.e. 'sg-12345') or an arrayref
                    containing a list of ids
+
  -filter          Filter on tags and other attributes.
 
 The full list of security group filters can be found at:
@@ -1511,6 +1515,7 @@ http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-qu
 sub describe_security_groups {
     my $self = shift;
     my %args = $self->args(-group_id=>@_);
+    $args{-group_name} ||= $args{-name};
     my @params = map { $self->list_parm($_,\%args) } qw(GroupName GroupId);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeSecurityGroups',@params);
@@ -1546,7 +1551,8 @@ sub create_security_group {
 
     my @param;
     push @param,$self->single_parm($_=>\%args) foreach qw(GroupName GroupDescription VpcId);
-    return $self->call('CreateSecurityGroup',@param);
+    my $g = $self->call('CreateSecurityGroup',@param) or return;
+    return $self->describe_security_groups($g);
 }
 
 =head2 $boolean = $ec2->delete_security_group($group_id)
@@ -1579,7 +1585,7 @@ sub delete_security_group {
 
 Add one or more incoming firewall rules to a security group. The rules
 to add are stored in a L<VM::EC2::SecurityGroup> which is created
-either by describe_groups() or create_group(). This method combines
+either by describe_security_groups() or create_security_group(). This method combines
 the actions AuthorizeSecurityGroupIngress,
 AuthorizeSecurityGroupEgress, RevokeSecurityGroupIngress, and
 RevokeSecurityGroupEgress.
@@ -1655,11 +1661,12 @@ sub _security_group_parm {
 	my @groups = $perm->groups;
 	for (my $i=0;$i<@groups;$i++) {
 	    my $m = $i+1;
-	    if (defined $perm->groupId) {
-		push @param,("IpPermissions.$n.Groups.$m.GroupId"  => $perm->groupId);
+	    my $group = $groups[$i];
+	    if (defined $group->groupId) {
+		push @param,("IpPermissions.$n.Groups.$m.GroupId"  => $group->groupId);
 	    } else {
-		push @param,("IpPermissions.$n.Groups.$m.UserId"   => $perm->userId);
-		push @param,("IpPermissions.$n.Groups.$m.GroupName"=> $perm->groupName);
+		push @param,("IpPermissions.$n.Groups.$m.UserId"   => $group->userId);
+		push @param,("IpPermissions.$n.Groups.$m.GroupName"=> $group->groupName);
 	    }
 	}
     }
