@@ -24,6 +24,7 @@ VM::EC2::Volume - Object describing an Amazon EBS volume
   }
   $vols[0]->attach('i-12345','/dev/sdg1');
   $vols[0]->detach;
+  $vols[0]->create_snapshot('automatic snapshot')
 
 =head1 DESCRIPTION
 

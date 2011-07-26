@@ -9,34 +9,129 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
  # set environment variables EC2_ACCESS_KEY, EC2_SECRET_KEY and/or EC2_URL
  # to fill in arguments automatically
 
+ ## IMAGE AND INSTANCE MANAGEMENT
+ # get new EC2 object
  my $ec2 = VM::EC2->new(-access_key => 'access key id',
-                      -secret_key => 'aws_secret_key',
-                      -endpoint   => 'http://ec2.us-east-1.amazonaws.com');
+                        -secret_key => 'aws_secret_key',
+                        -endpoint   => 'http://ec2.amazonaws.com');
 
- my ($image) = $ec2->describe_images(-image_id=>'ami-12345');
+ # fetch an image by its ID
+ my $image = $ec2->describe_images('ami-12345');
 
- $image->run_instances(-key_name      =>'My_key',
-                       -security_group=>'default',
-                       -min_count=>2,
-                       -instance_type => 't1.micro')
+ # get some information about the image
+ my $architecture = $image->architecture;
+ my $description  = $image->description;
+ my @devices      = $image->blockDeviceMapping;
+ for my $d (@devices) {
+    print $d->deviceName,"\n";
+    print $d->snapshotId,"\n";
+    print $d->volumeSize,"\n";
+ }
+
+ # run two instances
+ my @instances = $image->run_instances(-key_name      =>'My_key',
+                                       -security_group=>'default',
+                                       -min_count     =>2,
+                                       -instance_type => 't1.micro')
            or die $ec2->error_str;
 
- my @snapshots = $ec2->describe_snapshots(-snapshot_id => 'id',
-                                          -owner         => 'ownerid',
-                                          -restorable_by => 'userid',
-                                          -filter        => {'tag:Name'=>'Root',
-                                                              'tag:Role'=>'Server'});
+ # wait for both instances to reach "running" or other terminal state
+ $ec2->wait_for_instances(@instances);
 
- foreach (@snapshots) { $_->add_tags('Version'=>'1.0') }
+ # print out both instance's current state and DNS name
+ for my $i (@instances) {
+    my $status = $i->current_status;
+    my $dns    = $i->dnsName;
+    print "$i: [$status] $dns\n";
+ }
 
- my @instances = $ec2->describe_instances(-instance_id => 'id',
-                                          -filter      => {architecture=>'i386',
-                                                           'tag:Role'=>'Server'})
-    or die $ec2->error_str;
+ # tag both instances with Role "server"
+ foreach (@instances) {$_->add_tag(Role=>'server');
 
- my @volumes = $ec2->describe_volumes(-volume_id => 'id',
-                                      -filter    => {'tag:Role'=>'Server'})
-    or die $ec2->error_str;
+ # stop both instances
+ foreach (@instances) {$_->stop}
+ 
+ # find instances tagged with Role=Server that are
+ # stopped, change the user data and restart.
+ @instances = $ec2->describe_instances({'tag:Role'       => 'Server',
+                                        'run-state-name' => 'stopped'});
+ for my $i (@instances) {
+    $i->userData('Secure-mode: off');
+    $i->start or warn "Couldn't start $i: ",$i->error_str;
+ }
+
+ # create an image from both instance, tag them, and make
+ # them public
+ for my $i (@instances) {
+     my $img = $i->create_image("Autoimage from $i","Test image");
+     $img->add_tags(Name  => "Autoimage from $i",
+                    Role  => 'Server',
+                    Status=> 'Production');
+     $img->make_public(1);
+ }
+
+ ## KEY MANAGEMENT
+
+ # retrieve the name and fingerprint of the first instance's 
+ # key pair
+ my $kp = $instances[0]->keyPair;
+ print $instances[0], ": keypair $kp=",$kp->fingerprint,"\n";
+
+ # create a new key pair
+ $kp = $ec2->create_key_pair('My Key');
+ 
+ # get the private key from this key pair and write it to a disk file
+ # in ssh-compatible format
+ my $private_key = $kp->private_key;
+ open (my $f,'>MyKeypair.rsa') or die $!;
+ print $f $private_key;
+ close $f;
+
+ # Import a preexisting SSH key
+ my $public_key = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC8o...';
+ $key = $ec2->import_key_pair('NewKey',$public_key);
+
+ ## SECURITY GROUPS AND FIREWALL RULES
+ # Create a new security group
+ my $group = $ec2->create_security_group(-name        => 'NewGroup',
+                                         -description => 'example');
+
+ # Add a firewall rule 
+ $group->authorize_incoming(-protocol  => 'tcp',
+                            -port      => 80,
+                            -source_ip => ['192.168.2.0/24','192.168.2.1/24'});
+
+ # Write rules back to Amazon
+ $group->update;
+
+ # Print current firewall rules
+ print join ("\n",$group->ipPermissions),"\n";
+
+ ## VOLUME && SNAPSHOT MANAGEMENT
+
+ # find existing volumes that are available
+ my @volumes = $ec2->describe_volumes({status=>'available'});
+
+ # back 'em all up to snapshots
+ foreach (@volumes) {$_->snapshot('Backup on '.localtime)}
+
+ # find a stopped instance in first volume's availability zone and 
+ # attach the volume to the instance using /dev/sdg
+ my $vol  = $volumes[0];
+ my $zone = $vol->availabilityZone;
+ @instances = $ec2->describe_instances({'availability-zone'=> $zone,
+                                        'run-state-name'   => $stopped);
+ $instances[0]->attach_volume($vol=>'/dev/sdg') if @instances;
+
+ # create a new 20 gig volume
+ $vol = $ec2->create_volume(-availability_zone=> 'us-east-1a',
+                            -size             =>  20);
+ while ($vol->current_status eq 'creating') { sleep 2; }
+ print "Volume $vol is ready!\n" if $vol->current_status eq 'available';
+
+ # create a new elastic address and associate it with an instance
+ my $address = $ec2->allocate_address();
+ $instances[0]->associate_address($address);
 
 =head1 DESCRIPTION
 
@@ -125,6 +220,12 @@ following differences:
        @i = $ec2->describe_instances(-filter=>{architecture=>'i386',
                                                'tag:Name'  =>'WebServer'})
 
+    If there are no other arguments you wish to pass, you can omit the
+    -filter argument and just pass a hashref:
+
+       @i = $ec2->describe_instances({architecture=>'i386',
+                                      'tag:Name'  =>'WebServer'})
+
     When adding or removing tags, the -tag argument has the same syntax.
 
  6) The tagnames of each XML object returned from AWS are converted into methods
@@ -180,7 +281,7 @@ following differences:
 
     You may also elect to raise an exception when an error occurs.
     See the new() method for details.
- 
+
 =head1 CORE METHODS
 
 This section describes the VM::EC2 constructor, accessor methods, and
@@ -417,6 +518,15 @@ all availability regions. You may provide a list of zones in either
 of the two forms shown above in order to restrict the list
 returned. Glob-style wildcards, such as "*east") are allowed.
 
+If you provide a single argument consisting of a hashref, it is
+treated as a -filter argument. In other words:
+
+ $ec2->describe_availability_zones({state=>'available'})
+
+is equivalent to
+
+ $ec2->describe_availability_zones(-filter=>{state=>'available'})
+
 Availability zone filters are described at
 http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeAvailabilityZones.html
 
@@ -450,11 +560,12 @@ Return a series of VM::EC2::Instance objects. Optional parameters are:
 
  -instance_id     ID of the instance(s) to return information on. 
                   This can be a string scalar, or an arrayref.
+
  -filter          Tags and other filters to apply.
 
-There are a large number of filters which can be specified. The filter
-argument is a hashreference in which the keys are the filter names,
-and the values are the match strings. Some filters accept wildcards.
+The filter argument is a hashreference in which the keys are the
+filter names, and the values are the match strings. Some filters
+accept wildcards.
 
 A typical filter example:
 
@@ -464,6 +575,11 @@ A typical filter example:
                        'tag:Role'                        => 'Server'
                       });
 
+You may omit the -filter argument name if there are no other arguments:
+
+  $ec2->describe_instances({'block-device-mapping.device-name'=>'/dev/sdh',
+                            'architecture'                    => 'i386',
+                             'tag:Role'                        => 'Server'});
 
 There are a large number of potential filters, which are listed at
 http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeInstances.html.
@@ -634,9 +750,9 @@ reservationId(), ownerId(), requesterId() and groups() methods.
                                            '/dev/sdc=:100:true']
     )
 
-2. It may take a short while for the instance to be returned by
-   describe_instances(). You may wish to sleep for 1-2 seconds
-   before calling current_status() or wait_for_instances().
+2. It may take a short while for a newly-launched instance to be
+    returned by describe_instances(). You may need to sleep for 1-2 seconds
+    before current_status() returns the correct value.
 
 3. Each instance object has a current_status() method which will
    return the current run state of the instance. You may poll this
@@ -649,10 +765,9 @@ reservationId(), ownerId(), requesterId() and groups() methods.
    }
 
 4. The utility method wait_for_instances() will wait until all
-   passed instances are in 'running' state.
+   passed instances are in the 'running' or other terminal state.
 
    my @instances = $ec2->run_instances(...);
-   sleep 1;
    $ec2->wait_for_instances(@instances);
 
 =back
@@ -790,7 +905,7 @@ wait_for_instances().
 Example:
 
     # find all instances tagged as "Version 0.5"
-    @instances = $ec2->describe_instances(-filter=>{'tag:Version'=>'0.5'});
+    @instances = $ec2->describe_instances({'tag:Version'=>'0.5'});
 
     # terminate them
     $ec2->terminate_instances(@instances);
@@ -865,6 +980,7 @@ sub wait_for_instances {
     my %terminal_state = (running    => 1,
 			  stopped    => 1,
 			  terminated => 1);
+    sleep 1;
     my @pending = grep {!$terminal_state{$_->current_status}} @instances;
 
     while (@pending) {
@@ -1054,9 +1170,16 @@ AMI. Optional parameters:
 
  -image_id        The id of the image, either a string scalar or an
                   arrayref.
+
  -executable_by   Filter by images executable by the indicated user account
+
  -owner           Filter by owner account
+
  -filter          Tags and other filters to apply
+
+If there are no other arguments, you may omit the -filter argument
+name and call describe_images() with a single hashref consisting of
+the search filters you wish to apply.
 
 The full list of image filters can be found at:
 http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeImages.html
@@ -1161,6 +1284,19 @@ sub register_image {
     return $self->call('RegisterImage',@param);
 }
 
+=head2 $result = $ec2->deregister_image($image_id)
+
+Deletes the registered image and returns true if successful.
+
+=cut
+
+sub deregister_image {
+    my $self = shift;
+    my %args  = $self->args(-image_id => @_);
+    my @param = $self->single_parm(ImageId=>\%args);
+    return $self->call('DeregisterImage',@param) or return;
+}
+
 =head2 @data = $ec2->describe_image_attribute($image_id,$attribute)
 
 
@@ -1258,7 +1394,11 @@ Return a series of VM::EC2::Volume objects. Optional parameters:
 
  -volume_id    The id of the volume to fetch, either a string
                scalar or an arrayref.
+
  -filter       One or more filters to apply to the search
+
+The -filter argument name can be omitted if there are no other
+arguments you wish to pass.
 
 The full list of volume filters can be found at:
 http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeVolumes.html
@@ -1283,7 +1423,9 @@ Arguments:
 
  -availability_zone    -- An availability zone from
                           describe_availability_zones (required)
+
  -snapshot_id          -- ID of a snapshot to use to build volume from.
+
  -size                 -- Size of the volume, in GB (between 1 and 1024).
 
 One or both of -snapshot_id or -size are required. For convenience,
@@ -1406,10 +1548,16 @@ Returns a series of VM::EC2::Snapshot objects. All parameters
 are optional:
 
  -snapshot_id     ID of the snapshot
+
  -owner           Filter by owner ID
+
  -restorable_by   Filter by IDs of a user who is allowed to restore
                    the snapshot
+
  -filter          Tags and other filters
+
+The -filter argument name can be omitted if there are no other
+arguments you wish to pass.
 
 The full list of applicable filters can be found at
 http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeSnapshots.html
@@ -1506,6 +1654,9 @@ Optional parameters:
                    containing a list of ids
 
  -filter          Filter on tags and other attributes.
+
+The -filter argument name can be omitted if there are no other
+arguments you wish to pass.
 
 The full list of security group filters can be found at:
 http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeSecurityGroups.html
@@ -2394,8 +2545,80 @@ sub args {
     my $default_param_name = shift;
     return unless @_;
     return @_ if $_[0] =~ /^-/;
+    return (-filter=>shift) if @_==1 && ref $_[0] && ref $_[0] eq 'HASH';
     return ($default_param_name => \@_);
 }
+
+=head1 MISSING METHODS
+
+As of 27 July 2011, the following Amazon API calls had not been implemented:
+
+AssociateDhcpOptions
+AssociateRouteTable
+AttachInternetGateway
+AttachVpnGateway
+BundleInstance
+CancelBundleTask
+CancelConversionTask
+CancelSpotInstanceRequests
+ConfirmProductInstance
+CreateCustomerGateway
+CreateDhcpOptions
+CreateInternetGateway
+CreateNetworkAcl
+CreateNetworkAclEntry
+CreatePlacementGroup
+CreateRoute
+CreateRouteTable
+CreateSpotDatafeedSubscription
+CreateSubnet
+CreateVpc
+CreateVpnConnection
+CreateVpnGateway
+DeleteCustomerGateway
+DeleteDhcpOptions
+DeleteInternetGateway
+DeleteNetworkAcl
+DeleteNetworkAclEntry
+DeletePlacementGroup
+DeleteRoute
+DeleteRouteTable
+DeleteSpotDatafeedSubscription
+DeleteSubnet
+DeleteVpc
+DeleteVpnConnection
+DeleteVpnGateway
+DescribeBundleTasks
+DescribeConversionTasks
+DescribeCustomerGateways
+DescribeDhcpOptions
+DescribeNetworkAcls
+DescribePlacementGroups
+DescribeReservedInstances
+DescribeReservedInstancesOfferings
+DescribeRouteTables
+DescribeSnapshotAttribute      * need to implement
+DescribeSpotDatafeedSubscription
+DescribeSpotInstanceRequests
+DescribeSpotPriceHistory
+DescribeSubnets
+DescribeVpcs
+DescribeVpnConnections
+DescribeVpnGateways
+DetachInternetGateway
+DetachVpnGateway
+DisassociateRouteTable
+GetPasswordData             * must implement
+ImportInstance
+ModifySnapshotAttribute     * must implement
+PurchaseReservedInstancesOffering
+ReplaceNetworkAclAssociation
+ReplaceNetworkAclEntry
+ReplaceRoute
+ReplaceRouteTableAssociation
+RequestSpotInstances
+ResetImageAttribute         * must implement
+ResetSnapshotAttribute      # must implement
 
 =head1 OTHER INFORMATION
 
@@ -2447,6 +2670,24 @@ VM::EC2::Generic's as_string() method:
 
 This will give you a Data::Dumper representation of the XML after it
 has been parsed.
+
+The suggested way to override the dispatch table is from within a
+subclass of VM::EC2:
+ 
+ package 'VM::EC2New';
+ use base 'VM::EC2';
+  sub new {
+      my $self=shift;
+      VM::EC2::Dispatch->add_override('call_name_1'=>\&subroutine1).
+      VM::EC2::Dispatch->add_override('call_name_2'=>\&subroutine2).
+      $self->SUPER::new(@_);
+ }
+
+=head1 DEVELOPING
+
+The git source for this library can be found at ...? Please fork a
+copy and send pull requets, or contact the author for commit
+privileges.
 
 =head1 SEE ALSO
 

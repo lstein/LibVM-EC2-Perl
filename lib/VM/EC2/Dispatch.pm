@@ -119,6 +119,7 @@ use constant ObjectRegistration => {
 	my $image_id = $data->{imageId} or return;
 	return $aws->describe_images($image_id);
     },
+    DeregisterImage      => 'boolean',
     DescribeAddresses => 'fetch_items,addressesSet,VM::EC2::ElasticAddress',
     AssociateAddress  => sub {
 	my $data = shift;

@@ -215,7 +215,7 @@ sub register_image {
 
     # just cleaning up, not really necessary
     delete $args{-root_size};
-    delete $args(-root_delete_on_termination};
+    delete $args{-root_delete_on_termination};
 
     return $self->aws->register_image(%args);
 }

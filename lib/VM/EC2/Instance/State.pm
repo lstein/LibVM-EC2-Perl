@@ -79,4 +79,10 @@ sub new {
 sub code { ${shift()}->{code} }
 sub name { ${shift()}->{name} }
 
+sub invalid_state {
+    my $self = shift;
+    my $aws  = shift;
+    return $self->new({code=>undef,name=>'invalid'},$aws);
+}
+
 1;

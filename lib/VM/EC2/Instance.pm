@@ -21,7 +21,7 @@ VM::EC2::Instance - Object describing an Amazon EC2 instance
   $public_ip     = $instance->ipAddress;
   $private_dns   = $instance->privateDnsName;
   $public_dns    = $instance->dnsName;
-  $time          = $instance->runTime;
+  $time          = $instance->launchTime;
   $status        = $instance->current_status;
   $tags          = $instance->tags;
 
@@ -29,6 +29,8 @@ VM::EC2::Instance - Object describing an Amazon EC2 instance
   $stateChange = $instance->stop();
   $stateChange = $instance->reboot();
   $stateChange = $instance->terminate();
+
+  $seconds       = $instance->up_time;
 
 =head1 DESCRIPTION
 
@@ -187,6 +189,10 @@ poll the instance until it is in the desired state:
 
  while ($instance->current_status eq 'pending') { sleep 5 }
 
+=head2 $state = $instance->current_state
+
+An alias for current_status().
+
 =head2 $state_change = $instance->start([$wait])
 
 This method will start the current instance and returns a
@@ -223,6 +229,12 @@ are either "running" or "stopped".
 Reboot the instance. Rebooting doesn't occur immediately; instead the
 request is queued by the Amazon system and may be satisfied several
 minutes later. For this reason, there is no "wait" argument.
+
+=head2 $seconds = $instance->up_time()
+
+Return the number of seconds since the instance was launched. Note
+that this includes time that the instance was either in the "running"
+or "stopped" state.
 
 =head2 $result = $instance->associate_address($elastic_address)
 
@@ -578,11 +590,12 @@ sub current_status {
     my $self = shift;
     my ($i)  = $self->aws->describe_instances(-instance_id=>$self->instanceId);
     $i or croak "invalid instance: ",$self->instanceId;
-    $self->refresh($i);
+    $self->refresh($i) or return VM::EC2::Instance::State->invalid_state($self->aws);
     return $i->instanceState;
 }
 
-sub status { shift->current_status } # legacy
+sub current_state { shift->current_status } # alias
+sub status        { shift->current_status } # legacy
 
 sub start {
     my $self = shift;
@@ -641,6 +654,14 @@ sub reboot {
     my $s    = $self->current_status;
     croak "Can't reboot $self: run state=$s"unless $s eq 'running';
     return $self->aws->reboot_instances($self);
+}
+
+sub upTime {
+    my $self = shift;
+    my $start = $self->launchTime;
+    VM::EC2::Dispatch::load_module('Date::Parse');
+    my $sec = Date::Parse::str2time($start);
+    return time()-$sec;
 }
 
 sub associate_address {
