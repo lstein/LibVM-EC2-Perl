@@ -118,7 +118,7 @@ sub new {
     @_ >= 2 or croak "Usage: $self->new(\$data,\$ec2)";
     my ($data,$ec2,$xmlns,$requestid) = @_;
     return bless {data => $data,
-		  ec2  => $ec2,
+		  aws  => $ec2,
 		  xmlns => $xmlns,
 		  requestId => $requestid
     },ref $self || $self;
@@ -135,8 +135,8 @@ be called as either ec2() (preferred) or aws() (deprecated).
 
 sub ec2 {
     my $self = shift;
-    my $d    = $self->{ec2};
-    $self->{ec2} = shift if @_;
+    my $d    = $self->{aws};
+    $self->{aws} = shift if @_;
     $d;
 }
 
@@ -228,7 +228,7 @@ sub tagSet {
 =head2 $boolean = $object->add_tags(\%hash)
 
 Add one or more tags to the object. You may provide either a list of
-tag/value pairs or a hashref. If no tag of the indicated name exists
+tag/value pairs or a hashref. If no tag of the indicated name exsists
 it will be created. If there is already a tag by this name, it will
 be set to the provided value. The result code is true if the Amazon
 resource was successfully updated.

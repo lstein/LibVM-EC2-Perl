@@ -300,7 +300,7 @@ use URI::Escape;
 use VM::EC2::Dispatch;
 use Carp 'croak';
 
-our $VERSION = '0.1';
+our $VERSION = '0.2';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance);
