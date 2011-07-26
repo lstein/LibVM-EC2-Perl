@@ -1,8 +1,8 @@
-package VM::EC2::Placement;
+package VM::EC2::Instance::Placement;
 
 =head1 NAME
 
-VM::EC2::Placement - Object describing an Amazon EC2 instance's placement
+VM::EC2::Instance::Placement - Object describing an Amazon EC2 instance's placement
 
 =head1 SYNOPSIS
 

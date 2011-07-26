@@ -82,7 +82,7 @@ These object methods are supported:
  launchTime     -- The time the instance launched.
 
  placement      -- The placement of the instance. Returns a
-                   VM::EC2::Placement object, which when used
+                   VM::EC2::Instance::Placement object, which when used
                    as a string is equal to the instance's
                    availability zone.
 
@@ -368,9 +368,10 @@ instanceId.
 L<VM::EC2>
 L<VM::EC2::Generic>
 L<VM::EC2::BlockDevice>
-L<VM::EC2::State::Reason>
-L<VM::EC2::State>
+L<VM::EC2::Instance::State>
+L<VM::EC2::Instance::State::Reason>
 L<VM::EC2::Instance::Metadata>
+L<VM::EC2::Instance::Placement>
 L<VM::EC2::Tag>
 
 =head1 AUTHOR
@@ -393,7 +394,7 @@ use VM::EC2::Group;
 use VM::EC2::Instance::State;
 use VM::EC2::Instance::State::Reason;
 use VM::EC2::BlockDevice::Mapping;
-use VM::EC2::Placement;
+use VM::EC2::Instance::Placement;
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Carp 'croak';
 
@@ -492,7 +493,7 @@ sub groupSet {
 sub placement {
     my $self = shift;
     my $p = $self->SUPER::placement or return;
-    return VM::EC2::Placement->new($p,$self->aws,$self->xmlns,$self->requestId);
+    return VM::EC2::Instance::Placement->new($p,$self->aws,$self->xmlns,$self->requestId);
 }
 
 sub monitoring {

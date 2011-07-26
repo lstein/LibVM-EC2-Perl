@@ -150,12 +150,12 @@ END {
 
 sub confirm_payment {
     print STDERR <<END;
-This test will launch one "micro" instance under your Amazon account
-and then terminate it, incurring a one hour runtime charge. This will
-incur a charge of \$0.02 (as of July 2011), which may be covered under 
-the AWS free tier. Also be aware that this test may take a while
-(several minutes) due to tests that launch, start, and stop instances.
-Test 21 creates an image, which also takes a while. Be patient.
+# This test will launch one "micro" instance under your Amazon account
+# and then terminate it, incurring a one hour runtime charge. This will
+# incur a charge of \$0.02 (as of July 2011), which may be covered under 
+# the AWS free tier. Also be aware that this test may take a while
+# (several minutes) due to tests that launch, start, and stop instances.
+# Test 21 creates an image, which also takes a while. Be patient.
 END
 ;
     print STDERR "Do you want to proceed? [Y/n] ";
