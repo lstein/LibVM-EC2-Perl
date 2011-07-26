@@ -157,7 +157,7 @@ snapshot public, a false one to make it private.
 =head2 @user_ids = $image->authorized_users
 
 Returns a list of user IDs with createVolume permissions for this
-snapshot. The result is a list of L<VM::EC2::CreateVolumePermission>
+snapshot. The result is a list of L<VM::EC2::Snapshot::CreateVolumePermission>
 objects, which interpolate as strings corresponding to either the
 user ID, or the group named "all."
 
@@ -213,7 +213,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
-use VM::EC2::CreateVolumePermission;
+use VM::EC2::Snapshot::CreateVolumePermission;
 use Carp 'croak';
 
 sub valid_fields {
@@ -291,7 +291,7 @@ sub current_status {
 
 sub createVolumePermissions {
     my $self = shift;
-    return map {VM::EC2::CreateVolumePermission->new($_,$self->aws)}
+    return map {VM::EC2::Snapshot::CreateVolumePermission->new($_,$self->aws)}
         $self->aws->describe_snapshot_attribute($self->snapshotId,'createVolumePermission');
 }
 

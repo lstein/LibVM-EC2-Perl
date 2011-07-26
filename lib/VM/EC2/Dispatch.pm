@@ -138,7 +138,8 @@ use constant ObjectRegistration => {
     RebootInstances      => 'boolean',
     MonitorInstances     => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
     UnmonitorInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
-    GetConsoleOutput     => 'fetch_one,VM::EC2::ConsoleOutput',
+    GetConsoleOutput     => 'VM::EC2::Instance::ConsoleOutput',
+    GetPasswordData      => 'VM::EC2::Instance::PasswordData',
     DescribeKeyPairs     => 'fetch_items,keySet,VM::EC2::KeyPair',
     CreateKeyPair        => 'VM::EC2::KeyPair',
     ImportKeyPair        => 'VM::EC2::KeyPair',
@@ -264,12 +265,12 @@ L<VM::EC2::BlockDevice>
 L<VM::EC2::BlockDevice::Attachment>
 L<VM::EC2::BlockDevice::Mapping>
 L<VM::EC2::BlockDevice::Mapping::EBS>
-L<VM::EC2::ConsoleOutput>
 L<VM::EC2::Error>
 L<VM::EC2::Generic>
 L<VM::EC2::Group>
 L<VM::EC2::Image>
 L<VM::EC2::Instance>
+L<VM::EC2::Instance::ConsoleOutput>
 L<VM::EC2::Instance::Set>
 L<VM::EC2::Instance::State>
 L<VM::EC2::Instance::State::Change>

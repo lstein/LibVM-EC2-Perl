@@ -699,6 +699,8 @@ sub create_image {
 	my ($name,$description) = @_;
 	$args{-name}         = $name;
 	$args{-description}  = $description if defined $description;
+    } else {
+	%args = @_;
     }
     $args{-name} or croak "Usage: create_image(\$image_name)";
     return $self->aws->create_image(%args,-instance_id=>$self->instanceId);

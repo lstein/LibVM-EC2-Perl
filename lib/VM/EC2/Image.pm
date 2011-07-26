@@ -220,7 +220,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 use VM::EC2::BlockDevice;
-use VM::EC2::LaunchPermission;
+use VM::EC2::Image::LaunchPermission;
 use VM::EC2::Instance::State::Reason;
 
 use Carp 'croak';
@@ -257,7 +257,7 @@ sub blockDeviceMapping {
 
 sub launchPermissions {
     my $self = shift;
-    return map {VM::EC2::LaunchPermission->new($_,$self->aws)}
+    return map {VM::EC2::Image::LaunchPermission->new($_,$self->aws)}
         $self->aws->describe_image_attribute($self->imageId,'launchPermission');
 }
 

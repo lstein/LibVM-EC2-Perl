@@ -305,7 +305,7 @@ use URI::Escape;
 use VM::EC2::Dispatch;
 use Carp 'croak';
 
-our $VERSION = '0.2';
+our $VERSION = '1.0';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance);
@@ -992,6 +992,23 @@ sub wait_for_instances {
 	sleep 3;
 	@pending = grep {!$terminal_state{$_->current_status}} @pending;
     }
+}
+
+=head2 $password_data = $ec2->get_password_data(-instance_id=>'i-12345');
+
+=head2 $password_data = $ec2->get_password_data('i-12345');
+
+For Windows instances, get the administrator's password as a
+L<VM::EC2::Instance::PasswordData> object.
+
+=cut
+
+sub get_password_data {
+    my $self = shift;
+    my %args = $self->args(-instance_id=>@_);
+    $args{-instance_id} or croak "Usage: get_password_data(-instance_id=>\$id)";
+    my @params = $self->single_parm('InstanceId',\%args);
+    return $self->call('GetPasswordData',@params);
 }
 
 =head2 $output = $ec2->get_console_output(-instance_id=>'i-12345')
@@ -2693,7 +2710,7 @@ sub args {
 
 =head1 MISSING METHODS
 
-As of 27 July 2011, the following Amazon API calls had not been implemented:
+As of 27 July 2011, the following Amazon API calls were NOT implemented:
 
 AssociateDhcpOptions
 AssociateRouteTable
@@ -2749,7 +2766,6 @@ DescribeVpnGateways
 DetachInternetGateway
 DetachVpnGateway
 DisassociateRouteTable
-GetPasswordData             * must implement
 ImportInstance
 PurchaseReservedInstancesOffering
 ReplaceNetworkAclAssociation
@@ -2757,7 +2773,6 @@ ReplaceNetworkAclEntry
 ReplaceRoute
 ReplaceRouteTableAssociation
 RequestSpotInstances
-ResetImageAttribute         * must implement
 
 =head1 OTHER INFORMATION
 
@@ -2841,15 +2856,18 @@ L<VM::EC2::Dispatch>
 L<VM::EC2::Generic>
 L<VM::EC2::BlockDevice>
 L<VM::EC2::BlockDevice::Attachment>
+L<VM::EC2::BlockDevice::EBS>
 L<VM::EC2::BlockDevice::Mapping>
 L<VM::EC2::BlockDevice::Mapping::EBS>
-L<VM::EC2::ConsoleOutput>
 L<VM::EC2::Error>
 L<VM::EC2::Generic>
 L<VM::EC2::Group>
 L<VM::EC2::Image>
 L<VM::EC2::Instance>
+L<VM::EC2::Instance::ConsoleOutput>
 L<VM::EC2::Instance::Metadata>
+L<VM::EC2::Instance::MonitoringState>
+L<VM::EC2::Instance::PasswordData>
 L<VM::EC2::Instance::Set>
 L<VM::EC2::Instance::State>
 L<VM::EC2::Instance::State::Change>

@@ -1,4 +1,4 @@
-package VM::EC2::ConsoleOutput;
+package VM::EC2::Instance::ConsoleOutput;
 
 =head1 NAME
 
@@ -66,7 +66,7 @@ use strict;
 use base 'VM::EC2::Generic';
 use MIME::Base64;
 
-use overload '""' => sub {shift()->output},
+use overload '""' => 'output',
     fallback      => 1;
 
 sub valid_fields {

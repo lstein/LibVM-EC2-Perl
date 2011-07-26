@@ -1,16 +1,16 @@
-package VM::EC2::CreateVolumePermission;
+package VM::EC2::Image::LaunchPermission;
 
 =head1 NAME
 
-VM::EC2::Region - Object describing AMI create volume permissions
+VM::EC2::Region - Object describing AMI launch permissions
 
 =head1 SYNOPSIS
 
   use VM::EC2;
 
   $ec2       = VM::EC2->new(...);
-  $snapshot  = $ec2->describe_snapshots('snap-12345');
-  @users     = $image->createVolumePermissions;
+  $image     = $ec2->describe_images('ami-12345');
+  @users     = $image->launchPermissions;
   for (@users) {
     $group = $_->group;
     $user  = $_->userId;
@@ -18,8 +18,8 @@ VM::EC2::Region - Object describing AMI create volume permissions
 
 =head1 DESCRIPTION
 
-This object represents an Amazon volume snapshot create volume
-permission, and is return by VM::EC2::Snapshot createVolumePermissions().
+This object represents an Amazon machine image launch permission, and
+is return by VM::EC2::Image launchPermissions().
 
 =head1 METHODS
 
@@ -38,7 +38,7 @@ userId. If the userId is blank, then interpolates as the group.
 
 L<VM::EC2>
 L<VM::EC2::Generic>
-L<VM::EC2::Snapshot>
+L<VM::EC2::Image>
 
 =head1 AUTHOR
 
@@ -55,7 +55,13 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 =cut
 
 use strict;
-use base 'VM::EC2::LaunchPermission';
+use base 'VM::EC2::Generic';
 
+sub primary_id {my $self = shift; $self->userId || $self->group };
+
+sub valid_fields {
+    my $self = shift;
+    return qw(group userId);
+}
 
 1;
