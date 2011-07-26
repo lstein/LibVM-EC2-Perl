@@ -23,7 +23,7 @@ SKIP: {
 skip "instance tests declined",TEST_COUNT unless confirm_payment();
 setup_environment();
 
-print STDERR "Spinning up an instance (that'll be \$0.02 please)...\n";
+print STDERR "Spinning up an instance...\n";
 
 require_ok('VM::EC2');
 $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");

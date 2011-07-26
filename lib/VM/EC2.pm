@@ -168,20 +168,25 @@ In addition, there are several utility classes:
                                                object.
 
 The interface provided by these modules is based on that described at
-http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ with the
-following differences:
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/. The
+following caveats apply:
 
- 1) For consistency with common Perl coding practices, method calls
+ 1) Not all of the Amazon API is currently implemented. Specifically,
+    calls dealing with Virtual Private Clouds (VPC), cluster management,
+    spot instances, and reserved instances, are not currently supported.
+    See L</MISSING METHODS> for a list of all the unimplemented API calls. 
+
+ 2) For consistency with common Perl coding practices, method calls
     are lowercase and words in long method names are separated by
     underscores. The Amazon API prefers mixed case.  So in the Amazon
     API the call to fetch instance information is "DescribeInstances",
     while in VM::EC2, the method is "describe_instances". To avoid
     annoyance, if you use the mixed case form for a method name, the
     Perl autoloader will automatically translate it to underscores for
-    you, and vice-versa which means you can call either
+    you, and vice-versa; this means you can call either
     $ec2->describe_instances() or $ec2->DescribeInstances().
 
- 2) Named arguments passed to methods are all lowercase, use
+ 3) Named arguments passed to methods are all lowercase, use
     underscores to separate words and start with hyphens.
     In other words, if the AWS API calls for an argument named
     "InstanceId" to be passed to the "DescribeInstances" call, then
@@ -197,7 +202,7 @@ following differences:
     -placement_zone and not -placement_availability_zone. See the
     documentation for these cases.
 
- 3) For each of the describe_foo() methods (where "foo" is a type of
+ 4) For each of the describe_foo() methods (where "foo" is a type of
     resource such as "instance"), you can fetch the resource by using
     their IDs either with the long form:
 
@@ -207,14 +212,14 @@ following differences:
 
           $ec2->describe_foo('a','b','c');
 
- 4) When the API calls for a list of arguments named Arg.1, Arg.2,
+ 5) When the API calls for a list of arguments named Arg.1, Arg.2,
     then the Perl interface allows you to use an anonymous array for
     the consecutive values. For example to call describe_instances()
     with multiple instance IDs, use:
 
        @i = $ec2->describe_instances(-instance_id=>['i-12345','i-87654'])
 
- 5) All Filter arguments are represented as a -filter argument whose value is
+ 6) All Filter arguments are represented as a -filter argument whose value is
     an anonymous hash:
 
        @i = $ec2->describe_instances(-filter=>{architecture=>'i386',
@@ -228,7 +233,7 @@ following differences:
 
     When adding or removing tags, the -tag argument has the same syntax.
 
- 6) The tagnames of each XML object returned from AWS are converted into methods
+ 7) The tagnames of each XML object returned from AWS are converted into methods
     with the same name and typography. So the <privateIpAddress> tag in a
     DescribeInstancesResponse, becomes:
 
@@ -249,7 +254,7 @@ following differences:
       @fields = sort $instance->fields;
       # 'amiLaunchIndex', 'architecture', 'blockDeviceMapping', ...
 
- 7) Whenever an object has a unique ID, string overloading is used so that 
+ 8) Whenever an object has a unique ID, string overloading is used so that 
     the object interpolates the ID into the string. For example, when you
     print a VM::EC2::Volume object, or use it in another string context,
     then it will appear as the string "vol-123456". Nevertheless, it will
@@ -259,7 +264,7 @@ following differences:
          print $v,"\n";                 # prints as "vol-123456"
          $zone = $v->availabilityZone;  # acts like an object
 
- 8) Many objects have convenience methods that invoke the AWS API on your
+ 9) Many objects have convenience methods that invoke the AWS API on your
     behalf. For example, instance objects have a current_status() method that returns
     the run status of the object, as well as start(), stop() and terminate()
     methods that control the instance's lifecycle.
@@ -268,7 +273,7 @@ following differences:
              $instance->stop;
          }
 
- 9) Calls to AWS that have failed for one reason or another (invalid
+ 10) Calls to AWS that have failed for one reason or another (invalid
     parameters, communications problems, service interruptions) will
     return undef and set the VM::EC2->is_error() method to true. The
     error message and its code can then be recovered by calling
@@ -1094,7 +1099,7 @@ sub describe_instance_attribute {
     return $result && $result->attribute($attribute);
 }
 
-=head2 $boolean = $ec2->modify_instance_attribute($instance_id,%param)
+=head2 $boolean = $ec2->modify_instance_attribute($instance_id,-$attribute_name=>$value)
 
 This method changes instance attributes. It can only be applied to stopped instances.
 The following is the list of attributes that can be set:
@@ -1260,7 +1265,7 @@ recommended that you do so. Otherwise the kernel will have to be
 specified for run_instances().
 
 Note: Immediately after registering the image you can add tags to it
-and use modify_image_attributes to change launch permissions, etc.
+and use modify_image_attribute to change launch permissions, etc.
 
 =cut
 
@@ -1299,7 +1304,6 @@ sub deregister_image {
 
 =head2 @data = $ec2->describe_image_attribute($image_id,$attribute)
 
-
 This method returns image attributes. Only one attribute can be
 retrieved at a time. The following is the list of attributes that can be
 retrieved:
@@ -1333,10 +1337,13 @@ sub describe_image_attribute {
     return $result && $result->attribute($attribute);
 }
 
-=head2 $boolean = $ec2->modify_image_attribute($image_id,%param)
+=head2 $boolean = $ec2->modify_image_attribute($image_id,-$attribute_name=>$value)
 
-This method changes image attributes. The following is the list of
-attributes that can be set:
+This method changes image attributes. The first argument is the image
+ID, and this is followed by the attribute name and the value to change
+it to.
+
+The following is the list of attributes that can be set:
 
  -launch_add_user         -- scalar or arrayref of UserIds to grant launch permissions to
  -launch_add_group        -- scalar or arrayref of Groups to remove launch permissions from
@@ -1345,6 +1352,9 @@ attributes that can be set:
  -launch_remove_group     -- scalar or arrayref of Groups to remove from launch permissions
  -product_code            -- scalar or array of product codes to add
  -description             -- scalar new description
+
+You can abbreviate the launch permission arguments to -add_user,
+-add_group, -remove_user, -remove_group, etc.
 
 Only one attribute can be changed in a single request.
 
@@ -1368,9 +1378,15 @@ Also see L<VM::EC2::Image> for shortcut methods. For example:
 
 sub modify_image_attribute {
     my $self = shift;
-    my $instance_id = shift or croak "Usage: modify_image_attribute(\$instanceId,%param)";
+    my $image_id = shift or croak "Usage: modify_image_attribute(\$imageId,%param)";
     my %args   = @_;
-    my @param  = (ImageId=>$instance_id);
+
+    # shortcuts
+    foreach (qw(add_user remove_user add_group remove_group)) {
+	$args{"-launch_$_"} ||= $args{"-$_"};
+    }
+
+    my @param  = (ImageId=>$image_id);
     push @param,$self->value_parm('Description',\%args);
     push @param,$self->list_parm('ProductCode',\%args);
     push @param,$self->launch_perm_parm('Add','UserId',$args{-launch_add_user});
@@ -1378,6 +1394,28 @@ sub modify_image_attribute {
     push @param,$self->launch_perm_parm('Add','Group',$args{-launch_add_group});
     push @param,$self->launch_perm_parm('Remove','Group',$args{-launch_remove_group});
     return $self->call('ModifyImageAttribute',@param);
+}
+
+=head2 $boolean = $ec2->reset_image_attribute($image_id,$attribute_name)
+
+This method resets an attribute of the given snapshot to its default
+value. The valid attributes are:
+
+ launchPermission
+
+
+=cut
+
+sub reset_image_attribute {
+    my $self = shift;
+    @_      == 2 or 
+	croak "Usage: reset_image_attribute(\$imageId,\$attribute_name)";
+    my ($image_id,$attribute) = @_;
+    my %valid = map {$_=>1} qw(launchPermission);
+    $valid{$attribute} or croak "attribute to reset must be one of ",join(' ',map{"'$_'"} keys %valid);
+    return $self->call('ResetImageAttribute',
+		       ImageId    => $image_id,
+		       Attribute  => $attribute);
 }
 
 =head1 EC2 VOLUMES AND SNAPSHOTS
@@ -1575,6 +1613,90 @@ sub describe_snapshots {
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeSnapshots',@params);
 }
+
+=head2 @data = $ec2->describe_snapshot_attribute($snapshot_id,$attribute)
+
+This method returns snapshot attributes. The first argument is the
+snapshot ID, and the second is the name of the attribute to
+fetch. Currently Amazon defines only one attribute,
+"createVolumePermission", which will return a list of user Ids who are
+allowed to create volumes from this snapshot.
+
+The result is a raw hash of attribute values. Please see
+L<VM::EC2::Snapshot> for a more convenient way of accessing and
+modifying snapshot attributes.
+
+=cut
+
+sub describe_snapshot_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_snapshot_attribute(\$instance_id,\$attribute_name)";
+    my ($snapshot_id,$attribute) = @_;
+    my @param  = (SnapshotId=>$snapshot_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeSnapshotAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+=head2 $boolean = $ec2->modify_snapshot_attribute($snapshot_id,-$argument=>$value)
+
+This method changes snapshot attributes. The first argument is the
+snapshot ID, and this is followed by an attribute modification command
+and the value to change it to.
+
+Currently the only attribute that can be changed is the
+createVolumeAttribute. This is done through the following arguments
+
+ -createvol_add_user         -- scalar or arrayref of UserIds to grant create volume permissions to
+ -createvol_add_group        -- scalar or arrayref of Groups to remove create volume permissions from
+                               (only currently valid value is "all")
+ -createvol_remove_user      -- scalar or arrayref of UserIds to remove from create volume permissions
+ -createvol_remove_group     -- scalar or arrayref of Groups to remove from create volume permissions
+
+You can abbreviate these to -add_user, -add_group, -remove_user, -remove_group, etc.
+
+See L<VM::EC2::Snapshot> for more convenient methods for interrogating
+and modifying the create volume permissions.
+
+=cut
+
+sub modify_snapshot_attribute {
+    my $self = shift;
+    my $snapshot_id = shift or croak "Usage: modify_snapshot_attribute(\$snapshotId,%param)";
+    my %args   = @_;
+
+    # shortcuts
+    foreach (qw(add_user remove_user add_group remove_group)) {
+	$args{"-createvol_$_"} ||= $args{"-$_"};
+    }
+
+    my @param  = (SnapshotId=>$snapshot_id);
+    push @param,$self->create_volume_perm_parm('Add','UserId',$args{-createvol_add_user});
+    push @param,$self->create_volume_perm_parm('Remove','UserId',$args{-createvol_remove_user});
+    push @param,$self->create_volume_perm_parm('Add','Group',$args{-createvol_add_group});
+    push @param,$self->create_volume_perm_parm('Remove','Group',$args{-createvol_remove_group});
+    return $self->call('ModifySnapshotAttribute',@param);
+}
+
+=head2 $boolean = $ec2->reset_snapshot_attribute($snapshot_id,$attribute)
+
+This method resets an attribute of the given snapshot to its default
+value. The only valid attribute at this time is
+"createVolumePermission."
+
+=cut
+
+sub reset_snapshot_attribute {
+    my $self = shift;
+    @_      == 2 or 
+	croak "Usage: reset_snapshot_attribute(\$snapshotId,\$attribute_name)";
+    my ($snapshot_id,$attribute) = @_;
+    my %valid = map {$_=>1} qw(createVolumePermission);
+    $valid{$attribute} or croak "attribute to reset must be 'createVolumePermission'";
+    return $self->call('ResetSnapshotAttribute',
+		       SnapshotId => $snapshot_id,
+		       Attribute  => $attribute);
+}
+
 
 =head2 $snapshot = $ec2->create_snapshot($volume_id)
 
@@ -1832,6 +1954,10 @@ the VM::EC2 instance was created. The way this is done is to fetch the
 return its groupId field. The result is cached so that subsequent
 accesses are fast.
 
+=head2 $account_id = $ec2->userId
+
+Same as above, for convenience.
+
 =cut
 
 sub account_id {
@@ -1840,6 +1966,8 @@ sub account_id {
     my $sg   = $self->describe_security_groups(-group_name=>'default') or return;
     return $self->{account_id} ||= $sg->ownerId;
 }
+
+sub userId { shift->account_id }
 
 =head2 @keys = $ec2->describe_key_pairs(-key_name => \@names,
                                    -filter    => \%filters);
@@ -2363,11 +2491,25 @@ sub launch_perm_parm {
     my $self = shift;
     my ($prefix,$suffix,$value) = @_;
     return unless defined $value;
+    $self->_perm_parm('LaunchPermission',$prefix,$suffix,$value);
+}
+
+sub create_volume_perm_parm {
+    my $self = shift;
+    my ($prefix,$suffix,$value) = @_;
+    return unless defined $value;
+    $self->_perm_parm('CreateVolumePermission',$prefix,$suffix,$value);
+}
+
+sub _perm_parm {
+    my $self = shift;
+    my ($base,$prefix,$suffix,$value) = @_;
+    return unless defined $value;
     my @list = ref $value && ref $value eq 'ARRAY' ? @$value : $value;
     my $c = 1;
     my @param;
     for my $v (@list) {
-	push @param,("LaunchPermission.$prefix.$c.$suffix" => $v);
+	push @param,("$base.$prefix.$c.$suffix" => $v);
 	$c++;
     }
     return @param;
@@ -2597,7 +2739,6 @@ DescribePlacementGroups
 DescribeReservedInstances
 DescribeReservedInstancesOfferings
 DescribeRouteTables
-DescribeSnapshotAttribute      * need to implement
 DescribeSpotDatafeedSubscription
 DescribeSpotInstanceRequests
 DescribeSpotPriceHistory
@@ -2610,7 +2751,6 @@ DetachVpnGateway
 DisassociateRouteTable
 GetPasswordData             * must implement
 ImportInstance
-ModifySnapshotAttribute     * must implement
 PurchaseReservedInstancesOffering
 ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
@@ -2618,7 +2758,6 @@ ReplaceRoute
 ReplaceRouteTableAssociation
 RequestSpotInstances
 ResetImageAttribute         * must implement
-ResetSnapshotAttribute      # must implement
 
 =head1 OTHER INFORMATION
 
@@ -2685,9 +2824,15 @@ subclass of VM::EC2:
 
 =head1 DEVELOPING
 
-The git source for this library can be found at ...? Please fork a
-copy and send pull requets, or contact the author for commit
-privileges.
+The git source for this library can be found at https://github.com/lstein/LibVM-EC2-Perl,
+To contribute to development, please obtain a github account and then either:
+ 
+ 1) Fork a copy of the repository, make your changes against this repository, 
+    and send a pull request to me to incorporate your changes.
+
+ 2) Contact me by email and ask for push privileges on the repository.
+
+See http://help.github.com/ for help getting started.
 
 =head1 SEE ALSO
 

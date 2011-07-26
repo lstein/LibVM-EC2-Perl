@@ -21,10 +21,13 @@ VM::EC2::Snapshot - Object describing an Amazon EBS snapshot
       $tags  = $snap->tags;
   }
 
-  # use a snapshot as the root device for a new AMI
-  $ami = $snap->register_image(-name         => 'My new image',
+ # use a snapshot as the root device for a new AMI
+ $ami = $snap->register_image(-name         => 'My new image',
                                -kernel_id    => 'aki-407d9529',
                                -architecture => 'i386');
+
+ #create a volume from the snapshot
+ $vol = $snap->create_volume(-zone => 'us-east-1a');
 
 =head1 DESCRIPTION
 
@@ -120,9 +123,62 @@ current_status() method to poll its availability:
 
   print "$ami is ready to go\n";
 
+=head2 $volume = $snap->create_volume(%args)
+
+Create a new volume from this snapshot. Arguments are:
+
+ -availability_zone    -- An availability zone from
+                          describe_availability_zones (required)
+
+ -size                 -- Size of the volume, in GB (between 1 and 1024).
+
+If -size is not provided, then the new volume will have the same size as
+the snapshot. 
+
+On success, the returned value is a L<VM::EC2::Volume> object.
+
 =head2 $status = $snap->current_status
 
 Refreshes the snapshot and returns its current status.
+
+=head2 $boolean = $snapshot->is_public
+
+Return true if the snapshot's createVolume permissions allow the "all"
+group to create volumes from the snapshot.
+
+=head2 $boolean = $snapshot->make_public($public)
+
+Modify the createVolumePermission attribute to allow the "all" group
+to create volumes from this snapshot. Provide a true value to make the
+snapshot public, a false one to make it private.
+
+=head2 @user_ids = $image->createVolumePermissions()
+
+=head2 @user_ids = $image->authorized_users
+
+Returns a list of user IDs with createVolume permissions for this
+snapshot. The result is a list of L<VM::EC2::CreateVolumePermission>
+objects, which interpolate as strings corresponding to either the
+user ID, or the group named "all."
+
+The two methods are aliases of each other.
+
+=head2 $boolean = $image->add_authorized_users($id1,$id2,...)
+
+=head2 $boolean = $image->remove_authorized_users($id1,$id2,...)
+
+=head2 $boolean = $image->reset_authorized_users
+
+These methods add and remove user accounts which have createVolume
+permissions for the snapshot. The result code indicates whether the
+list of user IDs were successfully added or removed. To add the "all"
+group, use make_public().
+
+reset_authorized_users() resets the list users authored to create
+volumes from this snapshot to empty, effectively granting volume
+creation to the owner only.
+
+See also authorized_users().
 
 =head2 $snap->refresh
 
@@ -157,6 +213,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
+use VM::EC2::CreateVolumePermission;
 use Carp 'croak';
 
 sub valid_fields {
@@ -220,9 +277,58 @@ sub register_image {
     return $self->aws->register_image(%args);
 }
 
+sub create_volume {
+    my $self = shift;
+    my @args = @_;
+    return $self->ec2->create_volume(@args,-snapshot_id=>$self->snapshotId);
+}
+
 sub current_status {
     my $self = shift;
     $self->refresh;
     return $self->status;
 }
+
+sub createVolumePermissions {
+    my $self = shift;
+    return map {VM::EC2::CreateVolumePermission->new($_,$self->aws)}
+        $self->aws->describe_snapshot_attribute($self->snapshotId,'createVolumePermission');
+}
+
+sub is_public {
+    my $self  = shift;
+    my @users = $self->createVolumePermissions;
+    my $count = grep {$_->group eq 'all'} @users;
+    return $count > 0;
+}
+
+sub make_public {
+    my $self = shift;
+    @_ == 1 or croak "Usage: VM::EC2::Snapshot->make_public(\$boolean)";
+    my $public = shift;
+    my @arg    = $public ? (-add_group=>'all') : (-remove_group=>'all');
+    my $result = $self->aws->modify_snapshot_attribute($self->snapshotId,@arg) or return;
+    return $result
+}
+
+sub authorized_users { shift->createVolumePermissions }
+
+sub add_authorized_users {
+    my $self = shift;
+    @_ or croak "Usage: VM::EC2::Snapshot->add_authorized_users(\@userIds)";
+    return $self->aws->modify_snapshot_attribute($self->snapshotId,-add_user=>\@_);
+}
+
+sub remove_authorized_users {
+    my $self = shift;
+    @_ or croak "Usage: VM::EC2::Snapshot->remove_authorized_users(\@userIds)";
+    return $self->aws->modify_snapshot_attribute($self->snapshotId,-remove_user=>\@_);
+}
+
+sub reset_authorized_users {
+    my $self = shift;
+    $self->aws->reset_snapshot_attribute($self->snapshotId,'createVolumePermission');
+}
+
+
 1;

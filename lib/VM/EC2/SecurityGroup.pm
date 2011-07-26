@@ -55,11 +55,12 @@ The following object methods are supported:
  ipPermissions    -- A list of rules that govern incoming connections
                      to instances running under this security group.
                      Each rule is a
-                     VM::EC2::SecurityGroup::IpPermission object.
+                     L<VM::EC2::SecurityGroup::IpPermission> object.
  ipPermissionsEgress -- A list of rules that govern outgoing connections
                      from instances running under this security group.
                      Each rule is a
-                     VM::EC2::SecurityGroup::IpPermission object.
+                     L<VM::EC2::SecurityGroup::IpPermission object>.
+                     This field is only valid for VPC groups.
  tags             -- Hashref containing tags associated with this group.
                      See L<VM::EC2::Generic>. 
 
@@ -235,14 +236,30 @@ sub outbound_permissions { shift->ipPermissionsEgress }
 sub ipPermissions {
     my $self = shift;
     my $p    = $self->SUPER::ipPermissions or return;
-    return map { VM::EC2::SecurityGroup::IpPermission->new($_,$self->aws,$self->xmlns,$self->requestId)} @{$p->{item}};
+    my @p = map { VM::EC2::SecurityGroup::IpPermission->new($_,
+							    $self->aws,
+							    $self->xmlns,
+							    $self->requestId)
+    } @{$p->{item}};
+    
+    # tell ip permissions about the owner -- needed for the
+    # group name string.
+    my $owner = $self->ownerId;
+    foreach (@p) {$_->ownerId($owner)}
+    return @p;
 }
 
 sub ipPermissionsEgress {
     my $self = shift;
     my $p    = $self->SUPER::ipPermissionsEgress or return;
-    return map { VM::EC2::SecurityGroup::IpPermission->new($_,$self->aws,$self->xmlns,$self->requestId)} 
+    my @p    = map { VM::EC2::SecurityGroup::IpPermission->new($_,$self->aws,$self->xmlns,$self->requestId)} 
            @{$p->{item}};
+
+    # tell ip permissions about the owner -- needed for the
+    # group name string.
+    my $owner = $self->ownerId;
+    foreach (@p) {$_->ownerId($owner)}
+    return @p;
 }
 
 # generate a hash of the ingress permissions, for use in modification
@@ -368,7 +385,9 @@ sub _new_permission {
     foreach (@addresses) { $_ = '0.0.0.0/0' if $_ eq 'any' }
     $data->{ipRanges}{item} = [map {{cidrIp=>$_}} @addresses] if @addresses;
 
-    return VM::EC2::SecurityGroup::IpPermission->new($data,$self->aws);
+    my $sg = VM::EC2::SecurityGroup::IpPermission->new($data,$self->aws);
+    $sg->ownerId($self->ownerId);
+    return $sg;
 }
 
 

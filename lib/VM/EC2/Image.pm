@@ -153,7 +153,7 @@ image. Note that the AWS API calls this
 "launchPermission", but this module makes it plural to emphasize that
 the result is a list.
 
-=head2 @user_ids = $image->authorized_permissions
+=head2 @user_ids = $image->authorized_users
 
 The same as launchPermissions.
 
@@ -163,8 +163,25 @@ The same as launchPermissions.
 
 These methods add and remove user accounts which have launch
 permissions for the image. The result code indicates whether the list
-of user IDs were successfully added or removed. See also
-launchPermissions().
+of user IDs were successfully added or removed.
+
+=head2 $boolean = $image->add_authorized_users($id1,$id2,...)
+
+=head2 $boolean = $image->remove_authorized_users($id1,$id2,...)
+
+=head2 $boolean = $image->reset_authorized_users
+
+These methods add and remove user accounts which have launch
+permissions for the image. The result code indicates whether the list
+of user IDs were successfully added or removed.
+
+reset_authorized_users() resets the list users authored to launch
+instances from this image to empty, effectively granting launch
+privileges to the owner only.
+
+See also authorized_users().
+
+
 
 =head2 $image->refresh
 
@@ -271,6 +288,11 @@ sub remove_authorized_users {
     my $self = shift;
     @_ or croak "Usage: VM::EC2::Image->remove_authorized_users(\@userIds)";
     return $self->aws->modify_image_attribute($self->imageId,-launch_remove_user=>\@_);
+}
+
+sub reset_authorized_users {
+    my $self = shift;
+    $self->aws->reset_image_attribute($self->imageId,'launchPermission');
 }
 
 sub run_instances {
