@@ -1,15 +1,12 @@
 This is an interface to Amazon EC2 REST tools that follows the
 2011-05-15 API. I created it because I needed access to the Tag and
 TagSet interfaces, and neither euca2ools nor Net::Amazon::EC2 provided
-this functionality.
+this functionality. The core Amazon API is supported, but support for
+VPC, clusters, spot instances and reserved instances is incomplete.
 
 The module provides an extensible object-oriented interface as
 illustrated by the following code:
 
- # set environment variables EC2_ACCESS_KEY, EC2_SECRET_KEY and/or EC2_URL
- # to fill in arguments automatically
-
- ## IMAGE AND INSTANCE MANAGEMENT
  # get new EC2 object
  my $ec2 = VM::EC2->new(-access_key => 'access key id',
                         -secret_key => 'aws_secret_key',
@@ -50,18 +47,10 @@ illustrated by the following code:
 
  # stop both instances
  foreach (@instances) {$_->stop}
- 
- # find instances tagged with Role=Server that are
- # stopped, change the user data and restart.
- @instances = $ec2->describe_instances({'tag:Role'       => 'Server',
-                                        'run-state-name' => 'stopped'});
- for my $i (@instances) {
-    $i->userData('Secure-mode: off');
-    $i->start or warn "Couldn't start $i: ",$i->error_str;
- }
 
- # create an image from both instance, tag them, and make
- # them public
+ $ec2->wait_for_instances(@instances); # wait till they stop
+ 
+ # create an image from both instance, tag them, and make them public
  for my $i (@instances) {
      my $img = $i->create_image("Autoimage from $i","Test image");
      $img->add_tags(Name  => "Autoimage from $i",
@@ -70,71 +59,15 @@ illustrated by the following code:
      $img->make_public(1);
  }
 
- ## KEY MANAGEMENT
+Development and bug reports
+---------------------------
 
- # retrieve the name and fingerprint of the first instance's 
- # key pair
- my $kp = $instances[0]->keyPair;
- print $instances[0], ": keypair $kp=",$kp->fingerprint,"\n";
+This module is supported using GitHub at
+https://github.com/lstein/LibVM-EC2-Perl. To report a bug please open
+the Issues tag and file a bug report using the "New Issue" button.
 
- # create a new key pair
- $kp = $ec2->create_key_pair('My Key');
- 
- # get the private key from this key pair and write it to a disk file
- # in ssh-compatible format
- my $private_key = $kp->private_key;
- open (my $f,'>MyKeypair.rsa') or die $!;
- print $f $private_key;
- close $f;
-
- # Import a preexisting SSH key
- my $public_key = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC8o...';
- $key = $ec2->import_key_pair('NewKey',$public_key);
-
- ## SECURITY GROUPS AND FIREWALL RULES
- # Create a new security group
- my $group = $ec2->create_security_group(-name        => 'NewGroup',
-                                         -description => 'example');
-
- # Add a firewall rule 
- $group->authorize_incoming(-protocol  => 'tcp',
-                            -port      => 80,
-                            -source_ip => ['192.168.2.0/24','192.168.2.1/24'});
-
- # Write rules back to Amazon
- $group->update;
-
- # Print current firewall rules
- print join ("\n",$group->ipPermissions),"\n";
-
- ## VOLUME && SNAPSHOT MANAGEMENT
-
- # find existing volumes that are available
- my @volumes = $ec2->describe_volumes({status=>'available'});
-
- # back 'em all up to snapshots
- foreach (@volumes) {$_->snapshot('Backup on '.localtime)}
-
- # find a stopped instance in first volume's availability zone and 
- # attach the volume to the instance using /dev/sdg
- my $vol  = $volumes[0];
- my $zone = $vol->availabilityZone;
- @instances = $ec2->describe_instances({'availability-zone'=> $zone,
-                                        'run-state-name'   => $stopped);
- $instances[0]->attach_volume($vol=>'/dev/sdg') if @instances;
-
- # create a new 20 gig volume
- $vol = $ec2->create_volume(-availability_zone=> 'us-east-1a',
-                            -size             =>  20);
- while ($vol->current_status eq 'creating') { sleep 2; }
- print "Volume $vol is ready!\n" if $vol->current_status eq 'available';
-
- # create a new elastic address and associate it with an instance
- my $address = $ec2->allocate_address();
- $instances[0]->associate_address($address);
-
-The git source for this library can be found at https://github.com/lstein/LibVM-EC2-Perl,
-To contribute to development, please obtain a github account and then either:
+To contribute to development of this module, please obtain a github
+account for yourself and then either:
  
  1) Fork a copy of the repository, make your changes against this repository, 
     and send a pull request to me to incorporate your changes.

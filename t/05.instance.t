@@ -73,14 +73,14 @@ $volume->add_tag(Name=>'Test volume created by VM::EC2');
 ok($volume,'volume creation');
 
 my $cnt = 0;
-while ($cnt++ < 10 && $volume->current_status eq 'creating') { sleep 2 }
+while ($cnt++ < 20 && $volume->current_status eq 'creating') { sleep 2 }
 SKIP: {
     skip "could not create a new volume, status was ".$volume->current_status,6
 	unless $volume->current_status eq 'available';
     my $a = $instance->attach_volume($volume => '/dev/sdg1');
     ok($a,'attach()');
     $cnt = 0;
-    while ($cnt++ < 10 && $a->current_status ne 'attached') { sleep 2 }
+    while ($cnt++ < 20 && $a->current_status ne 'attached') { sleep 2 }
     is($a->current_status,'attached','attach volume to instance');
     is($volume->current_status,'in-use','volume reports correct attachment');
     ok($volume->detach,'detach volume from instance');
