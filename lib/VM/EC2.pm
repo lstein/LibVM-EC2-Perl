@@ -175,7 +175,7 @@ following caveats apply:
 
  1) Not all of the Amazon API is currently implemented. Specifically,
     calls dealing with Virtual Private Clouds (VPC), cluster management,
-    spot instances, and reserved instances, are not currently supported.
+    and spot instances are not currently supported.
     See L</MISSING METHODS> for a list of all the unimplemented API calls. 
 
  2) For consistency with common Perl coding practices, method calls
@@ -306,7 +306,7 @@ use URI;
 use URI::Escape;
 use VM::EC2::Dispatch;
 use VM::EC2::Error;
-use Carp 'croak';
+use Carp 'croak','carp';
 
 our $VERSION = '1.0';
 our $AUTOLOAD;
@@ -1431,10 +1431,10 @@ sub modify_image_attribute {
     my @param  = (ImageId=>$image_id);
     push @param,$self->value_parm('Description',\%args);
     push @param,$self->list_parm('ProductCode',\%args);
-    push @param,$self->launch_perm_parm('Add','UserId',$args{-launch_add_user});
+    push @param,$self->launch_perm_parm('Add','UserId',   $args{-launch_add_user});
     push @param,$self->launch_perm_parm('Remove','UserId',$args{-launch_remove_user});
-    push @param,$self->launch_perm_parm('Add','Group',$args{-launch_add_group});
-    push @param,$self->launch_perm_parm('Remove','Group',$args{-launch_remove_group});
+    push @param,$self->launch_perm_parm('Add','Group',    $args{-launch_add_group});
+    push @param,$self->launch_perm_parm('Remove','Group', $args{-launch_remove_group});
     return $self->call('ModifyImageAttribute',@param);
 }
 
@@ -1712,10 +1712,10 @@ sub modify_snapshot_attribute {
     }
 
     my @param  = (SnapshotId=>$snapshot_id);
-    push @param,$self->create_volume_perm_parm('Add','UserId',$args{-createvol_add_user});
+    push @param,$self->create_volume_perm_parm('Add','UserId',   $args{-createvol_add_user});
     push @param,$self->create_volume_perm_parm('Remove','UserId',$args{-createvol_remove_user});
-    push @param,$self->create_volume_perm_parm('Add','Group',$args{-createvol_add_group});
-    push @param,$self->create_volume_perm_parm('Remove','Group',$args{-createvol_remove_group});
+    push @param,$self->create_volume_perm_parm('Add','Group',    $args{-createvol_add_group});
+    push @param,$self->create_volume_perm_parm('Remove','Group', $args{-createvol_remove_group});
     return $self->call('ModifySnapshotAttribute',@param);
 }
 
@@ -2373,6 +2373,136 @@ sub disassociate_address {
     return $self->call('DisassociateAddress',@param);
 }
 
+=head1 RESERVED INSTANCES
+
+These methods apply to describing, purchasing and using Reserved Instances.
+
+=head2 @offerings = $ec2->describe_reserved_instances_offerings(@offering_ids)
+
+=head2 @offerings = $ec2->describe_reserved_instances_offerings(%args)
+
+This method returns a list of the reserved instance offerings
+currently available for purchase. The arguments allow you to filter
+the offerings according to a variety of filters. 
+
+All arguments are optional. If no named arguments are used, then the
+arguments are treated as Reserved Instance Offering IDs.
+ 
+ -reserved_instances_offering_id  A scalar or arrayref of reserved
+                                   instance offering IDs
+
+ -instance_type                   The instance type on which the
+                                   reserved instance can be used,
+                                   e.g. "c1.medium"
+
+ -availability_zone, -zone        The availability zone in which the
+                                   reserved instance can be used.
+
+ -product_description             The reserved instance description.
+                                   Valid values are "Linux/UNIX",
+                                   "Linux/UNIX (Amazon VPC)",
+                                   "Windows", and "Windows (Amazon
+                                   VPC)"
+
+ -instance_tenancy                The tenancy of the reserved instance
+                                   offering, either "default" or
+                                   "dedicated". (VPC instances only)
+
+ -filter                          A set of filters to apply.
+
+For available filters, see http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeReservedInstancesOfferings.html.
+
+The returned objects are of type L<VM::EC2::ReservedInstance::Offering>
+
+This can be combined with the Offering purchase() method as shown here:
+
+ @offerings = $ec2->describe_reserved_instances_offerings(
+          {'availability-zone'   => 'us-east-1a',
+           'instance-type'       => 'c1.medium',
+           'product-description' =>'Linux/UNIX',
+           'duration'            => 31536000,  # this is 1 year
+           });
+ $offerings[0]->purchase(5) and print "Five reserved instances purchased\n";
+
+=cut
+
+sub describe_reserved_instances_offerings {
+    my $self = shift;
+    my %args = $self->args('-reserved_instances_offering_id',@_);
+    $args{-availability_zone} ||= $args{-zone};
+    my @param = $self->list_parm('ReservedInstancesOfferingId',\%args);
+    push @param,$self->single_parm('ProductDescription',\%args);
+    push @param,$self->single_parm('InstanceType',\%args);
+    push @param,$self->single_parm('AvailabilityZone',\%args);
+    push @param,$self->single_parm('InstanceTenancy',\%args);  # should initial "i" be upcase?
+    push @param,$self->filter_parm(\%args);
+    return $self->call('DescribeReservedInstancesOfferings',@param);
+}
+
+=head $id = $ec2->purchase_reserved_instances_offering($offering_id)
+
+=head $id = $ec2->purchase_reserved_instances_offering(%args)
+
+Purchase one or more reserved instances based on an offering.
+
+Arguments:
+
+ -reserved_instances_offering_id, -id -- The reserved instance offering ID
+                                         to purchase (required).
+
+ -instance_count, -count              -- Number of instances to reserve
+                                          under this offer (optional, defaults
+                                          to 1).
+
+
+Returns a Reserved Instances Id on success, undef on failure. Also see the purchase() method of
+L<VM::EC2::ReservedInstance::Offering>.
+
+=cut
+
+sub purchase_reserved_instances_offering {
+    my $self = shift;
+    my %args = $self->args('-reserved_instances_offering_id'=>@_);
+    $args{-reserved_instances_offering_id} ||= $args{-id};
+    $args{-reserved_instances_offering_id} or 
+	croak "purchase_reserved_instances_offering(): the -reserved_instances_offering_id argument is required";
+    $args{-instance_count} ||= $args{-count};
+    my @param = $self->single_parm('ReservedInstancesOfferingId',\%args);
+    push @param,$self->single_parm('InstanceCount',\%args);
+    return $self->call('PurchaseReservedInstancesOffering',@param);
+}
+
+=head2 @res_instances = $ec2->describe_reserved_instances(@res_instance_ids)
+
+=head2 @res_instances = $ec2->describe_reserved_instances(%args)
+
+This method returns a list of the reserved instances that you
+currently own.  The information returned includes the type of
+instances that the reservation allows you to launch, the availability
+zone, and the cost per hour to run those reserved instances.
+
+All arguments are optional. If no named arguments are used, then the
+arguments are treated as Reserved Instance  IDs.
+ 
+ -reserved_instances_id -- A scalar or arrayref of reserved
+                            instance IDs
+
+ -filter                -- A set of filters to apply.
+
+For available filters, see http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeReservedInstances.html.
+
+The returned objects are of type L<VM::EC2::ReservedInstance>
+
+=cut
+
+sub describe_reserved_instances {
+    my $self = shift;
+    my %args = $self->args('-reserved_instances_id',@_);
+    my @param = $self->list_parm('ReservedInstancesId',\%args);
+    push @param,$self->filter_parm(\%args);
+    return $self->call('DescribeReservedInstances',@param);
+}
+
 # ------------------------------------------------------------------------------------------
 
 =head1 INTERNAL METHODS
@@ -2424,8 +2554,9 @@ sub value_parm {
     my $self = shift;
     my ($argname,$args) = @_;
     my $name = $self->canonicalize($argname);
-    return unless exists $args->{$name};
-    return ("$argname.Value"=>$args->{$name});
+    return unless exists $args->{$name} || exists $args->{"-$argname"};
+    my $val = $args->{$name} || $args->{"-$argname"};
+    return ("$argname.Value"=>$val);
 }
 
 =head2 @parameters = $ec2->single_parm(ParameterName => \%args)
@@ -2436,8 +2567,9 @@ sub single_parm {
     my $self = shift;
     my ($argname,$args) = @_;
     my $name = $self->canonicalize($argname);
-    return unless exists $args->{$name};
-    my $v = ref $args->{$name}  && ref $args->{$name} eq 'ARRAY' ? $args->{$name}[0] : $args->{$name};
+    my $val  = $args->{$name} || $args->{"-$argname"};
+    defined $val or return;
+    my $v = ref $val  && ref $val eq 'ARRAY' ? $val->[0] : $val;
     return ($argname=>$v);
 }
 
@@ -2451,7 +2583,7 @@ sub list_parm {
     my $name = $self->canonicalize($argname);
 
     my @params;
-    if (my $a = $args->{$name}) {
+    if (my $a = $args->{$name}||$args->{"-$argname"}) {
 	my $c = 1;
 	for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
 	    push @params,("$argname.".$c++ => $_);
@@ -2502,7 +2634,7 @@ sub key_value_parameters {
     my $arg_name     = $self->canonicalize($parameter_name);
     
     my @params;
-    if (my $a = $args->{$arg_name}) {
+    if (my $a = $args->{$arg_name}||$args->{"-$parameter_name"}) {
 	my $c = 1;
 	if (ref $a && ref $a eq 'HASH') {
 	    while (my ($name,$value) = each %$a) {
@@ -2557,7 +2689,6 @@ sub _perm_parm {
     return @param;
 }
 
-
 =head2 @parameters = $ec2->block_device_parm($block_device_mapping_string)
 
 =cut
@@ -2596,8 +2727,9 @@ sub boolean_parm {
     my $self = shift;
     my ($argname,$args) = @_;
     my $name = $self->canonicalize($argname);
-    return unless exists $args->{$name};
-    return ($argname => $args->{$name} ? 'true' : 'false');
+    return unless exists $args->{$name} || exists $args->{$argname};
+    my $val = $args->{$name} || $args->{$argname};
+    return ($argname => $val ? 'true' : 'false');
 }
 
 =head2 $version = $ec2->version()
@@ -2650,7 +2782,7 @@ sub call {
 	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg},$self);
 	}
 	$self->error($error);
-	warn  "$error" if $self->print_error;
+	carp  "$error" if $self->print_error;
 	croak "$error" if $self->raise_error;
 	return;
     }
@@ -2779,8 +2911,6 @@ DescribeCustomerGateways
 DescribeDhcpOptions
 DescribeNetworkAcls
 DescribePlacementGroups
-DescribeReservedInstances
-DescribeReservedInstancesOfferings
 DescribeRouteTables
 DescribeSpotDatafeedSubscription
 DescribeSpotInstanceRequests
@@ -2793,7 +2923,6 @@ DetachInternetGateway
 DetachVpnGateway
 DisassociateRouteTable
 ImportInstance
-PurchaseReservedInstancesOffering
 ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
 ReplaceRoute
@@ -2901,6 +3030,8 @@ L<VM::EC2::Instance::State::Reason>
 L<VM::EC2::KeyPair>
 L<VM::EC2::Region>
 L<VM::EC2::ReservationSet>
+L<VM::EC2::ReservedInstance>
+L<VM::EC2::ReservedInstance::Offering>
 L<VM::EC2::SecurityGroup>
 L<VM::EC2::Snapshot>
 L<VM::EC2::Tag>

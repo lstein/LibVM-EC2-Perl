@@ -91,7 +91,10 @@ SKIP: {
     undef $volume;
 }
 
+$ec2->print_error(0); # avoid deliberate error message
 ok(!$instance->userData('abcdefg'),"don't change user data on running instance");
+$ec2->print_error(1);
+
 print STDERR "# Stopping instance...\n";
 ok($instance->stop('wait'),'stop running instance');
 is($instance->current_status,'stopped','stopped instance reports correct state');
@@ -124,6 +127,8 @@ SKIP: {
 exit 0;
 
 END {
+    $ec2->print_error(0);
+
     if ($instance) {
 	print STDERR "# Terminating $instance...\n";
 	$instance->terminate();

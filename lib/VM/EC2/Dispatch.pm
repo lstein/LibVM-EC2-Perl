@@ -144,6 +144,13 @@ use constant ObjectRegistration => {
     CreateKeyPair        => 'VM::EC2::KeyPair',
     ImportKeyPair        => 'VM::EC2::KeyPair',
     DeleteKeyPair        => 'boolean',
+    DescribeReservedInstancesOfferings 
+	 => 'fetch_items,reservedInstancesOfferingsSet,VM::EC2::ReservedInstance::Offering',
+    DescribeReservedInstances          => 'fetch_items,reservedInstancesSet,VM::EC2::ReservedInstance',
+    PurchaseReservedInstancesOffering  => sub { my ($data,$ec2) = @_;
+						my $ri_id = $data->{reservedInstancesId} or return;
+						return $ec2->describe_reserved_instances($ri_id);
+    },
 };
 
 sub new {
