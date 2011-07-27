@@ -85,7 +85,7 @@ sub cleanup {
 
 END {
     if ($ec2) {
-	print STDERR "deleting test volumes and snapshots...\n";
+	print STDERR "# deleting test volumes and snapshots...\n";
 	cleanup();
     }
 }
