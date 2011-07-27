@@ -1,4 +1,4 @@
-This is an interface to Amazon EC2 REST tools that follows the
+eThis is an interface to Amazon EC2 REST tools that follows the
 2011-05-15 API. I created it because I needed access to the Tag and
 TagSet interfaces, and neither euca2ools nor Net::Amazon::EC2 provided
 this functionality. The core Amazon API is supported, but support for
@@ -77,7 +77,7 @@ account for yourself and then either:
 See http://help.github.com/ for help getting started.
 
 Lincoln D. Stein <lincoln.stein@gmail.com>
-1 August 2011
+26 July 2011
 
 
 
