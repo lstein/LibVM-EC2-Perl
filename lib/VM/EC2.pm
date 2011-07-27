@@ -135,10 +135,12 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is a partial interface to the 2011-05-15 version of the Amazon
-AWS API. It was written provide access to the new tag and metadata
-interface that is not currently supported by Net::Amazon::EC2, as well
-as to provide developers with an extension mechanism for the API.
+This is an interface to the 2011-05-15 version of the Amazon AWS API
+(http://aws.amazon.com/ec2). It was written provide access to the new
+tag and metadata interface that is not currently supported by
+Net::Amazon::EC2, as well as to provide developers with an extension
+mechanism for the API. This library will also support the Eucalyptus
+open source cloud (http://open.eucalyptus.com).
 
 The main interface is the VM::EC2 object, which provides methods for
 interrogating the Amazon EC2, launching instances, and managing
@@ -303,6 +305,7 @@ use POSIX 'strftime';
 use URI;
 use URI::Escape;
 use VM::EC2::Dispatch;
+use VM::EC2::Error;
 use Carp 'croak';
 
 our $VERSION = '1.0';
@@ -337,9 +340,14 @@ Create a new Amazon access object. Required parameters are:
 
  -raise_error  If true, throw an exception.
 
+ -print_error  If true, print errors to STDERR.
+
 One or more of -access_key, -secret_key and -endpoint can be omitted
 if the environment variables EC2_ACCESS_KEY, EC2_SECRET_KEY and
 EC2_URL are defined.
+
+To use a Eucalyptus cloud, please provide the appropriate endpoint
+URL.
 
 By default, when the Amazon API reports an error, such as attempting
 to perform an invalid operation on an instance, the corresponding
@@ -369,12 +377,14 @@ sub new {
     $endpoint_url   .= '/' unless $endpoint_url =~ m!/$!;
 
     my $raise_error  = $args{-raise_error};
+    my $print_error  = $args{-print_error};
     return bless {
 	id              => $id,
 	secret          => $secret,
 	endpoint        => $endpoint_url,
 	idempotent_seed => sha1_hex(rand()),
 	raise_error     => $raise_error,
+	print_error     => $print_error,
     },ref $self || $self;
 }
 
@@ -433,6 +443,21 @@ sub raise_error {
     my $self = shift;
     my $d    = $self->{raise_error};
     $self->{raise_error} = shift if @_;
+    $d;
+}
+
+=head2 $ec2->print_error($boolean)
+
+Change the handling of error conditions. Pass a true value to cause
+Amazon API errors to print error messages to STDERR. Pass false to
+cancel this behavior.
+
+=cut
+
+sub print_error {
+    my $self = shift;
+    my $d    = $self->{print_error};
+    $self->{print_error} = shift if @_;
     $d;
 }
 
@@ -2622,9 +2647,10 @@ sub call {
 	} else {
 	    my $code = $response->status_line;
 	    my $msg  = $response->decoded_content;
-	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg});
+	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg},$self);
 	}
 	$self->error($error);
+	warn  "$error" if $self->print_error;
 	croak "$error" if $self->raise_error;
 	return;
     }

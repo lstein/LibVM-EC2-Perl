@@ -23,7 +23,7 @@ use constant GROUP_DESCRIPTION => 'Test group created by VM::EC2; do not use!!';
 setup_environment();
 
 require_ok('VM::EC2');
-my $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
+my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 
 # in case it was here from a previous invocation
 $ec2->delete_security_group(-name=>GROUP);

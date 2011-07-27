@@ -25,7 +25,7 @@ skip "instance tests declined",TEST_COUNT unless confirm_payment();
 setup_environment();
 
 require_ok('VM::EC2');
-$ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
+$ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 
 cleanup();
 

@@ -18,7 +18,7 @@ use EC2TestSupport;
 setup_environment();
 
 require_ok('VM::EC2');
-my $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
+my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 
 # make a key
 my $kn      = 'VM-EC2 Test Key';

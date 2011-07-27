@@ -34,8 +34,10 @@ lib/VM/EC2/Snapshot.pm
 lib/VM/EC2/Snapshot/CreateVolumePermission.pm
 lib/VM/EC2/Tag.pm
 lib/VM/EC2/Volume.pm
+Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
+META.yml
 README
 t/01.describe.t
 t/02.keypairs.t
@@ -43,5 +45,3 @@ t/03.securitygroup.t
 t/04.volume.t
 t/05.instance.t
 t/lib/EC2TestSupport.pm
-Makefile.PL
-META.yml

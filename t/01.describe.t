@@ -19,7 +19,7 @@ use EC2TestSupport;
 setup_environment();
 
 require_ok('VM::EC2');
-my $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
+my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 ok($ec2,'VM::EC2->new');
 
 my $natty = $ec2->describe_images(TEST_IMAGE);  # defined in t/EC2TestSupport
@@ -94,6 +94,7 @@ ok(@sg>0,'describe_security_groups');
 ok(scalar(grep {$_->name =~ /default/} @sg),'default security group present');
 
 # error handling
+$ec2->print_error(0);
 is($ec2->call('IncorrectAction'),undef,'errors return undef');
 my $error = $ec2->error;
 is($error->code,'InvalidAction','error code on invalid action');

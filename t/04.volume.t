@@ -22,7 +22,7 @@ use constant VOLUME_DESC => 'Delete me!';
 setup_environment();
 
 require_ok('VM::EC2');
-my $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
+my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 
 # in case the test was interrupted earlier
 cleanup();
