@@ -1,3 +1,5 @@
+1.02
+
 1.01  Thu Jul 28 10:32:52 EDT 2011
       - Add -print_error argument to VM::EC2->new.
       - Support for reserved instances.

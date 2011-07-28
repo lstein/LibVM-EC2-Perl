@@ -196,7 +196,12 @@ following caveats apply:
 
          $instance = $ec2->describe_instances(-instance_id=>'i-12345')
 
-    No automatic translation is provided for argument names (sorry).
+    In most cases automatic case translation will be performed for you
+    on arguments. So in the previous example, you could use
+    -InstanceId as well as -instance_id. The exception
+    is when an absurdly long argument name was replaced with an 
+    abbreviated one as described below. In this case, you must use
+    the documented argument name.
 
     In a small number of cases, when the parameter name was absurdly
     long, it has been abbreviated. For example, the
@@ -627,12 +632,7 @@ sub describe_instances {
     my @params;
     push @params,$self->list_parm('InstanceId',\%args);
     push @params,$self->filter_parm(\%args);
-    my @i = $self->call('DescribeInstances',@params) or return;
-    if (!wantarray) { # scalar context
-	return       if @i == 0;
-	return $i[0] if @i == 1;
-    }
-    return @i
+    return $self->call('DescribeInstances',@params) or return;
 }
 
 =head2 @i = $ec2->run_instances(%param)
@@ -816,7 +816,7 @@ sub run_instances {
        qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIPAddress
           InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
     push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
-    push @p,('UserData' =>encode_base64($args{-user_data}))            if $args{-user_data};
+    push @p,('UserData' =>encode_base64($args{-user_data}))           if $args{-user_data};
     push @p,('Placement.AvailabilityZone'=>$args{-availability_zone}) if $args{-placement_zone};
     push @p,('Placement.GroupName'=>$args{-group_name})               if $args{-placement_group};
     push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-placement_tenancy};
