@@ -114,11 +114,13 @@ use constant ObjectRegistration => {
     CreateImage             => sub { 
 	my ($data,$aws) = @_;
 	my $image_id = $data->{imageId} or return;
+	sleep 2; # wait for the thing to register
 	return $aws->describe_images($image_id);
     },
     RegisterImage             => sub { 
 	my ($data,$aws) = @_;
 	my $image_id = $data->{imageId} or return;
+	sleep 2; # wait for the thing to register
 	return $aws->describe_images($image_id);
     },
     DeregisterImage      => 'boolean',

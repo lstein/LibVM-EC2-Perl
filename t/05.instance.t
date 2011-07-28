@@ -9,7 +9,7 @@ use File::Temp qw(tempfile);
 use FindBin '$Bin';
 use lib "$Bin/lib","$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
-use constant TEST_COUNT => 26;
+use constant TEST_COUNT => 27;
 use Test::More tests => TEST_COUNT;
 use EC2TestSupport;
 use constant IMG_NAME => 'Test_Image_from_libVM_EC2';
@@ -118,7 +118,15 @@ SKIP: {
     ok(!$image->is_public,'newly created image not public');
     ok($image->make_public(1),'make image public');
     ok($image->is_public,'image now public');
+    my @block_devices = $image->blockDeviceMapping;
+    ok(@block_devices>0,'block devices defined in image');
+
+    my @snapshots = map {$_->snapshotId} @block_devices;
     ok($ec2->deregister_image($image),'deregister_image');
+
+    foreach (@snapshots) {
+	$ec2->delete_snapshot($_) if $_;
+    }
 }
 
 }  # SKIP
@@ -155,6 +163,7 @@ END {
 
 sub confirm_payment {
     print STDERR <<END;
+
 # This test will launch one "micro" instance under your Amazon account
 # and then terminate it, incurring a one hour runtime charge. This will
 # incur a charge of \$0.02 (as of July 2011), which may be covered under 

@@ -1,8 +1,9 @@
-1.01
+1.01  Thu Jul 28 10:32:52 EDT 2011
       - Add -print_error argument to VM::EC2->new.
       - Support for reserved instances.
+      - Fix test 05 to avoid leaving dangling 1 GB snapshots.
 
-1.0    Tue Jul 26 23:07:47 EDT 2011
+1.00   Tue Jul 26 23:07:47 EDT 2011
        -Core API fully implemented
 
-0.1    -Partial implementation of API.
+0.10  -Partial implementation of API.

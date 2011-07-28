@@ -82,7 +82,7 @@ exit 0;
 
 
 END {
-    print STDERR "deleting test security group...\n";
+    print STDERR "# deleting test security group...\n";
     $ec2->delete_security_group(-name=>GROUP)
 	if $ec2;
 }
