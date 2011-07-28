@@ -238,7 +238,11 @@ following caveats apply:
        @i = $ec2->describe_instances({architecture=>'i386',
                                       'tag:Name'  =>'WebServer'})
 
-    When adding or removing tags, the -tag argument has the same syntax.
+    For any filter, you may represent multiple OR arguments as an arrayref:
+
+      @i = $ec2->describe-instances({'instance-state-name'=>['stopped','terminated']})
+
+    When adding or removing tags, the -tag argument uses the same syntax.
 
  7) The tagnames of each XML object returned from AWS are converted into methods
     with the same name and typography. So the <privateIpAddress> tag in a
@@ -313,7 +317,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.01';
+our $VERSION = '1.02';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -2639,8 +2643,14 @@ sub key_value_parameters {
 	if (ref $a && ref $a eq 'HASH') {
 	    while (my ($name,$value) = each %$a) {
 		push @params,("$parameter_name.$c.$keyname"   => $name);
-		push @params,("$parameter_name.$c.$valuename" => $value)
-		    unless !defined $value && $skip_undef_values;
+		if (ref $value && ref $value eq 'ARRAY') {
+		    for (my $m=1;$m<=@$value;$m++) {
+			push @params,("$parameter_name.$c.$valuename.$m" => $value->[$m-1])
+		    }
+		} else {
+		    push @params,("$parameter_name.$c.$valuename" => $value)
+			unless !defined $value && $skip_undef_values;
+		}
 		$c++;
 	    }
 	} else {
@@ -2795,6 +2805,7 @@ sub call {
     if (!wantarray) { # scalar context
 	return $obj[0] if @obj == 1;
 	return         if @obj == 0;
+	return @obj;
     } else {
 	return @obj;
     }
@@ -2951,14 +2962,51 @@ will need to override the object dispatch mechanism. Fortunately this
 is very easy. After "use VM::EC2" call
 VM::EC2::Dispatch->add_override() one or more times:
 
- VM::EC2::Dispatch->add_override($call_name=>\&subroutine).
+ VM::EC2::Dispatch->add_override($call_name => $dispatch).
 
-The first argument is name of the Amazon API call,
-e.g. "DescribeImages". The second argument is a CODE reference to the
-code you want to be invoked to handle the parsed XML returned from the
-request. The code will receive two arguments consisting of the parsed
-content of the response, and the VM::EC2 object used to generate the
-request.
+The first argument, $call_name, is name of the Amazon API call, such as "DescribeImages".
+
+The second argument, $dispatch, instructs VM::EC2::Dispatch how to
+create objects from the parsed XML. There are three possible syntaxes:
+
+ 1) A CODE references, such as an anonymous subroutine.
+
+    In this case the code reference will be invoked to handle the 
+    parsed XML returned from the request. The code will receive 
+    two arguments consisting of the parsed
+    content of the response, and the VM::EC2 object used to generate the
+    request.
+
+ 2) A VM::EC2::Dispatch method name, optionally followed by its parameters
+    delimited by commas. Example:
+
+           "fetch_items,securityGroupInfo,VM::EC2::SecurityGroup"
+
+    This tells Dispatch to invoke its fetch_items() method with
+    the following arguments:
+
+     $dispatch->fetch_items($parsed_xml,$ec2,'securityGroupInfo','VM::EC2::SecurityGroup')
+
+    The fetch_items() method is used for responses in which a
+    list of objects is embedded within a series of <item> tags.
+    See L<VM::EC2::Dispatch> for more information.
+
+    Other commonly-used methods are "fetch_one", and "boolean".
+
+ 3) A class name, such as 'MyVolume'
+
+    In this case, class MyVolume is loaded and then its new() method
+    is called with the four arguments ($parsed_xml,$ec2,$xmlns,$requestid),
+    where $parsed_xml is the parsed XML response, $ec2 is the VM::EC2
+    object that generated the request, $xmlns is the XML namespace
+    of the XML response, and $requestid is the AWS-generated ID for the
+    request. Only the first two arguments are really useful.
+
+    I suggest you inherit from VM::EC2::Generic and use the inherited new()
+    method to store the parsed XML object and other arguments.
+
+Dispatch tries each of (1), (2) and (3), in order. This means that
+class names cannot collide with method names.
 
 The parsed content is the result of passing the raw XML through a
 XML::Simple object created with:
@@ -2991,6 +3039,9 @@ subclass of VM::EC2:
       VM::EC2::Dispatch->add_override('call_name_2'=>\&subroutine2).
       $self->SUPER::new(@_);
  }
+
+See L<VM::EC2::Dispatch> for a working example of subclassing VM::EC2
+and one of its object classes.
 
 =head1 DEVELOPING
 
