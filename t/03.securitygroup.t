@@ -19,11 +19,14 @@ use constant GROUP => 'VM::EC2 Test Group';
 use constant GROUP_DESCRIPTION => 'Test group created by VM::EC2; do not use!!';
 
 # this script tests the security groups
-
-setup_environment();
+my ($ec2);
 
 require_ok('VM::EC2');
-my $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
+SKIP: {
+
+skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
+
+$ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
 
 # in case it was here from a previous invocation
 $ec2->delete_security_group(-name=>GROUP);
@@ -77,6 +80,7 @@ ok($g->update,'update with revocation');
 @perm = sort $g->ipPermissions;
 is(scalar @perm,1,'revoke worked');
 is($perm[0],"udp(80..80) GRPNAME $from",'correct firewall rules revoked');
+}
 
 exit 0;
 

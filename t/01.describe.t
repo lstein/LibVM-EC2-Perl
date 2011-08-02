@@ -15,10 +15,12 @@ use Test::More tests => TEST_COUNT;
 use EC2TestSupport;
 
 # this script tests all the describe() functions and associated features such as tags.
-
-setup_environment();
-
 require_ok('VM::EC2');
+reset_declined();
+
+SKIP: {
+skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
+
 my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 ok($ec2,'VM::EC2->new');
 
@@ -113,6 +115,7 @@ eval {
 };
 like($@,qr/UnknownParameter/,'raise error mode');
 $ec2->raise_error(0);
+}
 
 exit 0;
 

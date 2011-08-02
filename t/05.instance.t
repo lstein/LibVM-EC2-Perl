@@ -21,8 +21,8 @@ my($ec2, $instance,$key,$address,$deallocate_address,$volume,$image);
 
 SKIP: {
 
-skip "instance tests declined",TEST_COUNT unless confirm_payment();
-setup_environment();
+skip "account information unavailable",TEST_COUNT unless setup_environment();
+skip "instance tests declined",        TEST_COUNT unless confirm_payment();
 
 require_ok('VM::EC2');
 $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
@@ -135,7 +135,7 @@ SKIP: {
 exit 0;
 
 END {
-    $ec2->print_error(0);
+    $ec2->print_error(0) if $ec2;
 
     if ($instance) {
 	print STDERR "# Terminating $instance...\n";
@@ -170,15 +170,24 @@ sub confirm_payment {
 # the AWS free tier. Also be aware that this test may take a while
 # (several minutes) due to tests that launch, start, and stop instances.
 # Test 21 creates an image, which also takes a while. Be patient.
+# (this prompt will timeout automatically in 10s)
 END
 ;
     print STDERR "Do you want to proceed? [Y/n] ";
-    chomp(my $input = <>);
-    $input ||= 'y';
-    return $input =~ /^[yY]/;
+    my $result = eval {
+	local $SIG{ALRM} = sub {warn "Timeout!\n"; die 'timeout'};
+	alarm(10);
+	chomp(my $input = <>);
+	$input ||= 'y';
+	$input =~ /^[yY]/;
+    };
+    alarm(0);
+    return $result;
 }
 
 sub cleanup {
+    reset_cache();
+    reset_declined();
     return unless $ec2;
     my $img = $ec2->describe_images({name=>IMG_NAME});
     if ($img) {

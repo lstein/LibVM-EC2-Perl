@@ -19,10 +19,14 @@ $SIG{TERM} = $SIG{INT} = sub { exit 0 };  # run the termination
 use constant VOLUME_NAME => 'VM::EC2 Test Volume';
 use constant VOLUME_DESC => 'Delete me!';
 
-setup_environment();
+my ($ec2);
 
 require_ok('VM::EC2');
-my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
+
+SKIP: {
+skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
+
+$ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 
 # in case the test was interrupted earlier
 cleanup();
@@ -72,6 +76,7 @@ is($newvol->size,$v->size,'size matches');
 is(scalar @v,1,'to_volumes() returns one volume');
 is($v[0],$newvol,'to_volumes() returns correct volume id');
 is($v[0]->snapshotId,$s,'snapshotId() is correct');
+}
 
 exit 0;
 

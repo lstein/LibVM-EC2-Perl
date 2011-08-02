@@ -18,6 +18,9 @@ use EC2TestSupport;
 setup_environment();
 
 require_ok('VM::EC2');
+SKIP: {
+skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
+
 my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 
 # make a key
@@ -49,5 +52,6 @@ BAIL_OUT($ec2->error_str) unless $key;
 @keys = $ec2->describe_key_pairs('MyBogusKeyPair');
 ok(scalar @keys,'import key pair');
 ok($ec2->delete_key_pair($key),'delete imported key');
+}
 
 exit 0;
