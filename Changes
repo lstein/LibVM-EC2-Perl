@@ -1,3 +1,8 @@
+1.04  Wed Aug 10 15:56:36 EDT 2011
+      - Document -availability_zone argument to run_instances(). Was formerly
+        misdocumented as -placement_zone. Both work now, and -zone works as
+	well.
+
 1.03  Tue Aug  2 16:55:15 EDT 2011
       - Tests will skip rather than fail if user fails to provide
         Amazon credentials.

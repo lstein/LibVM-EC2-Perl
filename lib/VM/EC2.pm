@@ -663,8 +663,10 @@ VM::EC2::Instance objects.
                      encode this. It will be done for you.
   -instance_type     Type of the instance to use. See below for a
                      list.
-  -placement_zone    The availability zone you want to launch the
+  -availability_zone The availability zone you want to launch the
                      instance into. Call $ec2->regions for a list.
+  -zone              Short version of -availability_aone.
+  -placement_zone    Deprecated version of -availability_zone.
   -placement_group   An existing placement group to launch the
                      instance into. Applicable to cluster instances
                      only.
@@ -814,13 +816,15 @@ sub run_instances {
     $args{-image_id}  or croak "run_instances(): -image_id argument missing";
     $args{-min_count} ||= 1;
     $args{-max_count} ||= $args{-min_count};
+    $args{-availability_zone} ||= $args{-zone};
+    $args{-availability_zone} ||= $args{-placement_zone};
 
     my @p = map {$self->single_parm($_,\%args) }
        qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIPAddress
           InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
     push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
     push @p,('UserData' =>encode_base64($args{-user_data}))           if $args{-user_data};
-    push @p,('Placement.AvailabilityZone'=>$args{-availability_zone}) if $args{-placement_zone};
+    push @p,('Placement.AvailabilityZone'=>$args{-availability_zone}) if $args{-availability_zone};
     push @p,('Placement.GroupName'=>$args{-group_name})               if $args{-placement_group};
     push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-placement_tenancy};
     push @p,('Monitoring.Enabled'   =>'true')                         if $args{-monitoring};
