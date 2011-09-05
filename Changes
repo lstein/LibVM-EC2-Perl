@@ -1,3 +1,7 @@
+1.05  Sun Sep  4 22:17:33 EDT 2011
+      - Add wait_for_snapshots(), wait_for_volumes(), and wait_for_attachments() methods,
+       as well as a generic wait_for_terminal_state() method.
+
 1.04  Wed Aug 10 15:56:36 EDT 2011
       - Document -availability_zone argument to run_instances(). Was formerly
         misdocumented as -placement_zone. Both work now, and -zone works as

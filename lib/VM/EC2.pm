@@ -317,7 +317,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.04';
+our $VERSION = '1.05';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -1002,29 +1002,103 @@ sub token {
     return $seed;
 }
 
-=head2 $ec2->wait_for_instances(-instance_id=>\@instances);
-
 =head2 $ec2->wait_for_instances(@instances)
 
 Wait for all members of the provided list of instances to reach some
 terminal state ("running", "stopped" or "terminated"), and then return
-a true value.
+a hash reference that maps each instance ID to its final state.
+
+Typical usage:
+
+ my @instances = $image->run_instances(-key_name      =>'My_key',
+                                       -security_group=>'default',
+                                       -min_count     =>2,
+                                       -instance_type => 't1.micro')
+           or die $ec2->error_str;
+ my $status = $ec2->wait_for_instances(@instances);
+ my @failed = grep {$status->{$_} ne 'running'} @instances;
+ print "The following failed: @failed\n";
 
 =cut
 
 sub wait_for_instances {
     my $self = shift;
-    my @instances = @_;
-    my %terminal_state = (running    => 1,
-			  stopped    => 1,
-			  terminated => 1);
-    sleep 1;
-    my @pending = grep {!$terminal_state{$_->current_status}} @instances;
+    $self->wait_for_terminal_state(\@_,['running','stopped','terminated']);
+}
 
+=head2 $ec2->wait_for_snapshots(@snapshots)
+
+Wait for all members of the provided list of snapshots to reach some
+terminal state ("completed", "error"), and then return a hash
+reference that maps each snapshot ID to its final state.
+
+=cut
+
+sub wait_for_snapshots {
+    my $self = shift;
+    $self->wait_for_terminal_state(\@_,['completed','error'])
+}
+
+=head2 $ec2->wait_for_volumes(@instances)
+
+Wait for all members of the provided list of volumes to reach some
+terminal state ("available", "in-use", "deleted" or "error"), and then
+return a hash reference that maps each instance ID to its final state.
+
+=cut
+
+sub wait_for_volumes {
+    my $self = shift;
+    $self->wait_for_terminal_state(\@_,['available','in-use','deleted','error']);
+}
+
+=head2 $ec2->wait_for_attachments(@attachment)
+
+Wait for all members of the provided list of
+VM::EC2::BlockDevice::Attachment objects to reach some terminal state
+("attached" or "detached"), and then return a hash reference that maps
+each attachment to its final state.
+
+Typical usage:
+
+    my $i = 0;
+    my $instance = 'i-12345';
+    my @attach;
+    foreach (@volume) {
+	push @attach,$_->attach($instance,'/dev/sdf'.$i++;
+    }
+    my $s = $ec2->wait_for_attachments(@attach);
+    my @failed = grep($s->{$_} ne 'attached'} @attach;
+    warn "did not attach: ",join ', ',@failed;
+
+=cut
+
+sub wait_for_attachments {
+    my $self = shift;
+    $self->wait_for_terminal_state(\@_,['attached','detached']);
+}
+
+=head2 $ec2->wait_for_terminal_state(\@objects,['list','of','states'])
+
+Generic version of the last four methods. Wait for all members of the provided list of Amazon objects 
+instances to reach some terminal state listed in the second argument, and then return
+a hash reference that maps each object ID to its final state.
+
+=cut
+
+sub wait_for_terminal_state {
+    my $self = shift;
+    my ($objects,$terminal_states) = @_;
+    my %terminal_state = map {$_=>1} @$terminal_states;
+    my %status = ();
+
+    my @pending = @$objects;
     while (@pending) {
 	sleep 3;
-	@pending = grep {!$terminal_state{$_->current_status}} @pending;
+	$status{$_} = $_->current_status foreach @pending;
+	@pending    = grep { !$terminal_state{$status{$_}} } @pending;
     }
+    return \%status;
 }
 
 =head2 $password_data = $ec2->get_password_data(-instance_id=>'i-12345');
