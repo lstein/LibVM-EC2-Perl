@@ -126,7 +126,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
  # create a new 20 gig volume
  $vol = $ec2->create_volume(-availability_zone=> 'us-east-1a',
                             -size             =>  20);
- while ($vol->current_status eq 'creating') { sleep 2; }
+ $ec2->wait_for_volumes($vol);
  print "Volume $vol is ready!\n" if $vol->current_status eq 'available';
 
  # create a new elastic address and associate it with an instance
@@ -1039,11 +1039,11 @@ sub wait_for_snapshots {
     $self->wait_for_terminal_state(\@_,['completed','error'])
 }
 
-=head2 $ec2->wait_for_volumes(@instances)
+=head2 $ec2->wait_for_volumes(@volumes)
 
 Wait for all members of the provided list of volumes to reach some
 terminal state ("available", "in-use", "deleted" or "error"), and then
-return a hash reference that maps each instance ID to its final state.
+return a hash reference that maps each volume ID to its final state.
 
 =cut
 
