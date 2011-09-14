@@ -23,7 +23,7 @@ VM::EC2::BlockDevice::Mapping - Object describing an EC2 block device attached t
 =head1 DESCRIPTION
 
 This object represents an Amazon block device associated with an instance;
-it is returned by VM::EC2->run_instances().
+it is returned by Instance->blockDeviceMapping().
 
 Please see L<VM::EC2::Generic> for methods shared by all VM::EC2
 objects.
@@ -33,6 +33,7 @@ objects.
 These object methods are supported:
 
  deviceName  -- Name of the device, such as /dev/sda1.
+ instance    -- Instance object associated with this volume.
  ebs         -- A VM::EC2::BlockDevice::Mapping::EBS object
                 describing the characteristics of the attached
                 EBS volume
@@ -44,7 +45,16 @@ passed through:
  status           -- One of "attaching", "attached", "detaching", "detached"
  attachTime       -- Time this volume was attached
  deleteOnTermination -- Whether the volume will be deleted when its attached
-                   instance is deleted.
+                   instance is deleted. Note that this will return perl true/false
+                   vales, rather than the strings "true" "false".
+
+The deleteOnTermination() method can be used to retrieve or modify this flag:
+
+ # get current deleteOnTermination flag
+ my $current_flag = $dev->deleteOnTermination;
+
+ # if flag is true, then set it to false
+ if ($current_flag) { $dev->deleteOnTermination(0) }
 
 In addition, the following convenience function is provided:
 
@@ -98,11 +108,29 @@ sub ebs {
     return $self->{ebs} ||= VM::EC2::BlockDevice::Mapping::EBS->new($self->SUPER::ebs,$self->aws);
 }
 
+sub instance     {
+    my $self = shift;
+    my $d = $self->{instance};
+    $self->{instance} = shift if @_;
+    return $d;
+}
 sub volumeId     { shift->ebs->volumeId }
 sub status       { shift->ebs->status   }
 sub attachTime   { shift->ebs->attachTime   }
-sub deleteOnTermination   { shift->ebs->deleteOnTermination }
 sub volume       { shift->ebs->volume }
+
+sub deleteOnTermination   { 
+    my $self = shift;
+    my $ebs  = $self->ebs;
+    my $flag = $ebs->deleteOnTermination;
+    if (@_) {
+	my $deleteOnTermination = shift;
+	$deleteOnTermination  ||= 0;
+	my $flag = $self->deviceName.'='.$self->volumeId.":$deleteOnTermination";
+	return $self->aws->modify_instance_attribute($self->instance,-block_devices=>$flag);
+    }
+    return $flag;
+}
 
 1;
 

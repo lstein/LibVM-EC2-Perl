@@ -42,7 +42,8 @@ The following object methods are supported:
                 instance is launched from this image.
  volumeSize  -- Size of the EBS volume (in gigs).
  deleteOnTermination -- Whether this EBS will be deleted when the
-                instance terminates.
+                instance terminates. Note that this will return
+                perl 0/1 values rather than the strings "false"/"true"
 
 =head1 STRING OVERLOADING
 
@@ -75,6 +76,12 @@ use base 'VM::EC2::Generic';
 sub valid_fields {
     my $self = shift;
     return qw(snapshotId volumeSize deleteOnTermination);
+}
+
+sub deleteOnTermination {
+    my $self = shift;
+    my $dot  = $self->SUPER::deleteOnTermination;
+    return $dot eq 'true';
 }
 
 1;

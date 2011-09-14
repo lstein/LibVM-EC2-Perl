@@ -111,8 +111,9 @@ sub deleteOnTermination { shift->ebs->deleteOnTermination }
 
 sub as_string {
     my $self = shift;
+    my $dot  = $self->deleteOnTermination ? 'true' : 'false';
     return $self->deviceName.'='.
-	join ':',$self->snapshotId,$self->volumeSize,$self->deleteOnTermination;
+	join ':',$self->snapshotId,$self->volumeSize,$dot;
 }
 
 1;

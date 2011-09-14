@@ -9,7 +9,7 @@ use File::Temp qw(tempfile);
 use FindBin '$Bin';
 use lib "$Bin/lib","$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
-use constant TEST_COUNT => 27;
+use constant TEST_COUNT => 30;
 use Test::More tests => TEST_COUNT;
 use EC2TestSupport;
 use constant IMG_NAME => 'Test_Image_from_libVM_EC2';
@@ -83,6 +83,14 @@ SKIP: {
     while ($cnt++ < 20 && $a->current_status ne 'attached') { sleep 2 }
     is($a->current_status,'attached','attach volume to instance');
     is($volume->current_status,'in-use','volume reports correct attachment');
+    my @mapping = $instance->blockDeviceMapping;
+    my ($b) = grep {$_ eq '/dev/sdg1'} @mapping;
+    ok($b,'block device mapping reports correct list');
+    ok(!$b->deleteOnTermination,'delete on termination flag set to false');
+    $b->deleteOnTermination(1);
+    ($b) = grep {$_ eq '/dev/sdg1'} $instance->blockDeviceMapping;
+    ok($b->deleteOnTermination,'set delete on termination to true');
+    
     ok($volume->detach,'detach volume from instance');
     $cnt = 0;
     while ($cnt++ < 20 && $volume->current_status ne 'available') { sleep 2 }

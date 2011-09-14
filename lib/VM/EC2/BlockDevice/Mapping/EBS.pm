@@ -52,7 +52,8 @@ The following object methods are supported:
  status           -- One of "attaching", "attached", "detaching", "detached"
  attachTime       -- Time this volume was attached
  deleteOnTermination -- Whether the volume will be deleted when its attached
-                   instance is deleted.
+                      instance is deleted. Note that this returns the perl
+                      0/1 booleans rather than "false"/"true" strings.
 
 In addition, the following convenience method is supported:
 
@@ -102,6 +103,12 @@ sub volume {
     my @vols = $self->aws->describe_volumes(-volume_id=>$self->volumeId) or return;
     @vols == 1 or die "describe_volumes(-volume_id=>",$self->volumeId,") returned more than one volume";
     return $self->{volume} = $vols[0];
+}
+
+sub deleteOnTermination {
+    my $self = shift;
+    my $dot  = $self->SUPER::deleteOnTermination;
+    return $dot eq 'true';
 }
 
 1;

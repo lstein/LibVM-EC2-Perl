@@ -317,7 +317,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.05';
+our $VERSION = '1.06';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -1239,6 +1239,9 @@ The following is the list of attributes that can be set:
  -root_device_name        -- root device name
  -source_dest_check       -- enable NAT (VPC only)
  -group_id                -- VPC security group
+ -block_devices           -- Specify block devices to change 
+                             deleteOnTermination flag
+ -block_device_mapping    -- Alias for -block_devices
 
 Only one attribute can be changed in a single request. For example:
 
@@ -1247,6 +1250,19 @@ Only one attribute can be changed in a single request. For example:
 The result code is true if the attribute was successfully modified,
 false otherwise. In the latter case, $ec2->error() will provide the
 error message.
+
+The ability to change the deleteOnTermination flag for attached block devices
+is not documented in the official Amazon API documentation, but appears to work.
+The syntax is:
+
+# turn on deleteOnTermination
+ $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
+# turn off deleteOnTermination
+ $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
+
+The syntax is slightly different from what is used by -block_devices
+in run_instances(), and is "device=volumeId:boolean". Multiple block
+devices can be specified using an arrayref.
 
 =cut
 
@@ -1262,6 +1278,8 @@ sub modify_instance_attribute {
     push @param,$self->list_parm('GroupId',\%args);
     push @param,('DisableApiTermination.Value'=>'true') if $args{-termination_protection};
     push @param,('InstanceInitiatedShutdownBehavior.Value'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
+    my $block_devices = $args{-block_devices} || $args{-block_device_mapping};
+    push @param,$self->block_device_parm($block_devices);
 
     return $self->call('ModifyInstanceAttribute',@param);
 }
@@ -2795,16 +2813,22 @@ sub block_device_parm {
 	my ($devicename,$blockdevice) = ($1,$2);
 	push @p,("BlockDeviceMapping.$c.DeviceName"=>$devicename);
 
-	if ($blockdevice eq 'none') {
+	if ($blockdevice =~ /^vol-/) {  # this is a volume, and not a snapshot
+	    my ($volume,$delete_on_term) = split ':',$blockdevice;
+	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeId" => $volume);
+	    push @p,("BlockDeviceMapping.$c.Ebs.DeleteOnTermination"=>$delete_on_term) 
+		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/
+	}
+	elsif ($blockdevice eq 'none') {
 	    push @p,("BlockDeviceMapping.$c.NoDevice" => '');
 	} elsif ($blockdevice =~ /^ephemeral\d$/) {
 	    push @p,("BlockDeviceMapping.$c.VirtualName"=>$blockdevice);
 	} else {
 	    my ($snapshot,$size,$delete_on_term) = split ':',$blockdevice;
-	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId"=>$snapshot)                if $snapshot;
+	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot)                if $snapshot;
 	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeSize" =>$size)                   if $size;
 	    push @p,("BlockDeviceMapping.$c.Ebs.DeleteOnTermination"=>$delete_on_term) 
-		if $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/
+		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/
 	}
 	$c++;
     }

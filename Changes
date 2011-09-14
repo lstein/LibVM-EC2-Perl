@@ -1,3 +1,8 @@
+1.06  Wed Sep 14 15:53:55 EDT 2011
+      - Added ability to change deleteOnTerminate flag for volumes attached on instances
+        after instance launch. See VM::EC2 and VM::EC2::BlockDevice::Mapping for
+	details.
+
 1.05  Sun Sep  4 22:17:33 EDT 2011
       - Add wait_for_snapshots(), wait_for_volumes(), and wait_for_attachments() methods,
        as well as a generic wait_for_terminal_state() method.

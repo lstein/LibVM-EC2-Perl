@@ -511,8 +511,11 @@ sub monitoring {
 
 sub blockDeviceMapping {
     my $self = shift;
+    $self->refresh;
     my $mapping = $self->SUPER::blockDeviceMapping or return;
-    return map { VM::EC2::BlockDevice::Mapping->new($_,$self->aws)} @{$mapping->{item}};
+    my @mapping = map { VM::EC2::BlockDevice::Mapping->new($_,$self->aws)} @{$mapping->{item}};
+    foreach (@mapping) { $_->instance($self) }
+    return @mapping;
 }
 
 sub blockDeviceMappings {shift->blockDeviceMapping}
