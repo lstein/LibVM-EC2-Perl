@@ -23,6 +23,7 @@ VM::EC2::Volume - Object describing an Amazon EBS volume
     @snapshots   = $vol->to_snapshots;
   }
   $vols[0]->attach('i-12345','/dev/sdg1');
+  $vols[0]->deleteOnTermination('true');
   $vols[0]->detach;
   $vols[0]->create_snapshot('automatic snapshot')
 
@@ -102,6 +103,15 @@ you can monitor by calling current_status():
        sleep 2;
     }
     print "volume is ready to go\n";
+
+=head2 $boolean = $vol->deleteOnTermination([$boolean])
+
+Get or set the deleteOnTermination flag for attached volumes. If the volume 
+is unattached, then this causes a fatal error. Called with no arguments, this
+method returns the current state of the deleteOnTermination flag for the
+volume's attachment. Called with a true/false argument, the method sets the
+flag by calling modify_instance_attributes() on the corresponding instance
+and returns true if successful.
 
 =head2 $snap = $vol->from_snapshot
 
@@ -186,6 +196,13 @@ sub attachments {
     my $items       = $self->attachmentSet->{item} or return;
     my @a = map {VM::EC2::BlockDevice::Attachment->new($_,$self->aws)} @$items;
     return @a;
+}
+
+sub deleteOnTermination {
+    my $self = shift;
+    $self->refresh;
+    my $attachment = $self->attachment or croak "$self is not attached";
+    return $attachment->deleteOnTermination(@_);
 }
 
 sub from_snapshot {

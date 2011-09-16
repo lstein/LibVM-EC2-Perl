@@ -9,7 +9,7 @@ use File::Temp qw(tempfile);
 use FindBin '$Bin';
 use lib "$Bin/lib","$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
-use constant TEST_COUNT => 30;
+use constant TEST_COUNT => 33;
 use Test::More tests => TEST_COUNT;
 use EC2TestSupport;
 use constant IMG_NAME => 'Test_Image_from_libVM_EC2';
@@ -29,7 +29,7 @@ $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 
 cleanup();
 
-my $natty = $ec2->describe_images(TEST_IMAGE);  # defined in t/EC2TestSupport
+my $natty = $ec2->describe_images(TEST_IMAGE);  # defined in t/lib/EC2TestSupport
 BAIL_OUT($ec2->error_str) unless $natty;			
 
 $key     = $ec2->create_key_pair("MyTestKey$$");
@@ -72,28 +72,35 @@ $volume = $ec2->create_volume(-size=>1,-availability_zone=>$zone) or warn $ec2->
 $volume->add_tag(Name=>'Test volume created by VM::EC2');
 ok($volume,'volume creation');
 
-my $cnt = 0;
-while ($cnt++ < 20 && $volume->current_status eq 'creating') { sleep 2 }
+$ec2->wait_for_volumes($volume);
 SKIP: {
     skip "could not create a new volume, status was ".$volume->current_status,6
 	unless $volume->current_status eq 'available';
     my $a = $instance->attach_volume($volume => '/dev/sdg1');
     ok($a,'attach()');
-    $cnt = 0;
-    while ($cnt++ < 20 && $a->current_status ne 'attached') { sleep 2 }
+    $ec2->wait_for_attachments($a);
+
     is($a->current_status,'attached','attach volume to instance');
+    ok(!$a->deleteOnTermination,'delete on termination flag set to false');
+    $a->deleteOnTermination(1);
+    $a->refresh;
+    ok($a->deleteOnTermination,'delete on termination flag set to true');
+
     is($volume->current_status,'in-use','volume reports correct attachment');
+
     my @mapping = $instance->blockDeviceMapping;
     my ($b) = grep {$_ eq '/dev/sdg1'} @mapping;
     ok($b,'block device mapping reports correct list');
-    ok(!$b->deleteOnTermination,'delete on termination flag set to false');
-    $b->deleteOnTermination(1);
+    ok($b->deleteOnTermination,'delete on termination flag set to true');
+    $b->deleteOnTermination(0);
     ($b) = grep {$_ eq '/dev/sdg1'} $instance->blockDeviceMapping;
-    ok($b->deleteOnTermination,'set delete on termination to true');
+    ok(!$b->deleteOnTermination,'set delete on termination to false');
+
+    is($volume->deleteOnTermination,$b->deleteOnTermination,'deleteOnTermination flags in sync');
     
-    ok($volume->detach,'detach volume from instance');
-    $cnt = 0;
-    while ($cnt++ < 20 && $volume->current_status ne 'available') { sleep 2 }
+    my $d = $volume->detach;
+    ok($d,'detach volume from instance');
+    $ec2->wait_for_attachments($d);
     is($volume->current_status,'available','detached volume becomes available');
     ok($ec2->delete_volume($volume),'delete volume');
     undef $volume;
@@ -159,7 +166,8 @@ END {
     }
     if ($volume) {
 	print STDERR "# Deleting volume...\n";
-	$volume->disassociate();
+	my $a = $volume->detach();
+	$ec2->wait_for_attachments($a) if $a;
 	$ec2->delete_volume($volume);
     }
     if ($image) {
@@ -177,7 +185,7 @@ sub confirm_payment {
 # incur a charge of \$0.02 (as of July 2011), which may be covered under 
 # the AWS free tier. Also be aware that this test may take a while
 # (several minutes) due to tests that launch, start, and stop instances.
-# Test 21 creates an image, which also takes a while. Be patient.
+# Test 27 creates an image, which also takes a while. Be patient.
 # (this prompt will timeout automatically in 10s)
 END
 ;

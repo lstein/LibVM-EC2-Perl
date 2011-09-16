@@ -13,10 +13,12 @@ VM::EC2::BlockDevice::Attachment - Object describing the attachment of an EBS vo
   $attachment  = $ec2->attachment;
 
   $volId       = $attachment->volumeId;
+  $device      = $attachment->device;
   $instanceId  = $attachment->instanceId;
   $status      = $attachment->status;
   $time        = $attachment->attachTime;
   $delete      = $attachment->deleteOnTermination;
+  $attachment->deleteOnTermination(1); # change delete flag
 
 =head1 DESCRIPTION
 
@@ -36,6 +38,15 @@ The following object methods are supported:
                      attached instance terminates. Note that this is a
                      Perl true, and not the string "true".
 
+The deleteOnTermination method is slightly more sophisticated than 
+the result from the standard AWS API because it returns the CURRENT
+deleteOnTermination flag for the attachment, which might have been
+changed by VM::EC2->modify_instance_attributes(). You may also change
+the deleteOnTermination state by passing a boolean argument to the
+method:
+
+  $attachment->deleteOnTermination(1);
+
 In addition, this class provides several convenience functions:
 
 =head2 $instance  = $attachment->instance
@@ -46,6 +57,14 @@ Returns the VM::EC2::Instance corresponding to this attachment.
 
 Returns the VM::EC2::Volume object corresponding to this
 attachment.
+
+=head2 $device = $attachment->deviceName
+
+Alias for device() to be compatible with VM::EC2::BlockDevice::Mapping call.
+
+=head2 $result = $attachment->deleteOnTermination($boolean)
+
+Change the deleteOnTermination flag on this attachment.
 
 =head2 $status = $attachment->current_status
 
@@ -101,9 +120,31 @@ sub current_status {
     return $a->status;
 }
 
+sub refresh {
+    my $self = shift;
+    my $v    = $self->aws->describe_volumes($self->volumeId);
+    my $a    = $v->attachment;
+    %$self   = %$a;
+}
+
+sub deviceName { shift->device }
+
 sub deleteOnTermination {
-    my $d = shift->SUPER::deleteOnTermination or return;
-    return $d eq 'true';
+    my $self = shift;
+
+    if (@_) {
+	my $deleteOnTermination = shift;
+	$deleteOnTermination  ||= 0;
+	my $flag = $self->device.'='.$self->volumeId.":$deleteOnTermination";
+	return $self->aws->modify_instance_attribute($self->instanceId,-block_devices=>$flag);
+    }
+
+    my $device    = $self->device;
+    my $instance  = $self->instance or die $self->aws->error_str;
+    my @mapping   = $instance->blockDeviceMapping;
+    my ($map)     = grep {$_ eq $device} @mapping;
+    $map or die "Didn't find blockDeviceMapping corresponding to this attachment";
+    return $map->deleteOnTermination;
 }
 
 sub instance {
