@@ -1,3 +1,6 @@
+1.07
+     - Up timeout for wait_for_attachments(), wait_for_volumes() to ten minutes.
+
 1.06  Wed Sep 14 15:53:55 EDT 2011
       - Added ability to change deleteOnTerminate flag for volumes attached on instances
         after instance launch. Facility is provided through VM::EC2, 

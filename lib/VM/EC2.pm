@@ -323,6 +323,9 @@ our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
                    VM::EC2::ReservedInstance);
 
+# hard-coded timeout for several wait_for_terminal_state() calls.
+use constant WAIT_FOR_TIMEOUT => 600;
+
 sub AUTOLOAD {
     my $self = shift;
     my ($pack,$func_name) = $AUTOLOAD=~/(.+)::([^:]+)$/;
@@ -1027,7 +1030,7 @@ $ec2->error_str() to a suitable message.
 
 sub wait_for_instances {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['running','stopped','terminated'],600);    # ten minute timeout on instances
+    $self->wait_for_terminal_state(\@_,['running','stopped','terminated'],WAIT_FOR_TIMEOUT);    # ten minute timeout on instances
 }
 
 =head2 $ec2->wait_for_snapshots(@snapshots)
@@ -1053,14 +1056,14 @@ terminal state ("available", "in-use", "deleted" or "error"), and then
 return a hash reference that maps each volume ID to its final state.
 
 If no terminal state is reached within a set timeout, currently
-hardcoded at 1 minute, then this method returns undef and sets
+hardcoded at 10 minutes, then this method returns undef and sets
 $ec2->error_str() to a suitable message.
 
 =cut
 
 sub wait_for_volumes {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['available','in-use','deleted','error'],60);  # sixty second timeout for creating volumes
+    $self->wait_for_terminal_state(\@_,['available','in-use','deleted','error'],WAIT_FOR_TIMEOUT);  # sixty second timeout for creating volumes
 }
 
 =head2 $ec2->wait_for_attachments(@attachment)
@@ -1083,14 +1086,14 @@ Typical usage:
     warn "did not attach: ",join ', ',@failed;
 
 If no terminal state is reached within a set timeout, currently
-hardcoded at 1 minute, then this method returns undef and sets
+hardcoded at 10 minutes, then this method returns undef and sets
 $ec2->error_str() to a suitable message.
 
 =cut
 
 sub wait_for_attachments {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['attached','detached'],60);  # sixty second timeout for attachments
+    $self->wait_for_terminal_state(\@_,['attached','detached'],WAIT_FOR_TIMEOUT);  # ten minutes
 }
 
 =head2 $ec2->wait_for_terminal_state(\@objects,['list','of','states'] [,$timeout])
@@ -1120,9 +1123,9 @@ sub wait_for_terminal_state {
 	    $status{$_} = $_->current_status foreach @pending;
 	    @pending    = grep { !$terminal_state{$status{$_}} } @pending;
 	}
+	alarm(0);
 	\%status;
     };
-    alarm(0);
     if ($@ =~ /timeout/) {
 	$self->error('timeout waiting for terminal state');
 	return;
