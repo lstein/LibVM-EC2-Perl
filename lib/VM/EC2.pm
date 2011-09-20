@@ -1151,6 +1151,8 @@ Get or change the timeout for wait_for_instances(), wait_for_attachments(),
 and wait_for_volumes(). The timeout is given in seconds, and defaults to
 600 (10 minutes). You can set this to 0 to wait forever.
 
+=cut
+
 sub wait_for_timeout {
     my $self = shift;
     $self->{wait_for_timeout} = WAIT_FOR_TIMEOUT
