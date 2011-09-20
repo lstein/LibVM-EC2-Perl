@@ -1,5 +1,6 @@
 1.07
-     - Up timeout for wait_for_attachments(), wait_for_volumes() to ten minutes.
+     - wait_for_attachments(), wait_for_instances(), and wait_for_volumes() will now timeout
+       after a set interval, which can be adjusted with wait_for_timeout().
 
 1.06  Wed Sep 14 15:53:55 EDT 2011
       - Added ability to change deleteOnTerminate flag for volumes attached on instances

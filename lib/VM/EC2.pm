@@ -1022,15 +1022,18 @@ Typical usage:
  my @failed = grep {$status->{$_} ne 'running'} @instances;
  print "The following failed: @failed\n";
 
-If no terminal state is reached within a set timeout, currently
-hardcoded at 10 minutes, then this method returns undef and sets
-$ec2->error_str() to a suitable message.
+If no terminal state is reached within a set timeout, then this method
+returns undef and sets $ec2->error_str() to a suitable message. The
+timeout, which defaults to 10 minutes (600 seconds), can be get or set
+with $ec2->wait_for_timeout().
 
 =cut
 
 sub wait_for_instances {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['running','stopped','terminated'],WAIT_FOR_TIMEOUT);    # ten minute timeout on instances
+    $self->wait_for_terminal_state(\@_,
+				   ['running','stopped','terminated'],
+				   $self->wait_for_timeout);
 }
 
 =head2 $ec2->wait_for_snapshots(@snapshots)
@@ -1046,7 +1049,9 @@ it in an eval{} and set alarm() if you wish to timeout.
 
 sub wait_for_snapshots {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['completed','error'],0);  # no timeout on snapshots -- they may take days
+    $self->wait_for_terminal_state(\@_,
+				   ['completed','error'],
+				   0);  # no timeout on snapshots -- they may take days
 }
 
 =head2 $ec2->wait_for_volumes(@volumes)
@@ -1055,15 +1060,18 @@ Wait for all members of the provided list of volumes to reach some
 terminal state ("available", "in-use", "deleted" or "error"), and then
 return a hash reference that maps each volume ID to its final state.
 
-If no terminal state is reached within a set timeout, currently
-hardcoded at 10 minutes, then this method returns undef and sets
-$ec2->error_str() to a suitable message.
+If no terminal state is reached within a set timeout, then this method
+returns undef and sets $ec2->error_str() to a suitable message. The
+timeout, which defaults to 10 minutes (600 seconds), can be get or set
+with $ec2->wait_for_timeout().
 
 =cut
 
 sub wait_for_volumes {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['available','in-use','deleted','error'],WAIT_FOR_TIMEOUT);  # sixty second timeout for creating volumes
+    $self->wait_for_terminal_state(\@_,
+				   ['available','in-use','deleted','error'],
+				   $self->wait_for_timeout);
 }
 
 =head2 $ec2->wait_for_attachments(@attachment)
@@ -1085,15 +1093,18 @@ Typical usage:
     my @failed = grep($s->{$_} ne 'attached'} @attach;
     warn "did not attach: ",join ', ',@failed;
 
-If no terminal state is reached within a set timeout, currently
-hardcoded at 10 minutes, then this method returns undef and sets
-$ec2->error_str() to a suitable message.
+If no terminal state is reached within a set timeout, then this method
+returns undef and sets $ec2->error_str() to a suitable message. The
+timeout, which defaults to 10 minutes (600 seconds), can be get or set
+with $ec2->wait_for_timeout().
 
 =cut
 
 sub wait_for_attachments {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['attached','detached'],WAIT_FOR_TIMEOUT);  # ten minutes
+    $self->wait_for_terminal_state(\@_,
+				   ['attached','detached'],
+				   $self->wait_for_timeout);
 }
 
 =head2 $ec2->wait_for_terminal_state(\@objects,['list','of','states'] [,$timeout])
@@ -1114,8 +1125,9 @@ sub wait_for_terminal_state {
     my %status = ();
     my @pending = grep {defined $_} @$objects; # in case we're passed an undef
     my $status = eval {
+	local $SIG{ALRM};
 	if ($timeout && $timeout > 0) {
-	    local $SIG{ALRM} = sub {die "timeout"};
+	    $SIG{ALRM} = sub {die "timeout"};
 	    alarm($timeout);
 	}
 	while (@pending) {
@@ -1131,6 +1143,21 @@ sub wait_for_terminal_state {
 	return;
     }
     return $status;
+}
+
+=head1 $timeout = $ec2->wait_for_timeout([$new_timeout]);
+
+Get or change the timeout for wait_for_instances(), wait_for_attachments(),
+and wait_for_volumes(). The timeout is given in seconds, and defaults to
+600 (10 minutes). You can set this to 0 to wait forever.
+
+sub wait_for_timeout {
+    my $self = shift;
+    $self->{wait_for_timeout} = WAIT_FOR_TIMEOUT
+	unless defined $self->{wait_for_timeout};
+    my $d = $self->{wait_for_timeout};
+    $self->{wait_for_timeout} = shift if @_;
+    return $d;
 }
 
 =head2 $password_data = $ec2->get_password_data(-instance_id=>'i-12345');
