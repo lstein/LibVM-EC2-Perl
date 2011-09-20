@@ -45,3 +45,4 @@ t/03.securitygroup.t
 t/04.volume.t
 t/05.instance.t
 t/lib/EC2TestSupport.pm
+META.json
