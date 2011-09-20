@@ -64,7 +64,7 @@ use overload
 	my $msg = $self->Message;
 	$msg   =~ s/\.$//;
 	my $code = $self->Code;
-	return "[$code] $msg]";},
+	return "[$code] $msg";},
     fallback => 1;
 
 sub valid_fields {

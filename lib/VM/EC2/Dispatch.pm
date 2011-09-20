@@ -186,6 +186,19 @@ use constant ObjectRegistration => {
     CreateSpotDatafeedSubscription    => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
     DescribeSpotDatafeedSubscription  => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
     DeleteSpotDatafeedSubscription    => 'boolean',
+    DescribeSpotPriceHistory          => sub { my ($data,$ec2,$xmlns,$request_id) = @_;
+					       if ($ec2->{spot_price_history_token} && !$data->{nextToken}) {
+						   $ec2->{spot_price_history_stop}++;
+					       }
+					       $ec2->{spot_price_history_token} = $data->{nextToken};
+					       my $items = $data->{spotPriceHistorySet}{item} or return;
+					       load_module('VM::EC2::Spot::PriceHistory');
+					       return map {VM::EC2::Spot::PriceHistory->new($_,$ec2,$xmlns,$request_id)}
+					          @$items;
+    },
+    RequestSpotInstances              => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
+    CancelSpotInstanceRequests        => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
+    DescribeSpotInstanceRequests      => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
 };
 
 sub new {
