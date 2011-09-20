@@ -2676,6 +2676,66 @@ sub describe_reserved_instances {
     return $self->call('DescribeReservedInstances',@param);
 }
 
+=head1 SPOT INSTANCES
+
+These methods allow you to request spot instances and manipulte spot
+data feed subscriptoins.
+
+=cut
+
+=head2 $subscription = $ec2->create_spot_datafeed_subscription($bucket,$prefix)
+
+This method creates a spot datafeed subscription. Provide the method with the
+name of an S3 bucket associated with your account, and a prefix to be appended
+to the files written by the datafeed. Spot instance usage logs will be written 
+into the requested bucket, and prefixed with the desired prefix.
+
+If no prefix is specified, it defaults to "SPOT_DATAFEED_";
+
+On success, a VM::EC2::Spot:DatafeedSubscription object is returned;
+
+Only one datafeed is allowed per account;
+
+=cut
+
+sub create_spot_datafeed_subscription {
+    my $self = shift;
+    my ($bucket,$prefix) = @_;
+    $bucket or croak "Usage: create_spot_datafeed_subscription(\$bucket,\$prefix)";
+    $prefix ||= 'SPOT_DATAFEED_';
+    my @param = (Bucket => $bucket,
+		 Prefix => $prefix);
+    return $self->call('CreateSpotDatafeedSubscription',@param);
+}
+
+=head2 $boolean = $ec2->delete_spot_datafeed_subscription()
+
+This method delete's the current account's spot datafeed
+subscription, if any. It takes no arguments.
+
+On success, it returns true.
+
+=cut
+
+sub delete_spot_datafeed_subscription {
+    my $self = shift;
+    return $self->call('DeleteSpotDatafeedSubscription');
+}
+
+=head2 $subscription = $ec2->describe_spot_datafeed_subscription()
+
+This method describes the current account's spot datafeed
+subscription, if any. It takes no arguments.
+
+On success, a VM::EC2::Spot:DatafeedSubscription object is returned;
+
+=cut
+
+sub describe_spot_datafeed_subscription {
+    my $self = shift;
+    return $self->call('DescribeSpotDatafeedSubscription');
+}
+
 # ------------------------------------------------------------------------------------------
 
 =head1 INTERNAL METHODS
