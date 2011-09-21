@@ -186,13 +186,13 @@ sub confirm_payment {
 # the AWS free tier. Also be aware that this test may take a while
 # (several minutes) due to tests that launch, start, and stop instances.
 # Test 27 creates an image, which also takes a while. Be patient.
-# (this prompt will timeout automatically in 10s)
+# (this prompt will timeout automatically in 15s)
 END
 ;
     print STDERR "Do you want to proceed? [Y/n] ";
     my $result = eval {
 	local $SIG{ALRM} = sub {warn "Timeout!\n"; die 'timeout'};
-	alarm(10);
+	alarm(15);
 	chomp(my $input = <>);
 	$input ||= 'y';
 	$input =~ /^[yY]/;
