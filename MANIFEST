@@ -27,16 +27,23 @@ lib/VM/EC2/Instance/State/Reason.pm
 lib/VM/EC2/KeyPair.pm
 lib/VM/EC2/Region.pm
 lib/VM/EC2/ReservationSet.pm
+lib/VM/EC2/ReservedInstance.pm
+lib/VM/EC2/ReservedInstance/Offering.pm
 lib/VM/EC2/SecurityGroup.pm
 lib/VM/EC2/SecurityGroup/GroupPermission.pm
 lib/VM/EC2/SecurityGroup/IpPermission.pm
 lib/VM/EC2/Snapshot.pm
 lib/VM/EC2/Snapshot/CreateVolumePermission.pm
+lib/VM/EC2/Spot/DatafeedSubscription.pm
+lib/VM/EC2/Spot/InstanceRequest.pm
+lib/VM/EC2/Spot/LaunchSpecification.pm
+lib/VM/EC2/Spot/PriceHistory.pm
 lib/VM/EC2/Tag.pm
 lib/VM/EC2/Volume.pm
 Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
+META.json
 META.yml
 README
 t/01.describe.t
@@ -44,5 +51,5 @@ t/02.keypairs.t
 t/03.securitygroup.t
 t/04.volume.t
 t/05.instance.t
+t/06.spot_instance.t
 t/lib/EC2TestSupport.pm
-META.json
