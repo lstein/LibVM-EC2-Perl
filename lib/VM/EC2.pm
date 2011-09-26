@@ -1509,6 +1509,7 @@ sub register_image {
     my %args = @_;
 
     $args{-name} or croak "register_image(): -name argument required";
+    $args{-block_device_mapping} ||= $args{-block_devices};
     if (!$args{-image_location}) {
 	$args{-root_device_name} && $args{-block_device_mapping}
 	or croak "register_image(): either provide -image_location to create an instance-store AMI\nor both the -root_device_name && -block_device_mapping arguments to create an EBS-backed AMI.";

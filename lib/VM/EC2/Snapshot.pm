@@ -262,13 +262,15 @@ sub register_image {
     # See if the root device is on the block device mapping list.
     # If it is not, then create a /dev/sda1 entry for it from this snapshot.
     my $rd = $args{-root_device_name};
-    unless (grep {/^$rd=/} @$block_devices) {
+    unless (grep {/$rd=/} @$block_devices) {
 	my $root_size   = $args{-root_size}   || '';
 	$args{-root_delete_on_termination} = 1 unless defined $args{-root_delete_on_termination};
 	my $root_delete = $args{-root_delete_on_termination} ? 'true' : 'false';
 	my $snap_id     = $self->snapshotId;
 	unshift @$block_devices,"$rd=$snap_id:$root_size:$root_delete"
     }
+
+    $args{-block_device_mapping} = $block_devices;
 
     # just cleaning up, not really necessary
     delete $args{-root_size};
