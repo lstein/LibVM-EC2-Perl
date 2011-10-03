@@ -70,7 +70,9 @@ connect to an invalid hostname.
 =head1 METHODS
 
 =head2 $meta = VM::EC2::Instance::Metadata->new()
+
 =head2 $meta = $ec2->instance_metadata()
+
 =head2 $meta = $instance->metadata()
 
 You can create a new metadata object either using this class's new()
