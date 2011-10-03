@@ -16,7 +16,7 @@ VM::EC2::Snapshot - Object describing an Amazon EBS snapshot
       $state = $snap->status;
       $time  = $snap->startTime;
       $progress = $snap->progress;
-      $size  = $snap->size;
+      $size  = $snap->volumeSize;
       $description = $snap->description;
       $tags  = $snap->tags;
   }
@@ -180,6 +180,11 @@ creation to the owner only.
 
 See also authorized_users().
 
+=head2 $size = $image->size
+
+Alias to volumeSize, provided for consistency with
+VM::EC2::Volume->size.
+
 =head2 $snap->refresh
 
 Refreshes the snapshot from information provided by AWS. Use before
@@ -231,6 +236,8 @@ sub valid_fields {
 }
 
 sub primary_id { shift->snapshotId }
+
+sub size { shift->volumeSize }
 
 sub from_volume {
     my $self = shift;

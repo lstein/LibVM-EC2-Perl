@@ -1,6 +1,12 @@
 1.08   Tue Oct  4 19:04:52 EDT 2011
      - Fixed return value from delete_security_group().
      - Added a detailed example script, bin/sync_to_snapshot.pl
+     - Fix broken call to VM::EC2::Snapshot->register_image(), which was failing with a message
+       about not providing all required arguments.
+     - Add VM::EC2::Snapshot->size() as an alias to volumeSize().
+     - Fix documentation formatting bugs in VM::EC2::Instance::Metadata.
+     - Add VM::EC2::Snapshot->size() as an alias to volumeSize().
+     -  Fix documentation formatting bugs in VM::EC2::Instance::Metadata
 
 1.07   Wed Sep 21 11:54:22 EDT 2011
      - Add full support for spot instances.
