@@ -2,7 +2,7 @@
 foo.*
 rename_plan\.txt
 ~$
-\.pl$
+^[^/]+\.pl$
 \.bak$
 _SKIP$
 ^\.

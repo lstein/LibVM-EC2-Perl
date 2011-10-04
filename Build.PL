@@ -9,6 +9,7 @@ my $build = Module::Build->new(
     license           => 'perl',
     dist_version_from => 'lib/VM/EC2.pm',
     dist_author       => 'Lincoln Stein <lincoln.stein@oicr.on.ca>',
+    configure_requires => { 'Module::Build' => 0 },
     requires          => {
       'LWP' => 5.835,
       'MIME::Base64' => '3.08',

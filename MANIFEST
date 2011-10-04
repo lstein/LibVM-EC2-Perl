@@ -1,3 +1,4 @@
+bin/sync_to_snapshot.pl
 Build.PL
 Changes
 lib/VM/EC2.pm
