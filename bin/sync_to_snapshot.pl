@@ -17,6 +17,8 @@ use File::Find;
 use File::Basename 'basename';
 use constant GB => 1_073_741_824;
 
+my $program_name = basename($0);
+
 my($Snapshot_name,$Filesystem,$Image,$Type,$Username,$Access_key,$Secret_key);
 GetOptions('snapshot=s'    => \$Snapshot_name,
 	   'filesystem=s'  => \$Filesystem,
@@ -25,7 +27,7 @@ GetOptions('snapshot=s'    => \$Snapshot_name,
 	   'type=s'        => \$Type,
 	   'access_key=s'  => \$Access_key,
 	   'secret_key=s'  => \$Secret_key) or die <<USAGE;
-Usage: create_snapshot.pl [options] files/directories to copy...
+Usage: $program_name [options] files/directories to copy...
 Rsync the indicated files and directories to Amazon EC2 and store
 in a named EBS snapshot. Snapshot will be incrementally updated
 if it already exists. The Version tag will be updated.
@@ -43,6 +45,8 @@ Options:
       --filesystem  Type of filesystem to create (bfs,cramfs,ext*,minix,ntfs,vfat,msdos).
                     Anything with a /sbin/mkfs.* executable on the server side will work.
                     Defaults to ext4.
+
+Options can be abbreviated.
 USAGE
     ;
 
@@ -54,7 +58,7 @@ $Image             ||= 'ami-ccf405a5';
 $Type              ||= 'm1.small';
 $Username          ||= 'ubuntu';
 
-$Snapshot_name or die "Please provide a snapshot name. Run create_snapshot.pl -h for help.\n";
+$Snapshot_name or die "Please provide a snapshot name. Run $program_name --help for help.\n";
 my @locations    = @ARGV;
 
 # These are variables that contain EC2 objects that need to be destroyed
@@ -81,12 +85,12 @@ eval {
     $Volume = $volume;
 
 # Create a temporary key for ssh'ing
-    my $keypairname = basename($0)."_$$";
+    my $keypairname = "${program_name}_$$";
     $KeyFile        = File::Spec->catfile(File::Spec->tmpdir,"$keypairname.PEM");
     $KeyPair        = $ec2->create_key_pair($keypairname);
     my $private_key = $KeyPair->privateKey;
     open my $k,'>',$KeyFile or die "Couldn't create $KeyFile: $!";
-    chmod 0600,$KeyFile   or die "Couldn't chmod  $KeyFile: $!";
+    chmod 0600,$KeyFile     or die "Couldn't chmod  $KeyFile: $!";
     print $k $private_key;
     close $k;
 
@@ -112,7 +116,7 @@ eval {
 
     if ($needs_resize) {
 	die "Sorry, but can only resize ext volumes " unless $Filesystem =~ /^ext/;
-	ssh('sudo /sbin/resize2fs $device');
+	ssh("sudo /sbin/resize2fs $device");
     }
 
     ssh('sudo mkdir -p /mnt/transfer; sudo mount $device /mnt/transfer; sudo chown $Username /mnt/transfer');
@@ -139,13 +143,26 @@ cleanup();
 exit 0;
 
 sub ssh {
-    my $cmd   = shift;
-    $Instance or die "No instance running!";
-    $KeyFile  or die "No key file defined!";
-    my $ip      = $Instance->dnsName;
-    my @result  = `ssh -i $KeyFile -l $Username $cmd`;
-    chomp(@result);
-    return @result;
+    my @cmd   = @_;
+    my $pid = open my $kid,"-|"; #this does a fork
+    die "Couldn't fork: $!" unless defined $pid;
+    if ($pid) {
+	my @results;
+	while (<$kid>) {
+	    push @results,$_;
+	}
+	close $kid;
+	die "ssh failed with status $?" unless $?==0;
+	if (wantarray) {
+	    chomp(@results);
+	    return @results;
+	} else {
+	    return join '',@results;
+	}
+    }
+
+    # in child
+    exec '/usr/bin/ssh','-i',$KeyFile,'-l',$Username,$ip,@cmd;
 }
 
 sub unused_device {
