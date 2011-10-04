@@ -17,7 +17,10 @@ use File::Find;
 use File::Basename 'basename';
 use constant GB => 1_073_741_824;
 
-my $program_name = basename($0);
+$SIG{INT}=$SIG{TERM}= sub {cleanup(); exit 0};
+
+my $Program_name = basename($0);
+$Program_name    =~ s/\.pl$//;
 
 my($Snapshot_name,$Filesystem,$Image,$Type,$Username,$Access_key,$Secret_key);
 GetOptions('snapshot=s'    => \$Snapshot_name,
@@ -27,7 +30,7 @@ GetOptions('snapshot=s'    => \$Snapshot_name,
 	   'type=s'        => \$Type,
 	   'access_key=s'  => \$Access_key,
 	   'secret_key=s'  => \$Secret_key) or die <<USAGE;
-Usage: $program_name [options] files/directories to copy...
+Usage: $Program_name [options] files/directories to copy...
 Rsync the indicated files and directories to Amazon EC2 and store
 in a named EBS snapshot. Snapshot will be incrementally updated
 if it already exists. The Version tag will be updated.
@@ -58,7 +61,7 @@ $Image             ||= 'ami-ccf405a5';
 $Type              ||= 'm1.small';
 $Username          ||= 'ubuntu';
 
-$Snapshot_name or die "Please provide a snapshot name. Run $program_name --help for help.\n";
+$Snapshot_name or die "Please provide a snapshot name. Run $Program_name --help for help.\n";
 my @locations    = @ARGV;
 
 # These are variables that contain EC2 objects that need to be destroyed
@@ -85,8 +88,8 @@ eval {
     $Volume = $volume;
 
 # Create a temporary key for ssh'ing
-    my $keypairname = "${program_name}_$$";
-    $KeyFile        = File::Spec->catfile(File::Spec->tmpdir,"$keypairname.PEM");
+    my $keypairname = "${Program_name}_$$";
+    $KeyFile        = File::Spec->catfile(File::Spec->tmpdir,"$keypairname.pem");
     $KeyPair        = $ec2->create_key_pair($keypairname);
     my $private_key = $KeyPair->privateKey;
     open my $k,'>',$KeyFile or die "Couldn't create $KeyFile: $!";
@@ -95,20 +98,27 @@ eval {
     close $k;
 
 # Create a temporary security group for ssh'ing
-    $Group          = $ec2->create_security_group(-name => basename($0)."_$$") or die $ec2->error_str;
+    $Group          = $ec2->create_security_group(-name        => "${Program_name}_$$",
+						  -description => "Temporary security group created by $Program_name"
+	) or die $ec2->error_str;
     $Group->authorize_incoming(-protocol   => 'tcp',
 			       -port       => 'ssh');
+    $Group->update or die $ec2->error_str;
 
 # Provision an instance in the same availability zone
     my $zone        = $Volume->availabilityZone;
     $Instance       = $ec2->run_instances(-image_id => $Image,
 					  -zone     => $zone,
 					  -key_name => $KeyPair,
-					  -security_group => $Group) or die $ec2->error_str;
+					  -security_group_id => $Group) or die $ec2->error_str;
+    $Instance->add_tag(Name => "Staging instance for snapshot $Snapshot_name created by $Program_name");
     $ec2->wait_for_instances($Instance);
     $Instance->current_status eq 'running'      or die "Instance $Instance, status = ",$Instance->current_status;
+
+    # wait until the ssh daemon is running...
+    while (!eval{ssh('echo running')}) {sleep 2; }
     
-    my $device = unused_device()                or die "Couldn't find suitable device to attach";
+    my $device = eval{unused_device()}          or die "Couldn't find suitable device to attach";
     
     my $s = $Instance->attach_volume($Volume=>$device)  or die "Couldn't attach $Volume to $Instance via $device";
     $ec2->wait_for_attachments($s)                      or die "Couldn't attach $Volume to $Instance via $device";
@@ -119,7 +129,7 @@ eval {
 	ssh("sudo /sbin/resize2fs $device");
     }
 
-    ssh('sudo mkdir -p /mnt/transfer; sudo mount $device /mnt/transfer; sudo chown $Username /mnt/transfer');
+    ssh("sudo mkdir -p /mnt/transfer; sudo mount $device /mnt/transfer; sudo chown $Username /mnt/transfer");
     my $Host = $Instance->dnsName;
     system "rsync -Ravz -e'ssh -i $KeyFile -l $Username' @locations $Host:/mnt/transfer";
 
@@ -144,6 +154,9 @@ exit 0;
 
 sub ssh {
     my @cmd   = @_;
+    $Instance or die "Remote instance not set up correctly";
+    my $host = $Instance->dnsName;
+
     my $pid = open my $kid,"-|"; #this does a fork
     die "Couldn't fork: $!" unless defined $pid;
     if ($pid) {
@@ -152,7 +165,7 @@ sub ssh {
 	    push @results,$_;
 	}
 	close $kid;
-	die "ssh failed with status $?" unless $?==0;
+	die "ssh failed with status ",$?>>8 unless $?==0;
 	if (wantarray) {
 	    chomp(@results);
 	    return @results;
@@ -162,11 +175,11 @@ sub ssh {
     }
 
     # in child
-    exec '/usr/bin/ssh','-i',$KeyFile,'-l',$Username,$ip,@cmd;
+    exec '/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$KeyFile,'-l',$Username,$host,@cmd;
 }
 
 sub unused_device {
-    my %devices = map {$_=>1} ssh('ls /dev/sd[a-z]* /dev/xvd[a-z]*');
+    my %devices = map {$_=>1} ssh('ls /dev/*d[a-z][0-9]*');
     my $base    = $devices{'/dev/sda1'}  ? '/dev/sd'
 	         :$devices{'/dev/xvda1'} ? '/dev/xvd'
 		 :die "can't figure out whether to use /dev/sd or /dev/xvd";
@@ -185,21 +198,35 @@ sub provision_volume {
 
     my @snaps = sort {$b->startTime <=> $a->startTime} $ec2->describe_snapshots(-owner  => $ec2->account_id,
 										-filter => {description=>$snapshot_name});
+    my $vol;
     if (@snaps) {
 	my $snap = $snaps[0];
 	my $s    = $size > $snap->volumeSize ? $size : $snap->volumeSize;
-	return $snap->create_volume(-availability_zone=>$zone,
+	$vol = $snap->create_volume(-availability_zone=>$zone,
 				    -size             => $s);
     } else {
-	return $ec2->create_volume(-availability_zone=>$zone,
+	$vol = $ec2->create_volume(-availability_zone=>$zone,
 				   -size             =>$size);
     }
+    return unless $vol;
+    $vol->add_tag(Name=>"Staging volume for snapshot $snapshot_name created by $Program_name");
+    return $vol;
 }
 
 sub cleanup {
     return unless $ec2;
-    $ec2->delete_key_pair($KeyPair) if $KeyPair;
-    $Instance->terminate()          if $Instance;
-    $ec2->delete_volume($Volume)    if $Volume;
-    unlink $KeyFile                 if -e $KeyFile;
+    $ec2->delete_key_pair($KeyPair)        if $KeyPair;
+    $Instance->terminate()                 if $Instance;
+    $ec2->delete_volume($Volume)           if $Volume;
+    $ec2->delete_security_group($Group)    if $Group;
+    unlink $KeyFile                        if -e $KeyFile;
+    undef $KeyPair;
+    undef $Instance;
+    undef $Volume;
+    undef $KeyFile;
+    undef $Group;
+}
+
+END {
+    cleanup();
 }
