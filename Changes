@@ -5,8 +5,6 @@
        about not providing all required arguments.
      - Add VM::EC2::Snapshot->size() as an alias to volumeSize().
      - Fix documentation formatting bugs in VM::EC2::Instance::Metadata.
-     - Add VM::EC2::Snapshot->size() as an alias to volumeSize().
-     -  Fix documentation formatting bugs in VM::EC2::Instance::Metadata
 
 1.07   Wed Sep 21 11:54:22 EDT 2011
      - Add full support for spot instances.
