@@ -73,6 +73,7 @@ eval {
     $ec2 = VM::EC2->new() or die "Can't create new VM::EC2";
 
 # find how large a volume we'll need.
+    print STDERR "Calculating needed size of staging volume...\n";
     my $bytes_needed = 0;
     find(sub {$bytes_needed += -s $_},@locations);
 
@@ -83,11 +84,16 @@ eval {
     my $gb = int(0.5+$bytes_needed/GB);
     $gb    = 1 if $gb < 1;
 
+    die "Required volume exceeds EC2 1TB limit"
+	if $gb > 1024;
+
 # Provision the volume
-    my($volume,$needs_resize) = provision_volume($gb,$Snapshot_name);
+    print STDERR "Provisioning a $gb GB volume...\n";
+    my($volume,$needs_mkfs,$needs_resize) = provision_volume($gb,$Snapshot_name);
     $Volume = $volume;
 
 # Create a temporary key for ssh'ing
+    print STDERR "Creating a temporary ssh key...\n";
     my $keypairname = "${Program_name}_$$";
     $KeyFile        = File::Spec->catfile(File::Spec->tmpdir,"$keypairname.pem");
     $KeyPair        = $ec2->create_key_pair($keypairname);
@@ -98,6 +104,7 @@ eval {
     close $k;
 
 # Create a temporary security group for ssh'ing
+    print STDERR "Creating a temporary security group with ssh enabled...\n";
     $Group          = $ec2->create_security_group(-name        => "${Program_name}_$$",
 						  -description => "Temporary security group created by $Program_name"
 	) or die $ec2->error_str;
@@ -106,32 +113,45 @@ eval {
     $Group->update or die $ec2->error_str;
 
 # Provision an instance in the same availability zone
+    print STDERR "Provisioning staging instance...\n";
     my $zone        = $Volume->availabilityZone;
     $Instance       = $ec2->run_instances(-image_id => $Image,
 					  -zone     => $zone,
 					  -key_name => $KeyPair,
+					  -instance_type     => $Type,
 					  -security_group_id => $Group) or die $ec2->error_str;
     $Instance->add_tag(Name => "Staging instance for snapshot $Snapshot_name created by $Program_name");
+
+# wait until the instance is running and the ssh daemon is responding...
+    print STDERR "Waiting for instance to come up. This may take a while...\n";
     $ec2->wait_for_instances($Instance);
     $Instance->current_status eq 'running'      or die "Instance $Instance, status = ",$Instance->current_status;
-
-    # wait until the ssh daemon is running...
-    while (!eval{ssh('echo running')}) {sleep 2; }
+    wait_for_ssh_daemon();  # we may die on this step
     
     my $device = eval{unused_device()}          or die "Couldn't find suitable device to attach";
     
+# attach and initialize volume
+    print STDERR "Attaching staging volume...\n";
     my $s = $Instance->attach_volume($Volume=>$device)  or die "Couldn't attach $Volume to $Instance via $device";
     $ec2->wait_for_attachments($s)                      or die "Couldn't attach $Volume to $Instance via $device";
     $s->current_status eq 'attached'                    or die "Couldn't attach $Volume to $Instance via $device";
 
     if ($needs_resize) {
 	die "Sorry, but can only resize ext volumes " unless $Filesystem =~ /^ext/;
+	print STDERR "Resizing previously-snapshotted volume to $gb GB...\n";
 	ssh("sudo /sbin/resize2fs $device");
+    } elsif ($needs_mkfs) {
+	print STDERR "Making $Filesystem filesystem on staging volume...\n";
+	ssh("sudo /sbin/mkfs.$Filesystem $device");
     }
 
+# do the rsync
+    print STDERR "Mounting staging volume...\n";
     ssh("sudo mkdir -p /mnt/transfer; sudo mount $device /mnt/transfer; sudo chown $Username /mnt/transfer");
+
+    print STDERR "Beginning rsync...\n";
     my $Host = $Instance->dnsName;
-    system "rsync -Ravz -e'ssh -i $KeyFile -l $Username' @locations $Host:/mnt/transfer";
+    system "rsync -Ravz -e'ssh -o \"StrictHostKeyChecking no\" -i $KeyFile -l $Username' @locations $Host:/mnt/transfer";
 
     ssh('sudo umount /mnt/transfer');
     $Instance->detach_volume($Volume);
@@ -142,8 +162,11 @@ eval {
 	$version = $snap->tags->{Version} || 0;
 	$version++;
     }
+
+    print STDERR "Creating snapshot $Snapshot_name version $version...\n";
     my $snap = $Volume->create_snapshot($Snapshot_name);
-    $snap    = $snap->add_tags(Version => $version);
+    $snap->add_tags(Version => $version);
+    $snap->add_tags(Name    => $Snapshot_name);
     print "Created snap $snap\n";
 };
 
@@ -196,30 +219,60 @@ sub provision_volume {
     my @zones = $ec2->describe_availability_zones({state=>'available'});
     my $zone  = $zones[rand @zones];
 
-    my @snaps = sort {$b->startTime <=> $a->startTime} $ec2->describe_snapshots(-owner  => $ec2->account_id,
+    my @snaps = sort {$b->startTime cmp $a->startTime} $ec2->describe_snapshots(-owner  => $ec2->account_id,
 										-filter => {description=>$snapshot_name});
-    my $vol;
+    my ($vol,$needs_mkfs,$needs_resize);
     if (@snaps) {
 	my $snap = $snaps[0];
+	print STDERR "Reusing existing snapshot $snap...\n";
 	my $s    = $size > $snap->volumeSize ? $size : $snap->volumeSize;
 	$vol = $snap->create_volume(-availability_zone=>$zone,
 				    -size             => $s);
+	$needs_resize = $snap->volumeSize < $s;
     } else {
 	$vol = $ec2->create_volume(-availability_zone=>$zone,
 				   -size             =>$size);
+	$needs_mkfs++;
     }
     return unless $vol;
     $vol->add_tag(Name=>"Staging volume for snapshot $snapshot_name created by $Program_name");
-    return $vol;
+    return ($vol,$needs_mkfs,$needs_resize);
+}
+
+sub wait_for_ssh_daemon {
+    open SAVERR,">&STDERR";
+    open STDERR,">/dev/null";  # inhibit error messages temporarily
+    eval {
+	local $SIG{ALRM} = sub {die 'timeout'};
+	alarm(60);  # do not wait more than one minute
+	while (!eval{ssh('echo running')}) {sleep 2; }
+	alarm(0);
+    };
+    open STDERR,">&SAVERR";
+    if ($@ =~ /timeout/) {
+	die "Timed out while waiting for ssh daemon to come up";
+    }
 }
 
 sub cleanup {
     return unless $ec2;
+
+    print STDERR "Deleting temporary keypair...\n";
     $ec2->delete_key_pair($KeyPair)        if $KeyPair;
-    $Instance->terminate()                 if $Instance;
-    $ec2->delete_volume($Volume)           if $Volume;
-    $ec2->delete_security_group($Group)    if $Group;
     unlink $KeyFile                        if -e $KeyFile;
+
+    print STDERR "Deleting staging volume...\n";
+    $ec2->delete_volume($Volume)           if $Volume;
+
+    print STDERR "Terminating staging instance...\n";
+    $Instance->terminate()                 if $Instance;
+
+    if ($Group) {
+	print STDERR "Waiting for staging instance to terminate...\n";
+	$ec2->wait_for_instances($Instance);
+	print STDERR "Deleting temporary security group...\n";
+	$ec2->delete_security_group($Group);
+    }
     undef $KeyPair;
     undef $Instance;
     undef $Volume;

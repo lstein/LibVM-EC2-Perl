@@ -298,6 +298,36 @@ following caveats apply:
     You may also elect to raise an exception when an error occurs.
     See the new() method for details.
 
+=head1 EXAMPLE SCRIPT
+
+The script sync_to_snapshot.pl, distributed with this module,
+illustrates a relatively complex set of steps on EC2 that does
+something useful. Given a list of directories or files on the local
+filesystem it copies the files into an EBS snapshot with the desired
+name by executing the following steps:
+
+1. Provisions a new EBS volume on EC2 large enough to hold the data.
+
+2. Spins up a staging instance to manage the network transfer of data
+from the local machine to the staging volume.
+
+3. Creates a temporary ssh keypair and a security group that allows an
+rsync-over-ssh.
+
+4. Formats and mounts the volume if necessary.
+
+5. Initiates an rsync-over-ssh for the designated files and
+directories.
+
+6. Unmounts and snapshots the volume.
+
+7. Cleans up.
+
+If a snapshot of the same name already exists, then it is used to
+create the staging volume, enabling network-efficient synchronization
+of the files. A snapshot tag named "Version" is incremented each time
+you synchronize.
+
 =head1 CORE METHODS
 
 This section describes the VM::EC2 constructor, accessor methods, and

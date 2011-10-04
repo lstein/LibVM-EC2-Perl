@@ -1,5 +1,6 @@
-1.08
+1.08   Tue Oct  4 19:04:52 EDT 2011
      - Fixed return value from delete_security_group().
+     - Added a detailed example script, bin/sync_to_snapshot.pl
 
 1.07   Wed Sep 21 11:54:22 EDT 2011
      - Add full support for spot instances.
