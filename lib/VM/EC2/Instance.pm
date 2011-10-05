@@ -56,7 +56,9 @@ These object methods are supported:
                    that describe_instances() was called, as a
                    VM::EC2::Instance::State object. Also
                    see the status() method, which re-queries EC2 for
-                   the current state of the instance.
+                   the current state of the instance. States are
+                   represented in strings as  "terminated", "running", 
+                   "stopped", "stopping",and "shutting-down".
 
  privateDnsName -- The private DNS name assigned to the instance within
                    Amazon's EC2 network. This element is defined only

@@ -174,9 +174,9 @@ http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/. The
 following caveats apply:
 
  1) Not all of the Amazon API is currently implemented. Specifically,
-    calls dealing with Virtual Private Clouds (VPC), cluster management,
-    and spot instances are not currently supported.
-    See L</MISSING METHODS> for a list of all the unimplemented API calls. 
+    calls dealing with Virtual Private Clouds (VPC) and cluster
+    management, are not currently supported.  See L</MISSING METHODS>
+    for a list of all the unimplemented API calls.
 
  2) For consistency with common Perl coding practices, method calls
     are lowercase and words in long method names are separated by
@@ -656,8 +656,23 @@ You may omit the -filter argument name if there are no other arguments:
                             'architecture'                    => 'i386',
                              'tag:Role'                        => 'Server'});
 
-There are a large number of potential filters, which are listed at
+There are a large number of filters, which are listed in full at
 http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeInstances.html.
+
+Here is a alpha-sorted list of filter names: architecture,
+availability-zone, block-device-mapping.attach-time,
+block-device-mapping.delete-on-termination,
+block-device-mapping.device-name, block-device-mapping.status,
+block-device-mapping.volume-id, client-token, dns-name, group-id,
+group-name, hypervisor, image-id, instance-id, instance-lifecycle,
+instance-state-code, instance-state-name, instance-type,
+instance.group-id, instance.group-name, ip-address, kernel-id,
+key-name, launch-index, launch-time, monitoring-state, owner-id,
+placement-group-name, platform, private-dns-name, private-ip-address,
+product-code, ramdisk-id, reason, requester-id, reservation-id,
+root-device-name, root-device-type, source-dest-check,
+spot-instance-request-id, state-reason-code, state-reason-message,
+subnet-id, tag-key, tag-value, tag:key, virtualization-type, vpc-id.
 
 Note that the objects returned from this method are the instances
 themselves, and not a reservation set. The reservation ID can be
@@ -870,6 +885,7 @@ sub run_instances {
 }
 
 =head2 @s = $ec2->start_instances(-instance_id=>\@instance_ids)
+
 =head2 @s = $ec2->start_instances(@instance_ids)
 
 Start the instances named by @instance_ids and return one or more
@@ -3455,7 +3471,6 @@ AttachVpnGateway
 BundleInstance
 CancelBundleTask
 CancelConversionTask
-CancelSpotInstanceRequests
 ConfirmProductInstance
 CreateCustomerGateway
 CreateDhcpOptions
@@ -3465,7 +3480,6 @@ CreateNetworkAclEntry
 CreatePlacementGroup
 CreateRoute
 CreateRouteTable
-CreateSpotDatafeedSubscription
 CreateSubnet
 CreateVpc
 CreateVpnConnection
@@ -3478,7 +3492,6 @@ DeleteNetworkAclEntry
 DeletePlacementGroup
 DeleteRoute
 DeleteRouteTable
-DeleteSpotDatafeedSubscription
 DeleteSubnet
 DeleteVpc
 DeleteVpnConnection
@@ -3490,9 +3503,6 @@ DescribeDhcpOptions
 DescribeNetworkAcls
 DescribePlacementGroups
 DescribeRouteTables
-DescribeSpotDatafeedSubscription
-DescribeSpotInstanceRequests
-DescribeSpotPriceHistory
 DescribeSubnets
 DescribeVpcs
 DescribeVpnConnections
@@ -3505,7 +3515,6 @@ ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
 ReplaceRoute
 ReplaceRouteTableAssociation
-RequestSpotInstances
 
 =head1 OTHER INFORMATION
 
