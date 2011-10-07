@@ -18,6 +18,7 @@ VM::EC2::Convenience::DataTransferServer - Automated VM for moving data in and o
  # provision volume either creates volumes from scratch or initializes them
  # using similarly-named EBS snapshots, adjusting the size as necessary.
  $server->provision_volume(-name    => 'Pictures',
+                           -fstype  => 'ext4',
                            -size    => 20) or die $server->error_str;
  $server->provision_volume(-name    => 'Videos',
                            -size    => 20) or die $server->error_str;
@@ -36,10 +37,11 @@ VM::EC2::Convenience::DataTransferServer - Automated VM for moving data in and o
 
  # remote to local transfer
  $server->get('Music' => '/tmp/music');
+ $server->get('Music','Videos' => '/tmp/music');
 
  # remote to remote transfer - useful for interzone transfers
- $server->put('Music' => "$server2:/home/ubuntu/music");
- $server->put('Music' => "$server2:Music");
+ $server->sync('Music' => "$server2:/home/ubuntu/music");
+ $server->sync('Music' => "$server2:Music");
 
  $server->snapshot('Music','Videos','Pictures');
  $server->terminate;  # automatically terminates when goes out of scope
@@ -90,19 +92,15 @@ sub new {
     my %args  = @_;
     $args{-image}         ||= '';
     $args{-image_name}    ||= 'ubuntu-maverick-10.10';
+    $args{-username}      ||= 'ubuntu';
     $args{-architecture}  ||= 'i386';
     $args{-root_type}     ||= 'instance-store';
     $args{-instance_type} ||= $args{-architecture} eq 'i386' ? 'm1.small' : 'm1.large';
 
-    my $instance = $class->create_instance(\%args)
-	or croak "Could not create an instance that satisfies requested criteria";
-
-    $class->wait_till_instance_is_ready($instance)
-	or croak "Instance did not come up in time expected";
-
     my $self = bless {
 	ec2      => $ec2,
-	instance => $instance,
+	instance => undef,
+	username => $username,
 	volumes  => {},           # {Symbolic_name => {snapshot=>$snap,volume=>$volume,mount=>'mnt/pt'}}
     },ref $class || $class;
     weaken($Servers{$self->as_string}=$self);
@@ -113,14 +111,114 @@ sub ec2      { shift->{ec2}      }
 sub instance { shift->{instance} }
 sub volumes  { shift->{volumes}  }
 sub keyfile  { shift->{keyfile}  }
+sub username { shift->{username} }
 
 sub as_string {
     my $self = shift;
     (my $ep   = $self->ec2->endpoint) =~ s!^http://!!;
-    return "$ep/".$self->instance;
+    return "$ep/".$self->{instance}||'no instance';
 }
 
-sub create_instance {
+sub provision_volume {
+    my $self = shift;
+    my %args = @_;
+    my $name = $args{-name};
+    my $size = $args{-size};
+    $name && $size or croak "Usage: provision_volume(-name=>'name',-size=>$size)";
+    my $mtpt   = $args{-mount}  || '/mnt/'.$self->ec2->token;
+    my $fstype = $args{-fstype} || 'ext4';
+    my $username = $self->username;
+    
+    $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
+    $self->info("Provisioning a $size GB volume...\n");
+    my $instance = $self->instance;
+    my $zone     = $instance->availabilityZone;
+    my ($vol,$needs_mkfs,$needs_resize) = $self->_create_volume($name,$size,$zone);
+    
+    my $device = eval{$self->unused_device()}        or die "Couldn't find suitable device to attach this volume to";
+    my $s = $Instance->attach_volume($vol=>$device)  or die "Couldn't attach $vol to $instance via $device";
+    $ec2->wait_for_attachments($s)                   or die "Couldn't attach $vol to $instance via $device";
+    $s->current_status eq 'attached'                 or die "Couldn't attach $vol to $instance via $device";
+
+    if ($needs_resize) {
+	die "Sorry, but can only resize ext volumes " unless $fstype =~ /^ext/;
+	$self->info("Resizing previously-snapshotted volume to $gb GB...\n");
+	$self->ssh("sudo /sbin/resize2fs $device");
+    } elsif ($needs_mkfs) {
+	$self->info("Making $fstype filesystem on staging volume...\n");
+	$self->ssh("sudo /sbin/mkfs.$fstype $device");
+    }
+
+    $self->info("Mounting staging volume...\n");
+    $self->ssh("sudo mkdir -p $mtpt; sudo mount $device $mtpt; sudo chown $username $mtpt");
+
+    $self->{volumes}{$name} = {volume=>$vol,mtpt=>$mtpt};
+    return $self->as_string .':'.$name;
+}
+
+sub put {
+    my $self   = shift;
+    my @source = @_;
+    my $dest   = pop @source;
+    # resolve symbolic name of $dest
+    my $target = $self->{volumes}{$dest}{mtpt} or croak "Staging volume $dest is unknown";
+    my $host     = $self->instance->dnsName;
+    my $keyfile  = $self->keyfile;
+    my $username = $self->username;
+    $self->info("Beginning rsync...\n");
+    system "rsync -Ravz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @source $host:$target";
+}
+
+sub sync {
+    my $self   = shift;
+    my @source = @_;
+    my $dest   = pop @source;
+    # figure out what $dest is
+    my ($dhost,$dpath) = split(':',$dest);
+    my ($host,$path);
+    if (my $server2 = $Servers{$dhost}) {
+	$host = $server2->instance->dnsName;
+	$path = $server2->{volumes}{$dpath}{mtpt} or croak "$dhost has no symbolic volume named $dpath";
+    } else {
+	$host = $dhost;
+	$path = $dpath;
+    }
+    croak "Oyy vey. How do I get the public key from source onto dest?";
+
+}
+
+sub get {
+    my $self = shift;
+    my @source = @_;
+    my $target   = pop @source;
+
+    # resolve symbolic names of src
+    my $host     = $self->instance->dnsName;
+    my @from;
+    foreach (@source) {
+	my $mnt = $self->{volumes}{$_}{mtpt} or croak "Staging volume $_ is unknown";
+	push @from,"$host:$mnt";
+    }
+    my $keyfile  = $self->keyfile;
+    my $username = $self->username;
+    
+    $self->info("Beginning rsync...\n");
+    system "rsync -Ravz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @from $target";
+}
+
+sub instance {
+    my $self = shift;
+    unless ($self->{instance}) {
+	my $instance = $self->_create_instance(\%args)
+	    or croak "Could not create an instance that satisfies requested criteria";
+	$class->wait_till_instance_is_ready($instance)
+	    or croak "Instance did not come up in a reasonable time";
+	$self->{instance} = $instance;
+    }
+    return $self->{instance};
+}
+
+sub _create_instance {
     my $self = shift;
     my $args = shift;
     # search for a matching instance
@@ -128,6 +226,7 @@ sub create_instance {
     $image ||= $self->search_for_image($args);
     my $sg   = $self->security_group();
     my $kp   = $self->keypair();
+    $self->info("Spinning up a staging instance of type $args->{-instance_type}...\n");
     return $self->ec2->run_instances(-image_id          => $image,
 				     -instance_type     => $args->{-instance_type},
 				     -security_group_id => $sg,
@@ -186,6 +285,32 @@ sub _new_keypair {
     close $k;
     $self->{keyfile} = $keyfile;
     return $kp;
+}
+
+sub _create_volume {
+    my $self = shift;
+    my ($name,$size,$zone) = @_;
+    my $ec2 = $self->ec2;
+    
+    my @snaps = sort {$b->startTime cmp $a->startTime} $ec2->describe_snapshots(-owner  => $ec2->account_id,
+										-filter => {description=>$name});
+    my ($vol,$needs_mkfs,$needs_resize);
+    if (@snaps) {
+	my $snap = $snaps[0];
+	print STDERR "Reusing existing snapshot $snap...\n";
+	my $s    = $size > $snap->volumeSize ? $size : $snap->volumeSize;
+	$vol = $snap->create_volume(-availability_zone=>$zone,
+				    -size             => $s);
+	$needs_resize = $snap->volumeSize < $s;
+    } else {
+	$vol = $ec2->create_volume(-availability_zone=>$zone,
+				   -size             =>$size);
+	$needs_mkfs++;
+    }
+    return unless $vol;
+    $vol->add_tag(Name=>"Staging volume for $name created by ".__PACKAGE__);
+    $vol->add_tag(Role=>"Staging volume for $name created by ".__PACKAGE__);
+    return ($vol,$needs_mkfs,$needs_resize);
 }
 
 sub cleanup {
