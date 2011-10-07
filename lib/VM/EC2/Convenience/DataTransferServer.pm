@@ -40,8 +40,8 @@ VM::EC2::Convenience::DataTransferServer - Automated VM for moving data in and o
  $server->get('Music','Videos' => '/tmp/music');
 
  # remote to remote transfer - useful for interzone transfers
- $server->sync('Music' => "$server2:/home/ubuntu/music");
- $server->sync('Music' => "$server2:Music");
+ $server->put('Music' => "$server2:/home/ubuntu/music");
+ $server->put('Music' => "$server2:Music");
 
  $server->snapshot('Music','Videos','Pictures');
  $server->terminate;  # automatically terminates when goes out of scope
@@ -90,18 +90,21 @@ sub new {
     my $class = shift;
     my $ec2   = shift or croak "Usage: $class->new(\$ec2,\@args)";
     my %args  = @_;
-    $args{-image}         ||= '';
-    $args{-image_name}    ||= 'ubuntu-maverick-10.10';
-    $args{-username}      ||= 'ubuntu';
-    $args{-architecture}  ||= 'i386';
-    $args{-root_type}     ||= 'instance-store';
-    $args{-instance_type} ||= $args{-architecture} eq 'i386' ? 'm1.small' : 'm1.large';
+    $args{-quiet}           ||= undef;
+    $args{-preserve_volume} ||= undef;
+    $args{-image}           ||= '';
+    $args{-image_name}      ||= 'ubuntu-maverick-10.10';
+    $args{-architecture}    ||= 'i386';
+    $args{-root_type}       ||= 'instance-store';
+    $args{-instance_type}   ||= $args{-architecture} eq 'i386' ? 'm1.small' : 'm1.large';
 
     my $self = bless {
 	ec2      => $ec2,
 	instance => undef,
 	username => $username,
 	volumes  => {},           # {Symbolic_name => {snapshot=>$snap,volume=>$volume,mount=>'mnt/pt'}}
+	quiet    => $args{-quiet},
+	preserve => $args{-preserve_volume},
     },ref $class || $class;
     weaken($Servers{$self->as_string}=$self);
     return $self;
@@ -112,6 +115,8 @@ sub instance { shift->{instance} }
 sub volumes  { shift->{volumes}  }
 sub keyfile  { shift->{keyfile}  }
 sub username { shift->{username} }
+sub preserve { shift->{preserve} }
+sub quiet    { shift->{quiet}    }
 
 sub as_string {
     my $self = shift;
@@ -226,16 +231,19 @@ sub _create_instance {
     $image ||= $self->search_for_image($args);
     my $sg   = $self->security_group();
     my $kp   = $self->keypair();
-    $self->info("Spinning up a staging instance of type $args->{-instance_type}...\n");
-    return $self->ec2->run_instances(-image_id          => $image,
-				     -instance_type     => $args->{-instance_type},
-				     -security_group_id => $sg,
-				     -key_name          => $kp);
+    $self->info("Creating staging server from $image...\n");
+    my $instance = $self->ec2->run_instances(-image_id          => $image,
+					     -instance_type     => $args->{-instance_type},
+					     -security_group_id => $sg,
+					     -key_name          => $kp);
+    $instance->add_tag(Name=>"Staging server created by VM::EC2::Convenience::DataTransferServer");
+    return $instance;
 }
 
 sub search_for_image {
     my $self = shift;
     my $args = shift;
+    $self->info("Searching for a suitable image matching $args->{-image_name}...\n");
     my @candidates = $self->ec2->describe_images({'name'             => "*$args->{-image_name}*",
 						  'root-device-type' => $args->{-root_type},
 						  'architecture'     => $args->{-architecture}});
@@ -243,6 +251,7 @@ sub search_for_image {
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
     my ($most_recent) = sort {$b->name cmp $a->name} @candidates;
+    $self->info("Found $most_recent...\n");
     return $most_recent;
 }
 
@@ -260,6 +269,7 @@ sub _new_security_group {
     my $self = shift;
     my $ec2  = $self->ec2;
     my $name = $ec2->token;
+    $self->info("Creating temporary security group $name...\n");
     my $sg =  $ec2->create_security_group(-name  => $name,
 				       -description => "Temporary security group created by ".__PACKAGE__
 	) or die $ec2->error_str;
@@ -273,6 +283,7 @@ sub _new_keypair {
     my $self = shift;
     my $ec2  = $self->ec2;
     my $name = $ec2->token;
+    $self->info("Creating temporary keypair $name...\n");
     my $kp   = $ec2->create_key_pair($name);
     my $tmpdir      = File::Spec->catfile(File::Spec->tmpdir,__PACKAGE__);
     make_path($tmpdir);
@@ -313,6 +324,13 @@ sub _create_volume {
     return ($vol,$needs_mkfs,$needs_resize);
 }
 
+
+sub info {
+    my $self = shift;
+    return if $self->quiet;
+    print STDERR @_;
+}
+
 sub cleanup {
     my $self = shift;
     if (-e $self->keyfile) {
@@ -329,9 +347,11 @@ sub cleanup {
     if (my $sg = $self->{security_group}) {
 	$self->ec2->delete_security_group($sg);
     }
-    for my $v (keys %{$self->volumes}) {
-	my $volume = $self->volumes->{$v}{volume};
-	$self->ec2->delete_volume($volume); # do we really want to do this?
+    unless ($self->preserve) {
+	for my $v (keys %{$self->volumes}) {
+	    my $volume = $self->volumes->{$v}{volume};
+	    $self->ec2->delete_volume($volume); # do we really want to do this?
+	}
     }
 }
 
