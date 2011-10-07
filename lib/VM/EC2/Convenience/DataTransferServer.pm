@@ -40,8 +40,8 @@ VM::EC2::Convenience::DataTransferServer - Automated VM for moving data in and o
  $server->get('Music','Videos' => '/tmp/music');
 
  # remote to remote transfer - useful for interzone transfers
- $server->put('Music' => "$server2:/home/ubuntu/music");
- $server->put('Music' => "$server2:Music");
+ $server->sync('Music' => "$server2:/home/ubuntu/music");
+ $server->sync('Music' => "$server2:Music");
 
  $server->snapshot('Music','Videos','Pictures');
  $server->terminate;  # automatically terminates when goes out of scope
@@ -121,7 +121,7 @@ sub quiet    { shift->{quiet}    }
 sub as_string {
     my $self = shift;
     (my $ep   = $self->ec2->endpoint) =~ s!^http://!!;
-    return "$ep/".$self->{instance}||'no instance';
+    return "$ep-".$self->{instance}||'no instance';
 }
 
 sub provision_volume {
@@ -161,12 +161,63 @@ sub provision_volume {
     return $self->as_string .':'.$name;
 }
 
+# take real or symbolic name and turn it into a two element
+# list consisting of server object and mount point
+# possible forms:
+#            /local/path
+#            Symbolic_path
+#            $server:/remote/path
+#            $server:./remote/path
+#            $server:../remote/path
+#            $server:Symbolic_path
+#            $server:Symbolic_path/additional/directories
+# 
+# treat path as symbolic if it does not start with a slash
+# or dot characters
+sub resolve_path {
+    my $self  = shift;
+    my $vpath = shift;
+    my ($servername,$pathname) = split ':',$vpath;
+
+    my ($server,$path);
+    if ($servername) {
+	$server = $Servers{$servername} or croak "$servername is not a transfer server";
+    }
+
+    if ($pathname !~ m!^[/.]!) { # symbolic name
+	my ($base,@rest) = split('/',$pathname);
+	my $mtpt = $server->mntpt($base) or croak "$server: no mountpoint for $base";
+	$path    = join ('/',$mtpt,@rest);
+    } else {
+	$path = $pathname;
+    }
+
+    return ($server,$path);
+}
+
+# most general form
+sub copy {
+    my $self = shift;
+    my @paths = map $self->resolve_path(@_);
+
+    my $dest   = pop @paths;
+    my @source = @paths;
+
+    my ($host,%hosts);
+    foreach (@source) {
+	$host        ||= $source->[0];  # looks mad
+	$source->[0] ||= $host;         # but isn't
+	$hosts{$source->[0]}++;
+    }
+    croak "More than one source host specified" if keys %hosts > 1;
+}
+
 sub put {
     my $self   = shift;
     my @source = @_;
     my $dest   = pop @source;
     # resolve symbolic name of $dest
-    my $target = $self->{volumes}{$dest}{mtpt} or croak "Staging volume $dest is unknown";
+    my $target   = $self->{volumes}{$dest}{mtpt} or croak "Staging volume $dest is unknown";
     my $host     = $self->instance->dnsName;
     my $keyfile  = $self->keyfile;
     my $username = $self->username;
@@ -181,15 +232,12 @@ sub sync {
     # figure out what $dest is
     my ($dhost,$dpath) = split(':',$dest);
     my ($host,$path);
-    if (my $server2 = $Servers{$dhost}) {
-	$host = $server2->instance->dnsName;
-	$path = $server2->{volumes}{$dpath}{mtpt} or croak "$dhost has no symbolic volume named $dpath";
-    } else {
-	$host = $dhost;
-	$path = $dpath;
-    }
-    croak "Oyy vey. How do I get the public key from source onto dest?";
-
+    my $server2 = $Servers{$dhost} or croak "$dhost is not a DataTransferServer";
+    $host = $server2->instance->dnsName;
+    $path = $server2->{volumes}{$dpath}{mtpt} or croak "$dhost has no symbolic volume named $dpath";
+    my $server2_private_key = $server2->keyfile;
+    my $spk = basename($server2_private_key);
+    $server1->put($server2_private_key => $spk);
 }
 
 sub get {
