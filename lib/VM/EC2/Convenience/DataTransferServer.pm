@@ -94,6 +94,7 @@ sub new {
     $args{-preserve_volume} ||= undef;
     $args{-image}           ||= '';
     $args{-image_name}      ||= 'ubuntu-maverick-10.10';
+    $args{-username}        ||= 'ubuntu';
     $args{-architecture}    ||= 'i386';
     $args{-root_type}       ||= 'instance-store';
     $args{-instance_type}   ||= $args{-architecture} eq 'i386' ? 'm1.small' : 'm1.large';
@@ -101,12 +102,14 @@ sub new {
     my $self = bless {
 	ec2      => $ec2,
 	instance => undef,
-	username => $username,
+	username => $args{-username},
 	volumes  => {},           # {Symbolic_name => {snapshot=>$snap,volume=>$volume,mount=>'mnt/pt'}}
 	quiet    => $args{-quiet},
 	preserve => $args{-preserve_volume},
     },ref $class || $class;
     weaken($Servers{$self->as_string}=$self);
+
+    $self->new_instance(\%args);
     return $self;
 }
 
@@ -120,8 +123,8 @@ sub quiet    { shift->{quiet}    }
 
 sub as_string {
     my $self = shift;
-    (my $ep   = $self->ec2->endpoint) =~ s!^http://!!;
-    return "$ep-".$self->{instance}||'no instance';
+    my $ip   = eval {$self->instance->dnsName} || '1.2.3.4';
+    return $ip;
 }
 
 sub provision_volume {
@@ -130,8 +133,9 @@ sub provision_volume {
     my $name = $args{-name};
     my $size = $args{-size};
     $name && $size or croak "Usage: provision_volume(-name=>'name',-size=>$size)";
-    my $mtpt   = $args{-mount}  || '/mnt/'.$self->ec2->token;
-    my $fstype = $args{-fstype} || 'ext4';
+    my $ec2      = $self->ec2;
+    my $mtpt     = $args{-mount}  || '/mnt/'.$ec2->token;
+    my $fstype   = $args{-fstype} || 'ext4';
     my $username = $self->username;
     
     $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
@@ -141,13 +145,13 @@ sub provision_volume {
     my ($vol,$needs_mkfs,$needs_resize) = $self->_create_volume($name,$size,$zone);
     
     my $device = eval{$self->unused_device()}        or die "Couldn't find suitable device to attach this volume to";
-    my $s = $Instance->attach_volume($vol=>$device)  or die "Couldn't attach $vol to $instance via $device";
+    my $s = $instance->attach_volume($vol=>$device)  or die "Couldn't attach $vol to $instance via $device";
     $ec2->wait_for_attachments($s)                   or die "Couldn't attach $vol to $instance via $device";
     $s->current_status eq 'attached'                 or die "Couldn't attach $vol to $instance via $device";
 
     if ($needs_resize) {
 	die "Sorry, but can only resize ext volumes " unless $fstype =~ /^ext/;
-	$self->info("Resizing previously-snapshotted volume to $gb GB...\n");
+	$self->info("Resizing previously-snapshotted volume to $size GB...\n");
 	$self->ssh("sudo /sbin/resize2fs $device");
     } elsif ($needs_mkfs) {
 	$self->info("Making $fstype filesystem on staging volume...\n");
@@ -177,13 +181,24 @@ sub provision_volume {
 sub resolve_path {
     my $self  = shift;
     my $vpath = shift;
-    my ($servername,$pathname) = split ':',$vpath;
 
-    my ($server,$path);
-    if ($servername) {
-	$server = $Servers{$servername} or croak "$servername is not a transfer server";
+    my ($servername,$pathname);
+    if ($vpath =~ /^([^:])+:(.+)$/) {
+	$servername = $self->{_last_host} = $1;
+	$pathname   = $2;
+    } elsif ($vpath =~ /^:(.+)$/) {
+	$servername = $self->{_last_host};
+	$pathname   = $2;
+    } else {
+	return [undef,$vpath];   # localhost
     }
 
+    my $server = $Servers{$servername} || $servername;
+    unless (ref $server && $server->isa('VM::EC2::Convenience::DataTransferServer')) {
+	return [$server,$pathname];
+    }
+
+    my $path;
     if ($pathname !~ m!^[/.]!) { # symbolic name
 	my ($base,@rest) = split('/',$pathname);
 	my $mtpt = $server->mntpt($base) or croak "$server: no mountpoint for $base";
@@ -192,24 +207,63 @@ sub resolve_path {
 	$path = $pathname;
     }
 
-    return ($server,$path);
+    return [$server,$path];
 }
 
 # most general form
+# 
 sub copy {
     my $self = shift;
-    my @paths = map $self->resolve_path(@_);
+    delete $self->{_last_host};
+    my @paths = map {$self->resolve_path($_)} @_;
 
     my $dest   = pop @paths;
     my @source = @paths;
 
-    my ($host,%hosts);
+    my %hosts;
     foreach (@source) {
-	$host        ||= $source->[0];  # looks mad
-	$source->[0] ||= $host;         # but isn't
-	$hosts{$source->[0]}++;
+	$hosts{$_[0]} = $_->[0];
     }
     croak "More than one source host specified" if keys %hosts > 1;
+    my ($source_host) = values %hosts;
+    my $dest_host     = $dest->[0];
+
+    my @source_paths      = map {$_->[1]} @source;
+    my $dest_path         = $dest->[1];
+
+    # localhost           => DataTransferServer
+    if (!$source_host && UNIVERSAL::isa($dest_host,__PACKAGE__)) {
+	return $dest_host->put(@source_paths,$dest_path);
+    }
+
+    # DataTransferServer  => localhost
+    if (UNIVERSAL::isa($source_host,__PACKAGE__) && !$dest_host) {
+	return $source_host->get(@source_paths,$dest_path);
+    }
+
+    # DataTransferServer1 => DataTransferServer2
+    # this one is slightly more difficult because datatransferserver1 has to
+    # ssh authenticate against datatransferserver2.
+    my $keyname = "/tmp/${source_host}_to_${dest_host}";
+    unless ($source_host->has_key($keyname)) {
+	$source_host->ssh("ssh-keygen -t dsa -q -f $keyname</dev/null 2>/dev/null");
+	$source_host->has_key($keyname=>1);
+    }
+    unless ($dest_host->accepts_key($keyname)) {
+	my $key_stuff = $source_host->ssh("cat ${keyname}.pub");
+	chomp($key_stuff);
+	$dest_host->ssh('mkdir -p .ssh; chmod 0700 .ssh; echo $key_stuff >> .ssh/authorized_keys');
+	$dest_host->accepts_key($keyname);
+    }
+
+    my $username = $dest_host->username;
+    return $source_host->ssh("rsync -Ravz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyname -l $username' @source_paths $dest_host:$dest_path");
+
+    # localhost           => localhost (local cp)
+    return system("rsync @source_paths $dest_path") == 0;
+
+    # DataTransferServer  => DataTransferServer (remote cp)
+    return $source_host->ssh("rsync @source_paths $dest_path");
 }
 
 sub put {
@@ -223,21 +277,6 @@ sub put {
     my $username = $self->username;
     $self->info("Beginning rsync...\n");
     system "rsync -Ravz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @source $host:$target";
-}
-
-sub sync {
-    my $self   = shift;
-    my @source = @_;
-    my $dest   = pop @source;
-    # figure out what $dest is
-    my ($dhost,$dpath) = split(':',$dest);
-    my ($host,$path);
-    my $server2 = $Servers{$dhost} or croak "$dhost is not a DataTransferServer";
-    $host = $server2->instance->dnsName;
-    $path = $server2->{volumes}{$dpath}{mtpt} or croak "$dhost has no symbolic volume named $dpath";
-    my $server2_private_key = $server2->keyfile;
-    my $spk = basename($server2_private_key);
-    $server1->put($server2_private_key => $spk);
 }
 
 sub get {
@@ -259,12 +298,13 @@ sub get {
     system "rsync -Ravz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @from $target";
 }
 
-sub instance {
+sub new_instance {
     my $self = shift;
+    my $args = shift;
     unless ($self->{instance}) {
-	my $instance = $self->_create_instance(\%args)
+	my $instance = $self->_create_instance($args)
 	    or croak "Could not create an instance that satisfies requested criteria";
-	$class->wait_till_instance_is_ready($instance)
+	$self->ec2->wait_till_instance_is_ready($instance)
 	    or croak "Instance did not come up in a reasonable time";
 	$self->{instance} = $instance;
     }
@@ -373,6 +413,35 @@ sub _create_volume {
 }
 
 
+sub ssh {
+    my $self = shift;
+    my @cmd   = @_;
+    my $Instance = $self->instance or die "Remote instance not set up correctly";
+    my $username = $self->username;
+    my $keyfile = $self->keyfile;
+    my $host = $Instance->dnsName;
+
+    my $pid = open my $kid,"-|"; #this does a fork
+    die "Couldn't fork: $!" unless defined $pid;
+    if ($pid) {
+	my @results;
+	while (<$kid>) {
+	    push @results,$_;
+	}
+	close $kid;
+	die "ssh failed with status ",$?>>8 unless $?==0;
+	if (wantarray) {
+	    chomp(@results);
+	    return @results;
+	} else {
+	    return join '',@results;
+	}
+    }
+
+    # in child
+    exec '/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd;
+}
+
 sub info {
     my $self = shift;
     return if $self->quiet;
@@ -401,6 +470,20 @@ sub cleanup {
 	    $self->ec2->delete_volume($volume); # do we really want to do this?
 	}
     }
+}
+
+sub has_key {
+    my $self = shift;
+    my $keyname = shift;
+    $self->{_has_key}{$keyname} = shift if @_;
+    return $self->{_has_key}{$keyname};
+}
+
+sub accepts_key {
+    my $self = shift;
+    my $keyname = shift;
+    $self->{_accepts_key}{$keyname} = shift if @_;
+    return $self->{_accepts_key}{$keyname};
 }
 
 sub DESTROY {
