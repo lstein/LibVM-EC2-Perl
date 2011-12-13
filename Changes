@@ -1,3 +1,7 @@
+1.11
+     - Document fact that VM::EC2->instance_metadata() can be called as a class
+       method.
+
 1.10
      - Add missing documentation, including removing spot instance methods from
         "unsupported" list.
