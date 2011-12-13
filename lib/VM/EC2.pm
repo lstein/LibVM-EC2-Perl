@@ -1283,6 +1283,8 @@ sub unmonitor_instances {
 
 =head2 $meta = $ec2->instance_metadata
 
+=head2 $meta = VM::EC2->instance_metadata
+
 B<For use on running EC2 instances only:> This method returns a
 VM::EC2::Instance::Metadata object that will return information about
 the currently running instance using the HTTP:// metadata fields
@@ -1290,6 +1292,9 @@ described at
 http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?instancedata-data-categories.html. This
 is usually fastest way to get runtime information on the current
 instance.
+
+Note that this method can be called as either an instance or a class
+method.
 
 =cut
 
