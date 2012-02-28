@@ -118,7 +118,7 @@ is($instance->userData,'abcdefg','user data set ok');
 
 # after stopping instance, should be console output
 ok($instance->console_output,'console output available');
-like($instance->console_output,qr/Linux version 2/,'console output is plausible');
+like($instance->console_output,qr/Linux version/,'console output is plausible');
 
 # create an image here
 print STDERR "# Creating an image...\n";
