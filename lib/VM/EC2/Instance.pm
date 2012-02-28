@@ -460,6 +460,7 @@ sub valid_fields {
               clientToken
               hypervisor
               tagSet
+              platform
              );
 }
 
