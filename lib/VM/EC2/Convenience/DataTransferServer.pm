@@ -9,11 +9,10 @@ VM::EC2::Convenience::DataTransferServer - Automated VM for moving data in and o
 
 =head1 SYNOPSIS
 
- my $factory = VM::EC2::Convenience->new(-access_key    => 'access key id',
-                                         -secret_key    => 'aws_secret_key',
-                                         -endpoint      => 'http://ec2.amazonaws.com');
-
- my $server = $factory->new_server(-name => 'ubuntu-maverick-10.10') or die $factory->error_str; # optional arguments
+ my $server = VM::EC2::Convenience->DataTransferServer->new(-access_key    => 'access key id',
+                                                            -secret_key    => 'aws_secret_key',
+                                                            -name          => 'ubuntu-maverick-10.10'
+    );
 
  # provision volume either creates volumes from scratch or initializes them
  # using similarly-named EBS snapshots, adjusting the size as necessary.
@@ -40,8 +39,8 @@ VM::EC2::Convenience::DataTransferServer - Automated VM for moving data in and o
  $server->get('Music','Videos' => '/tmp/music');
 
  # remote to remote transfer - useful for interzone transfers
- $server->sync('Music' => "$server2:/home/ubuntu/music");
- $server->sync('Music' => "$server2:Music");
+ $server->copy('Music' => "$server2:/home/ubuntu/music");
+ $server->copy('Music' => "$server2:Music");
 
  $server->snapshot('Music','Videos','Pictures');
  $server->terminate;  # automatically terminates when goes out of scope
@@ -133,33 +132,37 @@ sub provision_volume {
     my $name = $args{-name};
     my $size = $args{-size};
     $name && $size or croak "Usage: provision_volume(-name=>'name',-size=>$size)";
+    $name        =~ /^[a-zA-Z0-9_.,&-]+$/
+	or croak "Volume name must contain only characters [a-zA-Z0-9_.,&-]; you asked for '$name'";
     my $ec2      = $self->ec2;
-    my $mtpt     = $args{-mount}  || '/mnt/'.$ec2->token;
+    my $mtpt     = $args{-mount}  || '/mnt/DataTransfer/'.$name;
     my $fstype   = $args{-fstype} || 'ext4';
     my $username = $self->username;
     
     $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
     $self->info("Provisioning a $size GB volume...\n");
     my $instance = $self->instance;
-    my $zone     = $instance->availabilityZone;
+    my $zone     = $instance->placement;
     my ($vol,$needs_mkfs,$needs_resize) = $self->_create_volume($name,$size,$zone);
     
-    my $device = eval{$self->unused_device()}        or die "Couldn't find suitable device to attach this volume to";
-    my $s = $instance->attach_volume($vol=>$device)  or die "Couldn't attach $vol to $instance via $device";
-    $ec2->wait_for_attachments($s)                   or die "Couldn't attach $vol to $instance via $device";
-    $s->current_status eq 'attached'                 or die "Couldn't attach $vol to $instance via $device";
+    my ($ebs_device,$mt_device) = eval{$self->unused_block_device()}           
+                      or die "Couldn't find suitable device to attach this volume to";
+    my $s = $instance->attach_volume($vol=>$ebs_device)  
+	              or die "Couldn't attach $vol to $instance via $ebs_device";
+    $ec2->wait_for_attachments($s)                   or die "Couldn't attach $vol to $instance via $ebs_device";
+    $s->current_status eq 'attached'                 or die "Couldn't attach $vol to $instance via $ebs_device";
 
     if ($needs_resize) {
 	die "Sorry, but can only resize ext volumes " unless $fstype =~ /^ext/;
 	$self->info("Resizing previously-snapshotted volume to $size GB...\n");
-	$self->ssh("sudo /sbin/resize2fs $device");
+	$self->ssh("sudo /sbin/resize2fs $mt_device");
     } elsif ($needs_mkfs) {
 	$self->info("Making $fstype filesystem on staging volume...\n");
-	$self->ssh("sudo /sbin/mkfs.$fstype $device");
+	$self->ssh("sudo /sbin/mkfs.$fstype $mt_device");
     }
 
     $self->info("Mounting staging volume...\n");
-    $self->ssh("sudo mkdir -p $mtpt; sudo mount $device $mtpt; sudo chown $username $mtpt");
+    $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt; sudo chown $username $mtpt");
 
     $self->{volumes}{$name} = {volume=>$vol,mtpt=>$mtpt};
     return $self->as_string .':'.$name;
@@ -271,12 +274,13 @@ sub put {
     my @source = @_;
     my $dest   = pop @source;
     # resolve symbolic name of $dest
-    my $target   = $self->{volumes}{$dest}{mtpt} or croak "Staging volume $dest is unknown";
+    $dest        =~ s/^.+://;  # get rid of hostname, if it is there
+    my $target   = $self->_symbolic_to_real_mtpt($dest);
     my $host     = $self->instance->dnsName;
     my $keyfile  = $self->keyfile;
     my $username = $self->username;
     $self->info("Beginning rsync...\n");
-    system "rsync -Ravz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @source $host:$target";
+    system "rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @source $host:$target";
 }
 
 sub get {
@@ -288,14 +292,15 @@ sub get {
     my $host     = $self->instance->dnsName;
     my @from;
     foreach (@source) {
-	my $mnt = $self->{volumes}{$_}{mtpt} or croak "Staging volume $_ is unknown";
-	push @from,"$host:$mnt";
+	(my $path = $_) =~ s/^.+://;  # get rid of host part, if it is there
+	$path = $self->_symbolic_to_real_mtpt($path);
+	push @from,"$host:$path";
     }
     my $keyfile  = $self->keyfile;
     my $username = $self->username;
     
     $self->info("Beginning rsync...\n");
-    system "rsync -Ravz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @from $target";
+    system "rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @from $target";
 }
 
 sub new_instance {
@@ -304,9 +309,13 @@ sub new_instance {
     unless ($self->{instance}) {
 	my $instance = $self->_create_instance($args)
 	    or croak "Could not create an instance that satisfies requested criteria";
-	$self->ec2->wait_till_instance_is_ready($instance)
+	$self->ec2->wait_for_instances($instance)
 	    or croak "Instance did not come up in a reasonable time";
 	$self->{instance} = $instance;
+    }
+    while (!eval{$self->ssh('pwd')}) {
+	$self->info("Waiting for ssh daemon to become ready on remote instance...");
+	sleep 5;
     }
     return $self->{instance};
 }
@@ -339,7 +348,7 @@ sub search_for_image {
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
     my ($most_recent) = sort {$b->name cmp $a->name} @candidates;
-    $self->info("Found $most_recent...\n");
+    $self->info("Found $most_recent: ",$most_recent->name,"\n");
     return $most_recent;
 }
 
@@ -357,7 +366,7 @@ sub _new_security_group {
     my $self = shift;
     my $ec2  = $self->ec2;
     my $name = $ec2->token;
-    $self->info("Creating temporary security group $name...\n");
+    $self->info("Creating temporary security group $name.\n");
     my $sg =  $ec2->create_security_group(-name  => $name,
 				       -description => "Temporary security group created by ".__PACKAGE__
 	) or die $ec2->error_str;
@@ -371,7 +380,7 @@ sub _new_keypair {
     my $self = shift;
     my $ec2  = $self->ec2;
     my $name = $ec2->token;
-    $self->info("Creating temporary keypair $name...\n");
+    $self->info("Creating temporary keypair $name\n");
     my $kp   = $ec2->create_key_pair($name);
     my $tmpdir      = File::Spec->catfile(File::Spec->tmpdir,__PACKAGE__);
     make_path($tmpdir);
@@ -412,14 +421,23 @@ sub _create_volume {
     return ($vol,$needs_mkfs,$needs_resize);
 }
 
+sub _symbolic_to_real_mtpt {
+    my $self = shift;
+    my $path = shift;
+    my @dirs = split '/',$path;
+    @dirs         = map {$self->{volumes}{$_}{mtpt} || $_} @dirs;
+    my $realpath  = join '/',@dirs;
+    $realpath    .= '/' if $path =~ m!/$!;
+    return $realpath;
+}
 
 sub ssh {
     my $self = shift;
     my @cmd   = @_;
     my $Instance = $self->instance or die "Remote instance not set up correctly";
     my $username = $self->username;
-    my $keyfile = $self->keyfile;
-    my $host = $Instance->dnsName;
+    my $keyfile  = $self->keyfile;
+    my $host     = $Instance->dnsName;
 
     my $pid = open my $kid,"-|"; #this does a fork
     die "Couldn't fork: $!" unless defined $pid;
@@ -442,6 +460,38 @@ sub ssh {
     exec '/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd;
 }
 
+# find an unused block device
+sub unused_block_device {
+    my $self        = shift;
+    my $major_start = shift || 'f';
+
+    my @devices = $self->ssh('ls -1 /dev/sd?*');
+    unless (@devices) {
+	@devices = $self->ssh('ls -1 /dev/xvd?*');
+    }
+    return unless @devices;
+    my %used = map {$_ => 1} @devices;
+    
+    my $major_start = shift || 'f';
+
+    my $base =   $used{'/dev/sda1'}   ? "/dev/sd"
+               : $used{'/dev/xvda1'}  ? "/dev/xvd"
+               : '';
+    die "Device list contains neither /dev/sda1 nor /dev/xvda1; don't know how blocks are named on this system"
+	unless $base;
+
+    my $ebs = '/dev/sd';
+    for my $major ($major_start..'p') {
+        for my $minor (1..15) {
+            my $local_device = "${base}${major}${minor}";
+            next if $used{$local_device}++;
+            my $ebs_device = "/dev/sd${major}${minor}";
+            return ($local_device,$ebs_device);
+        }
+    }
+    return;
+}
+
 sub info {
     my $self = shift;
     return if $self->quiet;
@@ -451,22 +501,28 @@ sub info {
 sub cleanup {
     my $self = shift;
     if (-e $self->keyfile) {
+	$self->info('Deleting private key file...');
 	my $dir = dirname($self->keyfile);
 	remove_tree($dir);
     }
     if (my $i = $self->instance) {
+	$self->info('Terminating staging instance...');
 	$i->terminate();
 	$self->ec2->wait_for_instances($i);
     }
     if (my $kp = $self->{keypair}) {
+	$self->info('Removing key pair...');
 	$self->ec2->delete_key_pair($kp);
     }
     if (my $sg = $self->{security_group}) {
+	$self->info('Removing security group...');
 	$self->ec2->delete_security_group($sg);
     }
     unless ($self->preserve) {
+	$self->info('Deleting staging volumes...');
 	for my $v (keys %{$self->volumes}) {
 	    my $volume = $self->volumes->{$v}{volume};
+	    warn "deleting volume... we probably don't want to do this...";
 	    $self->ec2->delete_volume($volume); # do we really want to do this?
 	}
     }
@@ -492,7 +548,10 @@ sub DESTROY {
     $self->cleanup;
 }
 
-
+sub VM::EC2::new_data_transfer_server {
+    my $self = shift;
+    return VM::EC2::Convenience::DataTransferServer->new($self,@_)
+}
 
 1;
 
