@@ -39,8 +39,8 @@ VM::EC2::Convenience::DataTransferServer - Automated VM for moving data in and o
  $server->get('Music','Videos' => '/tmp/music');
 
  # remote to remote transfer - useful for interzone transfers
- $server->copy('Music' => "$server2:/home/ubuntu/music");
- $server->copy('Music' => "$server2:Music");
+ $server->rsync('Music' => "$server2:/home/ubuntu/music");
+ $server->rsync('Music' => "$server2:Music");
 
  $server->snapshot('Music','Videos','Pictures');
  $server->terminate;  # automatically terminates when goes out of scope
@@ -70,6 +70,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use VM::EC2;
+use VM::EC2::Convenience::StagingVolume;
 use Carp 'croak';
 use Scalar::Util 'weaken';
 use File::Spec;
@@ -84,31 +85,32 @@ use overload
 use constant GB => 1_073_741_824;
 
 my %Servers;
+my %Zones;
+my $LastHost;
 
 sub new {
     my $class = shift;
     my $ec2   = shift or croak "Usage: $class->new(\$ec2,\@args)";
     my %args  = @_;
-    $args{-quiet}           ||= undef;
-    $args{-preserve_volume} ||= undef;
-    $args{-image}           ||= '';
-    $args{-image_name}      ||= 'ubuntu-maverick-10.10';
-    $args{-username}        ||= 'ubuntu';
-    $args{-architecture}    ||= 'i386';
-    $args{-root_type}       ||= 'instance-store';
-    $args{-instance_type}   ||= $args{-architecture} eq 'i386' ? 'm1.small' : 'm1.large';
+    $args{-quiet}             ||= undef;
+    $args{-image}             ||= '';
+    $args{-image_name}        ||= 'ubuntu-maverick-10.10';
+    $args{-username}          ||= 'ubuntu';
+    $args{-architecture}      ||= 'i386';
+    $args{-root_type}         ||= 'instance-store';
+    $args{-availability_zone} ||= undef;
+    $args{-instance_type}     ||= $args{-architecture} eq 'i386' ? 'm1.small' : 'm1.large';
+    $args{-preserve_volume}     = 1 unless defined $args{-preserve_volume};
 
     my $self = bless {
 	ec2      => $ec2,
 	instance => undef,
 	username => $args{-username},
-	volumes  => {},           # {Symbolic_name => {snapshot=>$snap,volume=>$volume,mount=>'mnt/pt'}}
 	quiet    => $args{-quiet},
-	preserve => $args{-preserve_volume},
     },ref $class || $class;
-    weaken($Servers{$self->as_string}=$self);
-
     $self->new_instance(\%args);
+    weaken($Servers{$self->as_string}         = $self);
+    weaken($Zones{$self->instance->placement} = $self);
     return $self;
 }
 
@@ -117,7 +119,6 @@ sub instance { shift->{instance} }
 sub volumes  { shift->{volumes}  }
 sub keyfile  { shift->{keyfile}  }
 sub username { shift->{username} }
-sub preserve { shift->{preserve} }
 sub quiet    { shift->{quiet}    }
 
 sub as_string {
@@ -164,8 +165,12 @@ sub provision_volume {
     $self->info("Mounting staging volume...\n");
     $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt; sudo chown $username $mtpt");
 
-    $self->{volumes}{$name} = {volume=>$vol,mtpt=>$mtpt};
-    return $self->as_string .':'.$name;
+    return VM::EC2::Convenience::StagingVolume->new({
+	volume    => $vol,
+	device    => $mt_device,
+	mtpt      => $mtpt,
+	server    => $self,
+	symbolic_name => $name});
 }
 
 # take real or symbolic name and turn it into a two element
@@ -186,11 +191,11 @@ sub resolve_path {
     my $vpath = shift;
 
     my ($servername,$pathname);
-    if ($vpath =~ /^([^:])+:(.+)$/) {
-	$servername = $self->{_last_host} = $1;
+    if ($vpath =~ /^([^:]+):(.+)$/) {
+	$servername = $LastHost = $1;
 	$pathname   = $2;
     } elsif ($vpath =~ /^:(.+)$/) {
-	$servername = $self->{_last_host};
+	$servername = $LastHost;
 	$pathname   = $2;
     } else {
 	return [undef,$vpath];   # localhost
@@ -203,9 +208,7 @@ sub resolve_path {
 
     my $path;
     if ($pathname !~ m!^[/.]!) { # symbolic name
-	my ($base,@rest) = split('/',$pathname);
-	my $mtpt = $server->mntpt($base) or croak "$server: no mountpoint for $base";
-	$path    = join ('/',$mtpt,@rest);
+	$path = $server->mntpt($pathname);
     } else {
 	$path = $pathname;
     }
@@ -215,9 +218,9 @@ sub resolve_path {
 
 # most general form
 # 
-sub copy {
+sub rsync {
     my $self = shift;
-    delete $self->{_last_host};
+    undef $LastHost;
     my @paths = map {$self->resolve_path($_)} @_;
 
     my $dest   = pop @paths;
@@ -230,6 +233,9 @@ sub copy {
     croak "More than one source host specified" if keys %hosts > 1;
     my ($source_host) = values %hosts;
     my $dest_host     = $dest->[0];
+
+    # if called as an object, then source defaults to us
+    $source_host    ||= $self if ref $self;
 
     my @source_paths      = map {$_->[1]} @source;
     my $dest_path         = $dest->[1];
@@ -244,29 +250,33 @@ sub copy {
 	return $source_host->get(@source_paths,$dest_path);
     }
 
+    if ($source_host eq $dest_host) {
+	return $source_host->ssh('rsync',@source_paths,$dest_path);
+    }
+
     # DataTransferServer1 => DataTransferServer2
     # this one is slightly more difficult because datatransferserver1 has to
     # ssh authenticate against datatransferserver2.
     my $keyname = "/tmp/${source_host}_to_${dest_host}";
     unless ($source_host->has_key($keyname)) {
+	$source_host->info('creating ssh key for server to server data transfer');
 	$source_host->ssh("ssh-keygen -t dsa -q -f $keyname</dev/null 2>/dev/null");
 	$source_host->has_key($keyname=>1);
     }
     unless ($dest_host->accepts_key($keyname)) {
 	my $key_stuff = $source_host->ssh("cat ${keyname}.pub");
 	chomp($key_stuff);
-	$dest_host->ssh('mkdir -p .ssh; chmod 0700 .ssh; echo $key_stuff >> .ssh/authorized_keys');
-	$dest_host->accepts_key($keyname);
+	$dest_host->ssh("mkdir -p .ssh; chmod 0700 .ssh; echo '$key_stuff' >> .ssh/authorized_keys");
+	$dest_host->accepts_key($keyname=>1);
     }
 
     my $username = $dest_host->username;
-    return $source_host->ssh("rsync -Ravz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyname -l $username' @source_paths $dest_host:$dest_path");
+    return $source_host->ssh('sudo','rsync','-avz','-e',"'ssh -o \"StrictHostKeyChecking no\" -i $keyname -l $username'",
+			     @source_paths,"$dest_host:$dest_path");
+
 
     # localhost           => localhost (local cp)
     return system("rsync @source_paths $dest_path") == 0;
-
-    # DataTransferServer  => DataTransferServer (remote cp)
-    return $source_host->ssh("rsync @source_paths $dest_path");
 }
 
 sub put {
@@ -275,7 +285,7 @@ sub put {
     my $dest   = pop @source;
     # resolve symbolic name of $dest
     $dest        =~ s/^.+://;  # get rid of hostname, if it is there
-    my $target   = $self->_symbolic_to_real_mtpt($dest);
+    my $target   = $dest;
     my $host     = $self->instance->dnsName;
     my $keyfile  = $self->keyfile;
     my $username = $self->username;
@@ -293,7 +303,6 @@ sub get {
     my @from;
     foreach (@source) {
 	(my $path = $_) =~ s/^.+://;  # get rid of host part, if it is there
-	$path = $self->_symbolic_to_real_mtpt($path);
 	push @from,"$host:$path";
     }
     my $keyfile  = $self->keyfile;
@@ -313,10 +322,10 @@ sub new_instance {
 	    or croak "Instance did not come up in a reasonable time";
 	$self->{instance} = $instance;
     }
-    while (!eval{$self->ssh('pwd')}) {
-	$self->info("Waiting for ssh daemon to become ready on remote instance...");
-	sleep 5;
-    }
+    do {
+	$self->info("Waiting for ssh daemon to become ready on remote instance...");    
+	sleep 2;
+    } until eval{$self->ssh('pwd')};
     return $self->{instance};
 }
 
@@ -328,11 +337,14 @@ sub _create_instance {
     $image ||= $self->search_for_image($args);
     my $sg   = $self->security_group();
     my $kp   = $self->keypair();
+    my $zone = $args->{-availability_zone};
     $self->info("Creating staging server from $image...\n");
     my $instance = $self->ec2->run_instances(-image_id          => $image,
 					     -instance_type     => $args->{-instance_type},
 					     -security_group_id => $sg,
-					     -key_name          => $kp);
+					     -key_name          => $kp,
+					     -availability_zone => $zone) 
+	or die "Can't create instance: ",$self->ec2->error_str;
     $instance->add_tag(Name=>"Staging server created by VM::EC2::Convenience::DataTransferServer");
     return $instance;
 }
@@ -360,6 +372,29 @@ sub security_group {
 sub keypair {
     my $self = shift;
     return $self->{keypair} ||= $self->_new_keypair();
+}
+
+sub snapshot {
+    my $self = shift;
+    my @vols = @_;
+    my @snaps;
+    for my $vol (@vols) {
+	my $device = $vol->device;
+	my $mtpt   = $vol->mtpt;
+	my $volume = $vol->ebs;
+	$self->info("unmounting $vol\n");
+	eval {$self->ssh('sudo','umount',$mtpt)};
+	croak "Could not umount $mtpt" if $@;
+	my $d = $self->volume_description($vol);
+	$self->info("snapshotting $vol\n");
+	my $snap = $volume->create_snapshot($d) or croak "Could not snapshot $vol: ",$vol->ec2->error_str;
+	$snap->add_tag(Name => $d);
+	push @snaps,$snap;
+	$self->info("remounting $vol\n");
+	eval {$self->ssh('sudo','mount',$device,$mtpt)};
+	croak "Could not remount $mtpt" if $@;
+    }
+    return @snaps;
 }
 
 sub _new_security_group {
@@ -399,9 +434,21 @@ sub _create_volume {
     my $self = shift;
     my ($name,$size,$zone) = @_;
     my $ec2 = $self->ec2;
+
+    my $d = $self->volume_description($name);
+    my @vols = sort {$b->createTime cmp $a->createTime} $ec2->describe_volumes({status              => 'available',
+										'availability-zone' => $zone,
+										'tag:Description'   => $d
+									       });
+    if (@vols) {
+	my $vol = $vols[0];
+	$self->info("Reusing existing volume $vol");
+	my $needs_resize = $vol->size != $size;
+	return ($vol,undef,$needs_resize);
+    }
     
     my @snaps = sort {$b->startTime cmp $a->startTime} $ec2->describe_snapshots(-owner  => $ec2->account_id,
-										-filter => {description=>$name});
+										-filter => {description=>$d});
     my ($vol,$needs_mkfs,$needs_resize);
     if (@snaps) {
 	my $snap = $snaps[0];
@@ -416,19 +463,16 @@ sub _create_volume {
 	$needs_mkfs++;
     }
     return unless $vol;
-    $vol->add_tag(Name=>"Staging volume for $name created by ".__PACKAGE__);
-    $vol->add_tag(Role=>"Staging volume for $name created by ".__PACKAGE__);
+    $vol->add_tag(Name       =>"Staging volume for $name created by ".__PACKAGE__);
+    $vol->add_tag(Description=>$d);
     return ($vol,$needs_mkfs,$needs_resize);
 }
 
-sub _symbolic_to_real_mtpt {
+sub volume_description {
     my $self = shift;
-    my $path = shift;
-    my @dirs = split '/',$path;
-    @dirs         = map {$self->{volumes}{$_}{mtpt} || $_} @dirs;
-    my $realpath  = join '/',@dirs;
-    $realpath    .= '/' if $path =~ m!/$!;
-    return $realpath;
+    my $vol  = shift;
+    my $name = ref $vol ? $vol->name : $vol;
+    return "Staging volume for $name created by ".__PACKAGE__;
 }
 
 sub ssh {
@@ -447,7 +491,7 @@ sub ssh {
 	    push @results,$_;
 	}
 	close $kid;
-	die "ssh failed with status ",$?>>8 unless $?==0;
+	croak "ssh failed with status ",$?>>8 unless $?==0;
 	if (wantarray) {
 	    chomp(@results);
 	    return @results;
@@ -518,14 +562,6 @@ sub cleanup {
 	$self->info('Removing security group...');
 	$self->ec2->delete_security_group($sg);
     }
-    unless ($self->preserve) {
-	$self->info('Deleting staging volumes...');
-	for my $v (keys %{$self->volumes}) {
-	    my $volume = $self->volumes->{$v}{volume};
-	    warn "deleting volume... we probably don't want to do this...";
-	    $self->ec2->delete_volume($volume); # do we really want to do this?
-	}
-    }
 }
 
 sub has_key {
@@ -545,7 +581,19 @@ sub accepts_key {
 sub DESTROY {
     my $self = shift;
     undef $Servers{$self->as_string};
+    undef $Zones{$self->instance->placement};
     $self->cleanup;
+}
+
+# can be called as a class method
+sub find_server_in_zone {
+    my $self = shift;
+    my $zone = shift;
+    return $Zones{$zone};
+}
+
+sub active_servers {
+    return values %Servers;
 }
 
 sub VM::EC2::new_data_transfer_server {
