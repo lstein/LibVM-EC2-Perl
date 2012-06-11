@@ -19,6 +19,8 @@ VM::EC2::Convenience::StagingVolume - High level functions for provisioning and 
  $vol1->put('/usr/local/my_videos/'   =>'videos/');
  mkdir('/tmp/jpegs');
  $vol1->get('pictures/*.jpg','/tmp/jpegs');
+
+ # note that these commands are executed on the remote server as root!
  @listing = $vol1->ls('-r','pictures');
  $vol1->chown('fred','pictures');
  $vol1->chgrp('nobody','pictures');
@@ -55,6 +57,8 @@ use strict;
 use VM::EC2;
 use Carp 'croak';
 use VM::EC2::Convenience::DataTransferServer;
+use File::Spec;
+
 use overload
     '""'     => sub {my $self = shift;
 		     return $self->as_string;
@@ -137,32 +141,68 @@ sub create_snapshot {
     }
 }
 
+#
+# $vol->get($source1,$source2,$source3....,$dest)
+# If $source not in format hostname:/path then 
+# volume will be appended to it.
 sub get {
     my $self = shift;
-    my $server = $self->server or croak "no server";
+    my $dest   = pop;
+    my $server = $self->server or croak "no staging server available";
 
-    my (@source,$dest);
-    if (@_ == 1) {
-	@source = $self->mtpt;
-	$dest   = shift;
-    } else {
-	$dest   = pop @_;
-	@source = map {$self->_absolute_path($_)} @_;
-    }
-
+    my @source = $self->_rel2abs(@_);
     $server->rsync(@source,$dest);
 }
 
+# $vol->put($source1,$source2,$source3....,$dest)
+# If $dest not in format hostname:/path then 
+# volume will be appended to it.
 sub put {
     my $self = shift;
-    my $server = $self->server or croak "no server";
-    
-    my (@source,$dest);
-    if (@_ == 1) {
-	@source = shift;
-	$dest   = $self->mtpt;
-    }
+    my $dest = pop;
+    my @source = @_;
+
+    my $server = $self->server or croak "no staging server available";
+    ($dest)    = $self->_rel2abs($dest);
     $server->rsync(@source,$dest);
+}
+
+sub ls    { shift->_cmd('ls',@_)    }
+sub mkdir { shift->_cmd('mkdir',@_) }
+sub chown { shift->_cmd('sudo chown',@_) }
+sub chgrp { shift->_cmd('sudo chgrp',@_) }
+sub chmod { shift->_cmd('sudo chmod',@_) }
+sub rm    { shift->_cmd('rm',@_)    }
+sub rmdir { shift->_cmd('rmdir',@_) }
+
+sub _cmd {
+    my $self = shift;
+    my $cmd          = shift;
+    my @args         = map {quotemeta} @_;
+    my $mtpt         = $self->mtpt;
+    eval{$self->server->ssh("cd '$mtpt'; $cmd @args")};
+}
+
+
+sub _rel2abs {
+    my $self  = shift;
+    my @paths = @_;
+
+    my $server = $self->server or croak "no server";
+
+    my @result;
+    foreach (@paths) {
+	if (/^([^:]+):(.+)$/) {
+	    push @result,$_;
+	}
+	elsif (m!^/!) { # absolute path
+	    push @result,"$server:".$_;
+	} 
+	else {
+	    push @result,"$server:".File::Spec->rel2abs($_,$self->mtpt);
+	}
+    }
+    return @result;
 }
 
 sub _select_zone {

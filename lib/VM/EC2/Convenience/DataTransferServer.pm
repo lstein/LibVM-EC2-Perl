@@ -206,14 +206,7 @@ sub resolve_path {
 	return [$server,$pathname];
     }
 
-    my $path;
-    if ($pathname !~ m!^[/.]!) { # symbolic name
-	$path = $server->mntpt($pathname);
-    } else {
-	$path = $pathname;
-    }
-
-    return [$server,$path];
+    return [$server,$pathname];
 }
 
 # most general form
@@ -234,20 +227,17 @@ sub rsync {
     my ($source_host) = values %hosts;
     my $dest_host     = $dest->[0];
 
-    # if called as an object, then source defaults to us
-    $source_host    ||= $self if ref $self;
-
     my @source_paths      = map {$_->[1]} @source;
     my $dest_path         = $dest->[1];
 
     # localhost           => DataTransferServer
     if (!$source_host && UNIVERSAL::isa($dest_host,__PACKAGE__)) {
-	return $dest_host->put(@source_paths,$dest_path);
+	return $dest_host->_rsync_put(@source_paths,$dest_path);
     }
 
     # DataTransferServer  => localhost
     if (UNIVERSAL::isa($source_host,__PACKAGE__) && !$dest_host) {
-	return $source_host->get(@source_paths,$dest_path);
+	return $source_host->_rsync_get(@source_paths,$dest_path);
     }
 
     if ($source_host eq $dest_host) {
@@ -271,7 +261,9 @@ sub rsync {
     }
 
     my $username = $dest_host->username;
-    return $source_host->ssh('sudo','rsync','-avz','-e',"'ssh -o \"StrictHostKeyChecking no\" -i $keyname -l $username'",
+    return $source_host->ssh('sudo','rsync','-avz',
+			     '-e',"'ssh -o \"StrictHostKeyChecking no\" -i $keyname -l $username'",
+			     "--rsync-path='sudo rsync'",
 			     @source_paths,"$dest_host:$dest_path");
 
 
@@ -279,37 +271,35 @@ sub rsync {
     return system("rsync @source_paths $dest_path") == 0;
 }
 
-sub put {
+sub _rsync_put {
     my $self   = shift;
     my @source = @_;
     my $dest   = pop @source;
     # resolve symbolic name of $dest
     $dest        =~ s/^.+://;  # get rid of hostname, if it is there
-    my $target   = $dest;
     my $host     = $self->instance->dnsName;
     my $keyfile  = $self->keyfile;
     my $username = $self->username;
     $self->info("Beginning rsync...\n");
-    system "rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @source $host:$target";
+    system "rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $host:$dest";
 }
 
-sub get {
+sub _rsync_get {
     my $self = shift;
     my @source = @_;
-    my $target   = pop @source;
+    my $dest   = pop @source;
 
     # resolve symbolic names of src
     my $host     = $self->instance->dnsName;
-    my @from;
     foreach (@source) {
 	(my $path = $_) =~ s/^.+://;  # get rid of host part, if it is there
-	push @from,"$host:$path";
+	$_ = "$host:$path";
     }
     my $keyfile  = $self->keyfile;
     my $username = $self->username;
     
     $self->info("Beginning rsync...\n");
-    system "rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' @from $target";
+    system "rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $dest";
 }
 
 sub new_instance {
@@ -323,8 +313,8 @@ sub new_instance {
 	$self->{instance} = $instance;
     }
     do {
-	$self->info("Waiting for ssh daemon to become ready on remote instance...");    
-	sleep 2;
+	$self->info("Waiting for ssh daemon to become ready on staging server...");    
+	sleep 5;
     } until eval{$self->ssh('pwd')};
     return $self->{instance};
 }
@@ -338,7 +328,7 @@ sub _create_instance {
     my $sg   = $self->security_group();
     my $kp   = $self->keypair();
     my $zone = $args->{-availability_zone};
-    $self->info("Creating staging server from $image...\n");
+    $self->info("Creating staging server from $image in $zone...\n");
     my $instance = $self->ec2->run_instances(-image_id          => $image,
 					     -instance_type     => $args->{-instance_type},
 					     -security_group_id => $sg,
@@ -442,7 +432,7 @@ sub _create_volume {
 									       });
     if (@vols) {
 	my $vol = $vols[0];
-	$self->info("Reusing existing volume $vol");
+	$self->info("Reusing existing volume $vol...\n");
 	my $needs_resize = $vol->size != $size;
 	return ($vol,undef,$needs_resize);
     }
@@ -491,7 +481,7 @@ sub ssh {
 	    push @results,$_;
 	}
 	close $kid;
-	croak "ssh failed with status ",$?>>8 unless $?==0;
+#	croak "ssh failed with status ",$?>>8 unless $?==0;
 	if (wantarray) {
 	    chomp(@results);
 	    return @results;
@@ -502,6 +492,16 @@ sub ssh {
 
     # in child
     exec '/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd;
+}
+
+sub shell {
+    my $self = shift;
+    fork() && return;
+    my $keyfile  = $self->keyfile;
+    my $username = $self->username;
+    my $host     = $self->instance->dnsName;
+    exec 'xterm',
+    '-e',"/usr/bin/ssh -o 'CheckHostIP no' -o 'StrictHostKeyChecking no' -i $keyfile -l $username $host";
 }
 
 # find an unused block device
