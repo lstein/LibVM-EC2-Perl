@@ -93,14 +93,14 @@ sub provision_volume {
     my $ec2   = shift or croak "Usage: $self->new(\$ec2,\@args)";
 
     my %args  = @_;
-    $args{-name}              ||= sprintf("Volume%02d",$Volume++);
-    $args{-fstype}            ||= 'ext4';
-    $args{-size}              ||= 10;
-    $args{-zone}              ||= $self->_select_zone($ec2);
+
+    $args{-zone}       = $self->_get_vol_zone($ec2,$args{-volume_id}) if $args{-volume_id};
+    $args{-name}     ||= $args{-volume_id} || $args{-snapshot_id} || sprintf("Volume%02d",$Volume++);
+    $args{-fstype}   ||= 'ext4';
+    $args{-size}     ||= 10;
+    $args{-zone}     ||= $self->_select_zone($ec2);
     my $server = $self->_get_server($ec2,$args{-zone}) or croak "Can't launch a server to provision volume";
-    my $vol    = $server->provision_volume(-name   => $args{-name},
-					   -fstype => $args{-fstype},
-					   -size   => $args{-size}) or croak "Can't provision volume";
+    my $vol    = $server->provision_volume(%args) or croak "Can't provision volume";
     return $vol;
 }
 
@@ -225,7 +225,7 @@ sub _select_zone {
     my $self = shift;
     my $ec2  = shift;
     if (my @servers = VM::EC2::Staging::Server->active_servers) {
-	return $servers[0]->placement;
+	return $servers[0]->instance->placement;
     } else {
 	my @zones = $ec2->describe_availability_zones;
 	return $zones[rand @zones];
@@ -238,6 +238,13 @@ sub _get_server {
     return VM::EC2::Staging::Server->find_server_in_zone($zone)
 	||
 	$ec2->new_data_transfer_server(-availability_zone=>$zone); # caches
+}
+
+sub _get_vol_zone {
+    my $self = shift;
+    my ($ec2,$volid) = @_;
+    my $volume = $ec2->describe_volumes($volid) or croak "unknown volumeid $volid";
+    return $volume->availabilityZone;
 }
 
 sub VM::EC2::staging_volume {

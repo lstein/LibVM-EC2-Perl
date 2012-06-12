@@ -9,10 +9,11 @@ VM::EC2::Staging::Server - Automated VM for moving data in and out of cloud.
 
 =head1 SYNOPSIS
 
- my $server = VM::EC2::Convenience->DataTransferServer->new(-access_key    => 'access key id',
-                                                            -secret_key    => 'aws_secret_key',
-                                                            -name          => 'ubuntu-maverick-10.10'
-    );
+ use VM::EC2::Staging::Server;
+
+ my $ec2    = VM::EC2->new;
+ my $server = $ec2->staging_server(-architecture => 'i386',
+                                   -availability_zone => 'us-east-1a');
 
  # provision volume either creates volumes from scratch or initializes them
  # using similarly-named EBS snapshots, adjusting the size as necessary.
@@ -70,7 +71,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use VM::EC2;
-use VM::EC2::Convenience::StagingVolume;
+use VM::EC2::Staging::Volume;
 use Carp 'croak';
 use Scalar::Util 'weaken';
 use File::Spec;
@@ -101,7 +102,6 @@ sub new {
     $args{-root_type}         ||= 'instance-store';
     $args{-availability_zone} ||= undef;
     $args{-instance_type}     ||= $args{-architecture} eq 'i386' ? 'm1.small' : 'm1.large';
-    $args{-preserve_volume}     = 1 unless defined $args{-preserve_volume};
 
     my $self = bless {
 	ec2      => $ec2,
@@ -131,21 +131,32 @@ sub as_string {
 sub provision_volume {
     my $self = shift;
     my %args = @_;
-    my $name = $args{-name};
-    my $size = $args{-size};
-    $name && $size or croak "Usage: provision_volume(-name=>'name',-size=>$size)";
-    $name        =~ /^[a-zA-Z0-9_.,&-]+$/
-	or croak "Volume name must contain only characters [a-zA-Z0-9_.,&-]; you asked for '$name'";
+
+    my $name   = $args{-name};
+    my $size   = $args{-size};
+    my $volid  = $args{-volume_id};
+    my $snapid = $args{-snapshot_id};
+
+    if ($volid || $snapid) {
+	$name  ||= $volid || $snapid;
+	$size  ||= -1;
+    } else {
+	$name && $size or croak "Usage: provision_volume(-name=>'name',-size=>$size)";
+	$name        =~ /^[a-zA-Z0-9_.,&-]+$/
+	    or croak "Volume name must contain only characters [a-zA-Z0-9_.,&-]; you asked for '$name'";
+    }
+
     my $ec2      = $self->ec2;
     my $mtpt     = $args{-mount}  || '/mnt/DataTransfer/'.$name;
     my $fstype   = $args{-fstype} || 'ext4';
     my $username = $self->username;
     
     $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
-    $self->info("Provisioning a $size GB volume...\n");
+
+    
     my $instance = $self->instance;
     my $zone     = $instance->placement;
-    my ($vol,$needs_mkfs,$needs_resize) = $self->_create_volume($name,$size,$zone);
+    my ($vol,$needs_mkfs,$needs_resize) = $self->_create_volume($name,$size,$zone,$volid,$snapid);
     
     my ($ebs_device,$mt_device) = eval{$self->unused_block_device()}           
                       or die "Couldn't find suitable device to attach this volume to";
@@ -155,18 +166,20 @@ sub provision_volume {
     $s->current_status eq 'attached'                 or die "Couldn't attach $vol to $instance via $ebs_device";
 
     if ($needs_resize) {
-	die "Sorry, but can only resize ext volumes " unless $fstype =~ /^ext/;
-	$self->info("Resizing previously-snapshotted volume to $size GB...\n");
-	$self->ssh("sudo /sbin/resize2fs $mt_device");
+	$self->scmd("sudo file -s $mt_device") =~ /ext[234]/   or croak "Sorry, but can only resize ext volumes ";
+	$self->info("Checking filesystem...\n");
+	$self->ssh("sudo /sbin/e2fsck -fy $mt_device")          or croak "Couldn't check $mt_device";
+	$self->info("Resizing previously-used volume to $size GB...\n");
+	$self->ssh("sudo /sbin/resize2fs $mt_device ${size}G") or croak "Couldn't resize $mt_device";
     } elsif ($needs_mkfs) {
 	$self->info("Making $fstype filesystem on staging volume...\n");
-	$self->ssh("sudo /sbin/mkfs.$fstype $mt_device");
+	$self->ssh("sudo /sbin/mkfs.$fstype $mt_device") or croak "Couldn't make filesystem on $mt_device";
     }
 
-    $self->info("Mounting staging volume...\n");
+    $self->info("Mounting staging volume.\n");
     $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt; sudo chown $username $mtpt");
 
-    return VM::EC2::Convenience::StagingVolume->new({
+    return VM::EC2::Staging::Volume->new({
 	volume    => $vol,
 	device    => $mt_device,
 	mtpt      => $mtpt,
@@ -336,13 +349,14 @@ sub new_instance {
 sub _create_instance {
     my $self = shift;
     my $args = shift;
-    # search for a matching instance
     my $image = $args->{-image};
+
+    # search for a matching instance
     $image ||= $self->search_for_image($args);
     my $sg   = $self->security_group();
     my $kp   = $self->keypair();
     my $zone = $args->{-availability_zone};
-    $self->info("Creating staging server from $image in $zone...\n");
+    $self->info("Creating staging server from $image in $zone.\n");
     my $instance = $self->ec2->run_instances(-image_id          => $image,
 					     -instance_type     => $args->{-instance_type},
 					     -security_group_id => $sg,
@@ -356,7 +370,7 @@ sub _create_instance {
 sub search_for_image {
     my $self = shift;
     my $args = shift;
-    $self->info("Searching for a suitable image matching $args->{-image_name}...\n");
+    $self->info("Searching for a staging image...");
     my @candidates = $self->ec2->describe_images({'name'             => "*$args->{-image_name}*",
 						  'root-device-type' => $args->{-root_type},
 						  'architecture'     => $args->{-architecture}});
@@ -364,7 +378,7 @@ sub search_for_image {
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
     my ($most_recent) = sort {$b->name cmp $a->name} @candidates;
-    $self->info("Found $most_recent: ",$most_recent->name,"\n");
+    $self->info("found $most_recent: ",$most_recent->name,"\n");
     return $most_recent;
 }
 
@@ -415,7 +429,7 @@ sub _new_keypair {
     my $self = shift;
     my $ec2  = $self->ec2;
     my $name = $ec2->token;
-    $self->info("Creating temporary keypair $name\n");
+    $self->info("Creating temporary keypair $name.\n");
     my $kp   = $ec2->create_key_pair($name);
     my $tmpdir      = File::Spec->catfile(File::Spec->tmpdir,__PACKAGE__);
     make_path($tmpdir);
@@ -432,13 +446,37 @@ sub _new_keypair {
 
 sub _create_volume {
     my $self = shift;
-    my ($name,$size,$zone) = @_;
+    my ($name,$size,$zone,$volid,$snapid) = @_;
     my $ec2 = $self->ec2;
 
-    my $d = $self->volume_description($name);
+    if ($volid) {
+	my $vol = $ec2->describe_volumes($volid) or croak "Unknown volume $volid";
+
+	croak "$volid is not in server availability zone $zone. Create staging volumes with VM::EC2->staging_volume() to avoid this."
+	    unless $vol->availabilityZone eq $zone;
+	croak "$vol is unavailable for use, status ",$vol->status
+	    unless $vol->status eq 'available';
+
+	$self->info("Using existing volume $vol.\n");
+	warn "RESIZING SHOULD NOT BE ALLOWED IN PREEXISTING VOLUMES" if $size > 0;
+	my $needs_resize = $size > 0 && $vol->size != $size;
+	$vol->add_tag(StagingName => $name);
+	return ($vol,undef,$needs_resize);
+    }
+
+    if ($snapid) {
+	my $snap = $ec2->describe_snapshots($snapid) or croak "Unknown snapshot $snapid";
+	warn "RESIZING TOO SMALLER SHOULD NOT BE ALLOWED IN PREEXISTING SNAPSHOTS" if $size > 0 && $snap->volumeSize > $size;
+	my $size = $snap->volumeSize unless $size > 0;
+	my $vol  = $snap->create_volume(-availability_zone => $zone,
+					-size              => $size) or croak $ec2->error_str;
+	$vol->add_tag(StagingName => $name);
+	return ($vol,undef,$vol->size != $size);
+    }
+
     my @vols = sort {$b->createTime cmp $a->createTime} $ec2->describe_volumes({status              => 'available',
 										'availability-zone' => $zone,
-										'tag:StagingName'   => $d
+										'tag:StagingName'   => $$name,
 									       });
     if (@vols) {
 	my $vol = $vols[0];
@@ -452,19 +490,20 @@ sub _create_volume {
     my ($vol,$needs_mkfs,$needs_resize);
     if (@snaps) {
 	my $snap = $snaps[0];
-	print STDERR "Reusing existing snapshot $snap...\n";
+	$self->info("Reusing existing snapshot $snap...\n");
 	my $s    = $size > $snap->volumeSize ? $size : $snap->volumeSize;
 	$vol = $snap->create_volume(-availability_zone=>$zone,
 				    -size             => $s);
 	$needs_resize = $snap->volumeSize < $s;
     } else {
+	$self->info("Provisioning a $size GB volume...\n");
 	$vol = $ec2->create_volume(-availability_zone=>$zone,
 				   -size             =>$size);
 	$needs_mkfs++;
     }
     return unless $vol;
     $vol->add_tag(Name        => "Staging volume for $name created by ".__PACKAGE__);
-    $vol->add_tag(Description => $d);
+    $vol->add_tag(Description => $self->volume_description($name));
     $vol->add_tag(StagingName => $name);
     return ($vol,$needs_mkfs,$needs_resize);
 }
