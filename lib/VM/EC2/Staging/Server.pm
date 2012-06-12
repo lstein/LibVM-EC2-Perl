@@ -1,11 +1,11 @@
-package VM::EC2::Convenience::DataTransferServer;
+package VM::EC2::Staging::Server;
 
 # high level interface for transferring data, and managing data snapshots
 # via a series of DataTransfer VMs.
 
 =head1 NAME
 
-VM::EC2::Convenience::DataTransferServer - Automated VM for moving data in and out of cloud.
+VM::EC2::Staging::Server - Automated VM for moving data in and out of cloud.
 
 =head1 SYNOPSIS
 
@@ -76,6 +76,7 @@ use Scalar::Util 'weaken';
 use File::Spec;
 use File::Path 'make_path','remove_tree';
 use File::Basename 'dirname';
+use POSIX 'setsid';
 use overload
     '""'     => sub {my $self = shift;
 		     return $self->as_string;
@@ -173,6 +174,19 @@ sub provision_volume {
 	symbolic_name => $name});
 }
 
+sub delete_volume {
+   my $self = shift;
+   my $vol  = shift;
+   my $mtpt = $vol->mtpt;
+   my $volume = $vol->ebs;
+   $self->info("unmounting $vol...");
+   $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
+   $self->info("detaching $vol...");
+   $self->ec2_wait_for_attachments( $volume->detach() );
+   $self->info("deleting $vol...");
+   $self->instance->delete_volume($volume);
+}
+
 # take real or symbolic name and turn it into a two element
 # list consisting of server object and mount point
 # possible forms:
@@ -202,7 +216,7 @@ sub resolve_path {
     }
 
     my $server = $Servers{$servername} || $servername;
-    unless (ref $server && $server->isa('VM::EC2::Convenience::DataTransferServer')) {
+    unless (ref $server && $server->isa('VM::EC2::Staging::Server')) {
 	return [$server,$pathname];
     }
 
@@ -221,7 +235,7 @@ sub rsync {
 
     my %hosts;
     foreach (@source) {
-	$hosts{$_[0]} = $_->[0];
+	$hosts{$_->[0]} = $_->[0];
     }
     croak "More than one source host specified" if keys %hosts > 1;
     my ($source_host) = values %hosts;
@@ -241,7 +255,7 @@ sub rsync {
     }
 
     if ($source_host eq $dest_host) {
-	return $source_host->ssh('rsync',@source_paths,$dest_path);
+	return $source_host->ssh('sudo','rsync','-avz',@source_paths,$dest_path);
     }
 
     # DataTransferServer1 => DataTransferServer2
@@ -254,7 +268,7 @@ sub rsync {
 	$source_host->has_key($keyname=>1);
     }
     unless ($dest_host->accepts_key($keyname)) {
-	my $key_stuff = $source_host->ssh("cat ${keyname}.pub");
+	my $key_stuff = $source_host->scmd("cat ${keyname}.pub");
 	chomp($key_stuff);
 	$dest_host->ssh("mkdir -p .ssh; chmod 0700 .ssh; echo '$key_stuff' >> .ssh/authorized_keys");
 	$dest_host->accepts_key($keyname=>1);
@@ -268,7 +282,7 @@ sub rsync {
 
 
     # localhost           => localhost (local cp)
-    return system("rsync @source_paths $dest_path") == 0;
+    return system('rsync',@source_paths,$dest_path) == 0;
 }
 
 sub _rsync_put {
@@ -281,7 +295,7 @@ sub _rsync_put {
     my $keyfile  = $self->keyfile;
     my $username = $self->username;
     $self->info("Beginning rsync...\n");
-    system "rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $host:$dest";
+    system("rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $host:$dest") == 0;
 }
 
 sub _rsync_get {
@@ -299,7 +313,7 @@ sub _rsync_get {
     my $username = $self->username;
     
     $self->info("Beginning rsync...\n");
-    system "rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $dest";
+    system("rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $dest")==0;
 }
 
 sub new_instance {
@@ -315,7 +329,7 @@ sub new_instance {
     do {
 	$self->info("Waiting for ssh daemon to become ready on staging server...");    
 	sleep 5;
-    } until eval{$self->ssh('pwd')};
+    } until eval{$self->scmd('pwd')};
     return $self->{instance};
 }
 
@@ -335,7 +349,7 @@ sub _create_instance {
 					     -key_name          => $kp,
 					     -availability_zone => $zone) 
 	or die "Can't create instance: ",$self->ec2->error_str;
-    $instance->add_tag(Name=>"Staging server created by VM::EC2::Convenience::DataTransferServer");
+    $instance->add_tag(Name=>"Staging server created by VM::EC2::Staging::Server");
     return $instance;
 }
 
@@ -366,25 +380,21 @@ sub keypair {
 
 sub snapshot {
     my $self = shift;
-    my @vols = @_;
+    my ($vol,$description) = @_;
     my @snaps;
-    for my $vol (@vols) {
-	my $device = $vol->device;
-	my $mtpt   = $vol->mtpt;
-	my $volume = $vol->ebs;
-	$self->info("unmounting $vol\n");
-	eval {$self->ssh('sudo','umount',$mtpt)};
-	croak "Could not umount $mtpt" if $@;
-	my $d = $self->volume_description($vol);
-	$self->info("snapshotting $vol\n");
-	my $snap = $volume->create_snapshot($d) or croak "Could not snapshot $vol: ",$vol->ec2->error_str;
-	$snap->add_tag(Name => $d);
-	push @snaps,$snap;
-	$self->info("remounting $vol\n");
-	eval {$self->ssh('sudo','mount',$device,$mtpt)};
-	croak "Could not remount $mtpt" if $@;
-    }
-    return @snaps;
+    my $device = $vol->device;
+    my $mtpt   = $vol->mtpt;
+    my $volume = $vol->ebs;
+    $self->info("unmounting $vol\n");
+    $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
+    my $d = $self->volume_description($vol);
+    $self->info("snapshotting $vol\n");
+    my $snap = $volume->create_snapshot($description) or croak "Could not snapshot $vol: ",$vol->ec2->error_str;
+    $snap->add_tag(StagingName => $vol->name);
+    $snap->add_tag(Name => "Staging volume ".$vol->name);
+    $self->info("remounting $vol\n");
+    $self->ssh('sudo','mount',$device,$mtpt) or croak "Could not remount $mtpt";
+    return $snap;
 }
 
 sub _new_security_group {
@@ -428,7 +438,7 @@ sub _create_volume {
     my $d = $self->volume_description($name);
     my @vols = sort {$b->createTime cmp $a->createTime} $ec2->describe_volumes({status              => 'available',
 										'availability-zone' => $zone,
-										'tag:Description'   => $d
+										'tag:StagingName'   => $d
 									       });
     if (@vols) {
 	my $vol = $vols[0];
@@ -438,7 +448,7 @@ sub _create_volume {
     }
     
     my @snaps = sort {$b->startTime cmp $a->startTime} $ec2->describe_snapshots(-owner  => $ec2->account_id,
-										-filter => {description=>$d});
+										-filter => {'tag:StagingName' => $name});
     my ($vol,$needs_mkfs,$needs_resize);
     if (@snaps) {
 	my $snap = $snaps[0];
@@ -453,8 +463,9 @@ sub _create_volume {
 	$needs_mkfs++;
     }
     return unless $vol;
-    $vol->add_tag(Name       =>"Staging volume for $name created by ".__PACKAGE__);
-    $vol->add_tag(Description=>$d);
+    $vol->add_tag(Name        => "Staging volume for $name created by ".__PACKAGE__);
+    $vol->add_tag(Description => $d);
+    $vol->add_tag(StagingName => $name);
     return ($vol,$needs_mkfs,$needs_resize);
 }
 
@@ -466,6 +477,16 @@ sub volume_description {
 }
 
 sub ssh {
+    my $self = shift;
+    my @cmd   = @_;
+    my $Instance = $self->instance or die "Remote instance not set up correctly";
+    my $username = $self->username;
+    my $keyfile  = $self->keyfile;
+    my $host     = $Instance->dnsName;
+    system('/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd)==0;
+}
+
+sub scmd {
     my $self = shift;
     my @cmd   = @_;
     my $Instance = $self->instance or die "Remote instance not set up correctly";
@@ -497,6 +518,7 @@ sub ssh {
 sub shell {
     my $self = shift;
     fork() && return;
+    setsid(); # so that we are independent of parent signals
     my $keyfile  = $self->keyfile;
     my $username = $self->username;
     my $host     = $self->instance->dnsName;
@@ -509,9 +531,9 @@ sub unused_block_device {
     my $self        = shift;
     my $major_start = shift || 'f';
 
-    my @devices = $self->ssh('ls -1 /dev/sd?*');
+    my @devices = $self->scmd('ls -1 /dev/sd?*');
     unless (@devices) {
-	@devices = $self->ssh('ls -1 /dev/xvd?*');
+	@devices = $self->scmd('ls -1 /dev/xvd?*');
     }
     return unless @devices;
     my %used = map {$_ => 1} @devices;
@@ -598,7 +620,7 @@ sub active_servers {
 
 sub VM::EC2::new_data_transfer_server {
     my $self = shift;
-    return VM::EC2::Convenience::DataTransferServer->new($self,@_)
+    return VM::EC2::Staging::Server->new($self,@_)
 }
 
 1;

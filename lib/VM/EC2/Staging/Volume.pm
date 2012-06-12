@@ -1,12 +1,12 @@
-package VM::EC2::Convenience::StagingVolume;
+package VM::EC2::Staging::Volume;
 
 =head1 NAME
 
-VM::EC2::Convenience::StagingVolume - High level functions for provisioning and populating EC2 volumes
+VM::EC2::Staging::Volume - High level functions for provisioning and populating EC2 volumes
 
 =head1 SYNOPSIS
 
- use VM::EC2::Convenience::StagingVolume;
+ use VM::EC2::Staging::Volume;
 
  my $ec2 = VM::EC2->new;
  my $vol1 = $ec2->staging_volume(-name => 'Backup',
@@ -56,7 +56,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use VM::EC2;
 use Carp 'croak';
-use VM::EC2::Convenience::DataTransferServer;
+use VM::EC2::Staging::Server;
 use File::Spec;
 
 use overload
@@ -133,11 +133,12 @@ sub as_string {
 
 sub create_snapshot {
     my $self = shift;
+    my $description = shift;
     if (my $server = $self->server) {
-	my ($snap) = $server->snapshot($self);
+	my ($snap) = $server->snapshot($self => $description);
 	return $snap;
     } else {
-	$self->ebs->create_snapshot(@_);
+	$self->ebs->create_snapshot($description);
     }
 }
 
@@ -167,20 +168,35 @@ sub put {
     $server->rsync(@source,$dest);
 }
 
+sub copy {
+    my $self = shift;
+    $self->server->rsync(@_);
+}
+
 sub ls    { shift->_cmd('ls',@_)    }
-sub mkdir { shift->_cmd('mkdir',@_) }
-sub chown { shift->_cmd('sudo chown',@_) }
-sub chgrp { shift->_cmd('sudo chgrp',@_) }
-sub chmod { shift->_cmd('sudo chmod',@_) }
-sub rm    { shift->_cmd('rm',@_)    }
-sub rmdir { shift->_cmd('rmdir',@_) }
+sub df    { shift->_cmd('df',@_)    }
+
+sub mkdir { shift->_ssh('mkdir',@_) }
+sub chown { shift->_ssh('sudo chown',@_) }
+sub chgrp { shift->_ssh('sudo chgrp',@_) }
+sub chmod { shift->_ssh('sudo chmod',@_) }
+sub rm    { shift->_ssh('rm',@_)    }
+sub rmdir { shift->_ssh('rmdir',@_) }
 
 sub _cmd {
     my $self = shift;
     my $cmd          = shift;
     my @args         = map {quotemeta} @_;
     my $mtpt         = $self->mtpt;
-    eval{$self->server->ssh("cd '$mtpt'; $cmd @args")};
+    $self->server->scmd("cd '$mtpt'; $cmd @args");
+}
+
+sub _ssh {
+    my $self = shift;
+    my $cmd          = shift;
+    my @args         = map {quotemeta} @_;
+    my $mtpt         = $self->mtpt;
+    $self->server->ssh("cd '$mtpt'; $cmd @args");
 }
 
 
@@ -208,7 +224,7 @@ sub _rel2abs {
 sub _select_zone {
     my $self = shift;
     my $ec2  = shift;
-    if (my @servers = VM::EC2::Convenience::DataTransferServer->active_servers) {
+    if (my @servers = VM::EC2::Staging::Server->active_servers) {
 	return $servers[0]->placement;
     } else {
 	my @zones = $ec2->describe_availability_zones;
@@ -219,14 +235,14 @@ sub _select_zone {
 sub _get_server {
     my $self = shift;
     my ($ec2,$zone) = @_;
-    return VM::EC2::Convenience::DataTransferServer->find_server_in_zone($zone)
+    return VM::EC2::Staging::Server->find_server_in_zone($zone)
 	||
 	$ec2->new_data_transfer_server(-availability_zone=>$zone); # caches
 }
 
 sub VM::EC2::staging_volume {
     my $self = shift;
-    return VM::EC2::Convenience::StagingVolume->provision_volume($self,@_)
+    return VM::EC2::Staging::Volume->provision_volume($self,@_)
 }
 
 1;
