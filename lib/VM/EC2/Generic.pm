@@ -240,6 +240,7 @@ sub as_string {
 }
 
 =head2 $hashref = $object->tags
+
 =head2 $hashref = $object->tagSet
 
 Return the metadata tags assigned to this resource, if any, as a

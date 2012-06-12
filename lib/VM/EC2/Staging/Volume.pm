@@ -97,7 +97,6 @@ sub provision_volume {
     $args{-zone}       = $self->_get_vol_zone($ec2,$args{-volume_id}) if $args{-volume_id};
     $args{-name}     ||= $args{-volume_id} || $args{-snapshot_id} || sprintf("Volume%02d",$Volume++);
     $args{-fstype}   ||= 'ext4';
-    $args{-size}     ||= 10;
     $args{-zone}     ||= $self->_select_zone($ec2);
     my $server = $self->_get_server($ec2,$args{-zone}) or croak "Can't launch a server to provision volume";
     my $vol    = $server->provision_volume(%args) or croak "Can't provision volume";
