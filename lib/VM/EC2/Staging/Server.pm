@@ -118,7 +118,6 @@ sub new {
 
 sub ec2      { shift->{ec2}      }
 sub instance { shift->{instance} }
-sub volumes  { shift->{volumes}  }
 sub keyfile  { shift->{keyfile}  }
 sub username { shift->{username} }
 sub quiet    { shift->{quiet}    }
@@ -198,28 +197,55 @@ sub provision_volume {
 	$self->ssh("sudo /sbin/mkfs.$fstype -L '$name' $mt_device") or croak "Couldn't make filesystem on $mt_device";
     }
 
-    $self->info("Mounting staging volume.\n");
-    $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt; sudo chown $username $mtpt");
-
-    return VM::EC2::Staging::Volume->new({
+    my $vol = VM::EC2::Staging::Volume->new({
 	volume    => $vol,
 	device    => $mt_device,
 	mtpt      => $mtpt,
 	server    => $self,
 	symbolic_name => $name});
+
+    $self->mount_volume($vol);
+    return $vol;
+}
+
+sub mount_volume {
+    my $self = shift;
+    my $vol  = shift;
+    my $mtpt      = $vol->mtpt;
+    my $mt_device = $vol->device;
+    $self->info("Mounting staging volume.\n");
+    $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt");
+    $vol->mounted(1);
+}
+
+sub unmount_volume {
+    my $self = shift;
+    my $vol  = shift;
+    my $mtpt = $vol->mtpt;
+    $self->info("unmounting $vol...\n");
+    $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
+    $vol->mounted(0);
+}
+
+sub remount_volume {
+    my $self = shift;
+    my $vol  = shift;
+    my $mtpt = $vol->mtpt;
+    my $device = $vol->device;
+    $self->info("remounting $vol\n");
+    $self->ssh('sudo','mount',$device,$mtpt) or croak "Could not remount $mtpt";
+    $vol->mounted(1);
 }
 
 sub delete_volume {
    my $self = shift;
    my $vol  = shift;
-   my $mtpt = $vol->mtpt;
-   my $volume = $vol->ebs;
-   $self->info("unmounting $vol...");
-   $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
-   $self->info("detaching $vol...");
-   $self->wait_for_attachments( $volume->detach() );
-   $self->info("deleting $vol...");
-   $self->ec2->delete_volume($volume);
+   my $ec2 = $self->ec2;
+   $self->unmount_volume($vol);
+   $ec2->wait_for_attachments( $vol->detach() );
+   $self->info("deleting $vol...\n");
+   $ec2->delete_volume($vol->volumeId);
+   $vol->mounted(0);
 }
 
 # take real or symbolic name and turn it into a two element
@@ -421,15 +447,13 @@ sub create_snapshot {
     my $device = $vol->device;
     my $mtpt   = $vol->mtpt;
     my $volume = $vol->ebs;
-    $self->info("unmounting $vol\n");
-    $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
+    $self->unmount_volume($vol);
     my $d = $self->volume_description($vol);
     $self->info("snapshotting $vol\n");
     my $snap = $volume->create_snapshot($description) or croak "Could not snapshot $vol: ",$vol->ec2->error_str;
     $snap->add_tag(StagingName => $vol->name);
     $snap->add_tag(Name => "Staging volume ".$vol->name);
-    $self->info("remounting $vol\n");
-    $self->ssh('sudo','mount',$device,$mtpt) or croak "Could not remount $mtpt";
+    $self->remount_volume($vol);
     return $snap;
 }
 

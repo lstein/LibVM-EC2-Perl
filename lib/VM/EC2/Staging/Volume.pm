@@ -124,6 +124,12 @@ sub device { shift->{device} }
 sub ebs    { shift->{volume} }
 sub mtpt   { shift->{mtpt}   }
 sub name   { shift->{symbolic_name}   }
+sub mounted {
+    my $self = shift;
+    my $m    = $self->{mounted};
+    $self->{mounted} = shift if @_;
+    return $m;
+}
 
 sub as_string {
     my $self = shift;
@@ -133,7 +139,7 @@ sub as_string {
 sub create_snapshot {
     my $self = shift;
     my $description = shift;
-    if (my $server = $self->server) {
+    if ($self->mounted && (my $server = $self->server)) {
 	my ($snap) = $server->create_snapshot($self => $description);
 	return $snap;
     } else {
@@ -150,6 +156,7 @@ sub get {
     my $dest   = pop;
     my $server = $self->server or croak "no staging server available";
 
+    $self->mounted or croak "Volume is not currently mounted";
     my @source = $self->_rel2abs(@_);
     $server->rsync(@source,$dest);
 }
@@ -162,6 +169,7 @@ sub put {
     my $dest = pop;
     my @source = @_;
 
+    $self->mounted or croak "Volume is not currently mounted";
     my $server = $self->server or croak "no staging server available";
     ($dest)    = $self->_rel2abs($dest);
     $server->rsync(@source,$dest);
@@ -169,6 +177,7 @@ sub put {
 
 sub copy {
     my $self = shift;
+    $self->mounted or croak "Volume is not currently mounted";
     $self->server->rsync(@_);
 }
 
@@ -182,10 +191,25 @@ sub chmod { shift->_ssh('sudo chmod',@_) }
 sub rm    { shift->_ssh('sudo rm',@_)    }
 sub rmdir { shift->_ssh('sudo rmdir',@_) }
 
+# remove volume entirely
+sub delete {
+    my $self = shift;
+    my $status = $self->current_status;
+    if ($status eq 'in-use') {
+	my $server = $self->server;
+	$server->delete_volume($self);
+    } elsif ($status eq 'available') {
+	$self->ec2->delete_volume($self);
+    } else {
+	croak "Cannot delete volume, status is $status";
+    }
+}
+
 sub _cmd {
     my $self = shift;
     my $cmd          = shift;
     my @args         = map {quotemeta} @_;
+    $self->mounted or croak "Volume is not currently mounted";
     my $mtpt         = $self->mtpt;
     $self->server->scmd("cd '$mtpt'; $cmd @args");
 }
@@ -194,6 +218,7 @@ sub _ssh {
     my $self = shift;
     my $cmd          = shift;
     my @args         = map {quotemeta} @_;
+    $self->mounted or croak "Volume is not currently mounted";
     my $mtpt         = $self->mtpt;
     $self->server->ssh("cd '$mtpt'; $cmd @args");
 }
