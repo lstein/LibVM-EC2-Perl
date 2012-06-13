@@ -417,7 +417,8 @@ sub new {
     my $secret       = $args{-secret_key} || $ENV{EC2_SECRET_KEY} 
                        or croak "Please provide SecretKey parameter or define environment variable EC2_SECRET_KEY";
     my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL} || 'http://ec2.amazonaws.com/';
-    $endpoint_url   .= '/' unless $endpoint_url =~ m!/$!;
+    $endpoint_url   .= '/'                     unless $endpoint_url =~ m!/$!;
+    $endpoint_url    = "http://".$endpoint_url unless $endpoint_url =~ m!https?://!;
 
     my $raise_error  = $args{-raise_error};
     my $print_error  = $args{-print_error};

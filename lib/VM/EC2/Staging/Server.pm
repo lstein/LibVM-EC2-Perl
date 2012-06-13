@@ -44,7 +44,7 @@ VM::EC2::Staging::Server - Automated VM for moving data in and out of cloud.
  $server->rsync('Music' => "$server2:/home/ubuntu/music");
  $server->rsync('Music' => "$server2:Music");
 
- $server->snapshot('Music','Videos','Pictures');
+ $server->create_snapshot($vol1 => 'snapshot of pictures');
  $server->terminate;  # automatically terminates when goes out of scope
 
 =head1 DESCRIPTION
@@ -414,7 +414,7 @@ sub keypair {
     return $self->{keypair} ||= $self->_new_keypair();
 }
 
-sub snapshot {
+sub create_snapshot {
     my $self = shift;
     my ($vol,$description) = @_;
     my @snaps;

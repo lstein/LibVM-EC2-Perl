@@ -134,7 +134,7 @@ sub create_snapshot {
     my $self = shift;
     my $description = shift;
     if (my $server = $self->server) {
-	my ($snap) = $server->snapshot($self => $description);
+	my ($snap) = $server->create_snapshot($self => $description);
 	return $snap;
     } else {
 	$self->ebs->create_snapshot($description);
