@@ -172,15 +172,15 @@ sub copy {
     $self->server->rsync(@_);
 }
 
-sub ls    { shift->_cmd('ls',@_)    }
+sub ls    { shift->_cmd('sudo ls',@_)    }
 sub df    { shift->_cmd('df',@_)    }
 
-sub mkdir { shift->_ssh('mkdir',@_) }
+sub mkdir { shift->_ssh('sudo mkdir',@_) }
 sub chown { shift->_ssh('sudo chown',@_) }
 sub chgrp { shift->_ssh('sudo chgrp',@_) }
 sub chmod { shift->_ssh('sudo chmod',@_) }
-sub rm    { shift->_ssh('rm',@_)    }
-sub rmdir { shift->_ssh('rmdir',@_) }
+sub rm    { shift->_ssh('sudo rm',@_)    }
+sub rmdir { shift->_ssh('sudo rmdir',@_) }
 
 sub _cmd {
     my $self = shift;
@@ -223,7 +223,7 @@ sub _rel2abs {
 sub _select_zone {
     my $self = shift;
     my $ec2  = shift;
-    if (my @servers = VM::EC2::Staging::Server->active_servers) {
+    if (my @servers = VM::EC2::Staging::Server->active_servers($ec2)) {
 	return $servers[0]->instance->placement;
     } else {
 	my @zones = $ec2->describe_availability_zones;

@@ -217,9 +217,9 @@ sub delete_volume {
    $self->info("unmounting $vol...");
    $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
    $self->info("detaching $vol...");
-   $self->ec2_wait_for_attachments( $volume->detach() );
+   $self->wait_for_attachments( $volume->detach() );
    $self->info("deleting $vol...");
-   $self->instance->delete_volume($volume);
+   $self->ec2->delete_volume($volume);
 }
 
 # take real or symbolic name and turn it into a two element
@@ -676,7 +676,11 @@ sub find_server_in_zone {
 }
 
 sub active_servers {
-    return values %Servers;
+    my $self = shift;
+    my $ec2  = shift; # optional
+    my @servers = values %Servers;
+    return @servers unless $ec2;
+    return grep {$_->ec2 eq $ec2} @servers;
 }
 
 sub VM::EC2::new_data_transfer_server {
