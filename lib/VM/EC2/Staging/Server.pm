@@ -89,6 +89,7 @@ use constant GB => 1_073_741_824;
 
 my %Servers;
 my %Zones;
+my %Volumes;
 my $LastHost;
 
 sub new {
@@ -102,6 +103,7 @@ sub new {
     $args{-instance_type}     ||= $class->default_instance_type;
     $args{-availability_zone} ||= undef;
     $args{-quiet}             ||= undef;
+    $args{-keep}              ||= undef;
     $args{-image}             ||= '';
 
     my $self = bless {
@@ -109,6 +111,7 @@ sub new {
 	instance => undef,
 	username => $args{-username},
 	quiet    => $args{-quiet},
+	keep     => $args{-keep},
     },ref $class || $class;
     $self->new_instance(\%args);
     weaken($Servers{$self->as_string}         = $self);
@@ -121,6 +124,7 @@ sub instance { shift->{instance} }
 sub keyfile  { shift->{keyfile}  }
 sub username { shift->{username} }
 sub quiet    { shift->{quiet}    }
+sub keep     { shift->{keep}     }
 
 sub default_image_name {
     return 'ubuntu-maverick-10.10';  # launches faster
@@ -147,6 +151,22 @@ sub as_string {
     my $self = shift;
     my $ip   = eval {$self->instance->dnsName} || '1.2.3.4';
     return $ip;
+}
+
+# scan for staging instances in current region and cache them
+# into memory
+# status should be...
+# -on_exit => {'terminate','stop','run'}
+sub scan {
+    my $self = shift;
+    my $ec2  = shift;
+    my @instances = $ec2->describe_instances(-filter=>{'tag-key'=>'StagingName'});
+    for my $instance (@instances) {
+	my $keyname = $instance->keyName;
+	my ($username,$keyfile) = $self->_check_keyfile($keyname) or next;
+	my ($group) = $instance->groups;
+	my $server  = $self->new($ec2,-keep=>1,-username=>$username...
+    }
 }
 
 sub provision_volume {
@@ -205,7 +225,20 @@ sub provision_volume {
 	symbolic_name => $name});
 
     $self->mount_volume($vol);
+    $self->register_volume($vol);
     return $vol;
+}
+
+sub register_volume {
+    my $self = shift;
+    my $vol  = shift;
+    weaken($Volumes{$vol->volumeId} = $vol);
+}
+
+sub unregister_volume {
+    my $self = shift;
+    my $vol  = shift;
+    delete $Volumes{$vol->volumeId};
 }
 
 sub mount_volume {
@@ -252,12 +285,11 @@ sub delete_volume {
 # list consisting of server object and mount point
 # possible forms:
 #            /local/path
-#            Symbolic_path
-#            $server:/remote/path
-#            $server:./remote/path
-#            $server:../remote/path
-#            $server:Symbolic_path
-#            $server:Symbolic_path/additional/directories
+#            vol-12345/relative/path
+#            vol-12345:/relative/path
+#            vol-12345:relative/path
+#            $server:/absolute/path
+#            $server:relative/path
 # 
 # treat path as symbolic if it does not start with a slash
 # or dot characters
@@ -266,7 +298,15 @@ sub resolve_path {
     my $vpath = shift;
 
     my ($servername,$pathname);
-    if ($vpath =~ /^([^:]+):(.+)$/) {
+    if ($vpath =~ m!^(vol-[0-9a-f]+):?(.*)! && $Volumes{$1}) {
+	my $vol  = $Volumes{$1};
+	my $path = $2;
+	$path       = "/$path" if $path && $path !~ m!^/!;
+	$servername = $LastHost = $vol->server;
+	my $mtpt    = $vol->mtpt;
+	$pathname   = $mtpt;
+	$pathname  .= $path if $path;
+    } elsif ($vpath =~ /^([^:]+):(.+)$/) {
 	$servername = $LastHost = $1;
 	$pathname   = $2;
     } elsif ($vpath =~ /^:(.+)$/) {
@@ -473,19 +513,18 @@ sub _new_security_group {
 
 sub _new_keypair {
     my $self = shift;
-    my $ec2  = $self->ec2;
-    my $name = $ec2->token;
+    my $ec2     = $self->ec2;
+    my $name    = $ec2->token;
+
     $self->info("Creating temporary keypair $name.\n");
-    my $kp   = $ec2->create_key_pair($name);
-    my $tmpdir      = File::Spec->catfile(File::Spec->tmpdir,__PACKAGE__);
-    make_path($tmpdir);
-    chmod 0700,$tmpdir;
-    my $keyfile     = File::Spec->catfile($tmpdir,"$name.pem");
+    my $kp      = $ec2->create_key_pair($name);
+    my $keyfile = $self->key_path($name);
     my $private_key = $kp->privateKey;
     open my $k,'>',$keyfile or die "Couldn't create $keyfile: $!";
     chmod 0600,$keyfile     or die "Couldn't chmod  $keyfile: $!";
     print $k $private_key;
     close $k;
+
     $self->{keyfile} = $keyfile;
     return $kp;
 }
@@ -541,7 +580,7 @@ sub _create_volume {
 
     else {
 	unless ($size > 0) {
-	    $self->info("No size provided. Defaulting to 10 GB.");
+	    $self->info("No size provided. Defaulting to 10 GB.\n");
 	    $size = 10;
 	}
 	$self->info("Provisioning a new $size GB volume...\n");
@@ -687,6 +726,7 @@ sub accepts_key {
 
 sub DESTROY {
     my $self = shift;
+    return if $self->keep;
     undef $Servers{$self->as_string};
     undef $Zones{$self->instance->placement};
     $self->cleanup;
@@ -705,6 +745,37 @@ sub active_servers {
     my @servers = values %Servers;
     return @servers unless $ec2;
     return grep {$_->ec2 eq $ec2} @servers;
+}
+
+sub key_path {
+    my $self    = shift;
+    my ($keyname,$username)  = @_;
+    $username ||= $self->username;
+    return File::Spec->catfile($self->dot_directory_path,"${username}-${keyname}.pem")
+}
+
+sub dot_directory_path {
+    my $class = shift;
+    my $dir = File::Spec->catfile($HOME,'.vm_ec2_staging');
+    unless (-e $dir && -d $dir) {
+	mkdir $dir       or croak "mkdir $dir: $!";
+	chmod 0700 $dir  or croak "chmod 0700 $dir: $!";
+    }
+    return $dir;
+}
+
+sub _check_keyfile {
+    my $self = shift;
+    my $keyname = shift;
+    my $dotpath = $self->dot_directory_path;
+    opendir my $d,$dotpath or die "Can't opendir $dotpath: $!";
+    while (my $file = readdir($d)) {
+	if ($file =~ /^(.+)-$keyname.pem/) {
+	    return $1,$self->key_path($keyname,$1);
+	}
+    }
+    closedir $d;
+    return;
 }
 
 sub VM::EC2::new_data_transfer_server {

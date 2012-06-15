@@ -61,8 +61,8 @@ use File::Spec;
 
 use overload
     '""'     => sub {my $self = shift;
-		     return $self->as_string;
-                  },
+ 		     return $self->short_name;  # "inherited" from VM::EC2::Volume
+},
     fallback => 1;
 
 my $Volume = 1;  # for anonymously-named volumes
@@ -94,11 +94,11 @@ sub provision_volume {
 
     my %args  = @_;
 
-    $args{-zone}       = $self->_get_vol_zone($ec2,$args{-volume_id}) if $args{-volume_id};
-    $args{-name}     ||= $args{-volume_id} || $args{-snapshot_id} || sprintf("Volume%02d",$Volume++);
-    $args{-fstype}   ||= 'ext4';
-    $args{-zone}     ||= $self->_select_zone($ec2);
-    my $server = $self->_get_server($ec2,$args{-zone}) or croak "Can't launch a server to provision volume";
+    $args{-availability_zone}  = $self->_get_vol_zone($ec2,$args{-volume_id}) if $args{-volume_id};
+    $args{-name}             ||= $args{-volume_id} || $args{-snapshot_id} || sprintf("Volume%02d",$Volume++);
+    $args{-fstype}           ||= 'ext4';
+    $args{-availability_zone}||= $self->_select_zone($ec2);
+    my $server = $self->_get_server($ec2,$args{-availability_zone}) or croak "Can't launch a server to provision volume";
     my $vol    = $server->provision_volume(%args) or croak "Can't provision volume";
     return $vol;
 }
@@ -131,10 +131,10 @@ sub mounted {
     return $m;
 }
 
-sub as_string {
-    my $self = shift;
-    return $self->server.':'.$self->mtpt;
-}
+#sub as_string {
+#    my $self = shift;
+#    return $self->server.':'.$self->mtpt;
+#}
 
 sub create_snapshot {
     my $self = shift;
@@ -269,6 +269,12 @@ sub _get_vol_zone {
     my ($ec2,$volid) = @_;
     my $volume = $ec2->describe_volumes($volid) or croak "unknown volumeid $volid";
     return $volume->availabilityZone;
+}
+
+sub DESTROY {
+    my $self = shift;
+    my $server = $self->server or return;
+    $server->unregister_volume($self);
 }
 
 sub VM::EC2::staging_volume {
