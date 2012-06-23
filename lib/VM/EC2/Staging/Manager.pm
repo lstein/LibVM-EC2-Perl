@@ -1,21 +1,20 @@
-package VM::EC2::Staging::Server;
-
-# high level interface for transferring data, and managing data snapshots
-# via a series of DataTransfer VMs.
+package VM::EC2::Staging::Manager;
 
 =head1 NAME
 
-VM::EC2::Staging::Server - Automated VM for moving data in and out of cloud.
+VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
 
 =head1 SYNOPSIS
 
  use VM::EC2::Staging::Manager;
 
  my $ec2     = VM::EC2->new;
- my $staging = VM::EC2::Staging::Manager->new(-ec2     => $ec2,
-                                              -on_exit => 'stop', # default, choose root volume type based on behavior
-                                              -quiet   => 0,      # default
-                                              -scan    => 1,      # default
+ my $staging = VM::EC2::Staging::Manager->new(-ec2         => $ec2,
+                                              -on_exit     => 'stop', # default, choose root volume type based on behavior
+                                              -quiet       => 0,      # default
+                                              -scan        => 1,      # default
+                                              -image_name  => 'ubuntu-maverick-10.10', # default
+                                              -user_name   => 'ubuntu',                # default
                                          );
  $staging->scan();  # populate with preexisting servers & volumes
  
@@ -69,19 +68,14 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use VM::EC2;
 use VM::EC2::Staging::Volume;
+use VM::EC2::Staging::Server;
 use Carp 'croak';
-use Scalar::Util 'weaken';
 use File::Spec;
 use File::Path 'make_path','remove_tree';
 use File::Basename 'dirname';
-use POSIX 'setsid';
-use overload
-    '""'     => sub {my $self = shift;
-		     return $self->as_string;
-                  },
-    fallback => 1;
 
-use constant GB => 1_073_741_824;
+use constant                     GB => 1_073_741_824;
+use constant SERVER_STARTUP_TIMEOUT => 120;
 
 my %Servers;
 my %Zones;
@@ -90,64 +84,39 @@ my $LastHost;
 
 sub new {
     my $class = shift;
-    my $ec2   = shift or croak "Usage: $class->new(\$ec2,\@args)";
     my %args  = @_;
-    $args{-image_name}        ||= $class->default_image_name;
+    $args{-ec2}               ||= VM::EC2->new();
+    $args{-on_exit}           ||= $class->default_exit_behavior;
+    $args{-reuse_key}         ||= $class->default_reuse_key;
     $args{-username}          ||= $class->default_user_name;
     $args{-architecture}      ||= $class->default_architecture;
     $args{-root_type}         ||= $class->default_root_type;
     $args{-instance_type}     ||= $class->default_instance_type;
     $args{-availability_zone} ||= undef;
     $args{-quiet}             ||= undef;
-    $args{-keep}              ||= undef;
-    $args{-image}             ||= '';
 
-    my $self = bless {
-	ec2      => $ec2,
-	instance => undef,
-	username => $args{-username},
-	quiet    => $args{-quiet},
-	keep     => $args{-keep},
-    },ref $class || $class;
-    $self->new_instance(\%args);
-    weaken($Servers{$self->as_string}         = $self);
-    weaken($Zones{$self->instance->placement} = $self);
-    return $self;
+    # create accessors
+    foreach (keys %args) {
+	next unless /^-\w+$/;
+	(my $func_name = $_) =~ s/^-//;
+	eval <<END;
+sub ${class}::${func_name} {
+    my \$self = shift;
+    my \$d    = \$self->{$_};
+    \$self->{$_} = shift if \@_;
+    return \$d;
+END
+    }
+
+    return bless \%args,ref $class || $class;
 }
 
-sub ec2      { shift->{ec2}      }
-sub instance { shift->{instance} }
-sub keyfile  { shift->{keyfile}  }
-sub username { shift->{username} }
-sub quiet    { shift->{quiet}    }
-sub keep     { shift->{keep}     }
-
-sub default_image_name {
-    return 'ubuntu-maverick-10.10';  # launches faster
-#    return 'ubuntu-precise-12.04';  # LTS, but launches more slowly
-}
-
-sub default_user_name {
-    return 'ubuntu';
-}
-
-sub default_architecture {
-    return 'i386';
-}
-
-sub default_root_type {
-    return 'instance-store';
-}
-
-sub default_instance_type {
-    return 'm1.small';
-}
-
-sub as_string {
-    my $self = shift;
-    my $ip   = eval {$self->instance->dnsName} || '1.2.3.4';
-    return $ip;
-}
+sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
+sub default_exit_behavior { 'terminate'   }
+sub default_user_name     { 'ubuntu'      }
+sub default_architecture  { 'i386'        }
+sub default_root_type     { 'instance-store'}
+sub default_instance_type { 'm1.small'      }
 
 # scan for staging instances in current region and cache them
 # into memory
@@ -156,12 +125,166 @@ sub as_string {
 sub scan {
     my $self = shift;
     my $ec2  = shift;
-    my @instances = $ec2->describe_instances(-filter=>{'tag-key'=>'StagingName'});
+    $self->_scan_instances($ec2);
+    $self->_scan_volumes($ec2);
+}
+
+sub _scan_instances {
+    my $self = shift;
+    my $ec2  = shift;
+    my @instances = $ec2->describe_instances(-filter=>{'tag:Role'=>'StagingInstance'});
     for my $instance (@instances) {
-	my $keyname = $instance->keyName;
-	my ($username,$keyfile) = $self->_check_keyfile($keyname) or next;
-	my ($group) = $instance->groups;
-	my $server  = $self->new($ec2,-keep=>1,-username=>$username...
+	my $keyname  = $instance->keyName                   or next;
+	my $keyfile  = $self->_check_keyfile($keyname)      or next;
+	my $username = $instance->tags->{'StagingUsername'} or next;
+	my $server   = VM::EC2::Staging::Server->new(
+	    -keyfile  => $keyfile,
+	    -username => $username,
+	    -instance => $instance
+	    );
+	$self->register_server($server);
+    }
+}
+
+sub _scan_volumes {
+    my $self = shift;
+    my $ec2  = shift;
+
+    # now the volumes
+    my @volumes = $ec2->describe_volumes(-filter=>{'tag:Role'=>'StagingVolume'});
+    for my $volume (@volumes) {
+	my $status = $volume->status;
+	next unless $status eq 'in-use';
+	
+	# the server should have been found by _scan_instances() in the earlier step
+	# Must run _scan_instances before _scan_volumes.
+	my $server     = $self->find_server_by_instance($instance) or next;
+
+	my $zone       = $volume->availabilityZone;
+	my $attachment = $volume->attachment;
+	my $ebs_device = $attachment->device;
+	my $instance   = $attachment->instance;
+	my $vol = VM::EC2::Staging::Volume->new(
+	    -volume => $volume,
+	    -name   => $name,
+	    # note - leave mtpt and device empty to avoid
+	    # starting up a server at this stage. The volume
+	    # will have to determine this info at use time.
+	    );
+	$self->register_volume($vol);
+    }
+}
+
+sub provision_server {
+    my $self    = shift;
+    my ($keyname,$keyfile) = $self->_security_key;
+    my $security_group     = $self->_security_group;
+    my $image              = $self->_search_for_image() or croak "No suitable image found";
+    my ($instance)         = $self->ec2->run_instances(
+	-image_id          => $image,
+	-instance_type     => $self->instance_type,
+	-security_group_id => $security_group,
+	-key_name          => $keyname,
+	-availability_zone => $self->availability_zone
+	);
+    $instance->add_tag(Role            => 'StagingInstance');
+    $instance->add_tag(StagingUsername => $self->username  );
+    $instance->add_tag(Name            => "Staging server created by ".__PACKAGE__);
+    my $server = VM::EC2::Staging::Server->new(
+	-keyfile  => $keyfile,
+	-username => $self->username,
+	-instance => $instance);
+    eval {
+	local $SIG{ALRM} = sub {die 'timeout'};
+	alarm(SERVER_STARTUP_TIMEOUT);
+	$self->_wait_for_instances($server);
+    };
+    alarm(0);
+    croak "some servers did not start after ",SERVER_STARTUP_TIMEOUT," seconds"
+	if $@ =~ /timeout/;
+    return $server;
+}
+
+sub find_server_by_instance {
+    my $self = shift;
+    my $instance = shift;
+    return $self->{Instances}{$instance};
+}
+
+sub register_server {
+    my $self   = shift;
+    my $server = shift;
+    my $zone   = $server->availability_zone;
+    $self->{Zones}{$zone}{Servers}{$server} = $server;
+    $self->{Instances}{$server->instance}   = $server;
+}
+
+sub unregister_server {
+    my $self   = shift;
+    my $server = shift;
+    my $zone   = $server->availability_zone;
+    delete $self->{Zones}{$zone}{Servers}{$server};
+    delete $self->{Instances}{$server->instance};
+}
+
+sub servers {
+    my $self = shift;
+    return values %{$self->{Instances}};
+}
+
+sub register_volume {
+    my $self = shift;
+    my $vol  = shift;
+    $self->{Volumes}{$vol->volumeId} = $vol;
+}
+
+sub unregister_volume {
+    my $self = shift;
+    my $vol  = shift;
+    delete $self->{Volumes}{$vol->volumeId};
+}
+
+sub volumes {
+    my $self = shift;
+    return values %{$self->{Volumes}};
+}
+
+sub start_all {
+    my $self = shift;
+    my @servers = $self->servers;
+    my @need_starting = grep {$_->current_status eq 'stopped'} @servers;
+    return unless @need_starting;
+    eval {
+	local $SIG{ALRM} = sub {die 'timeout'};
+	alarm(SERVER_STARTUP_TIMEOUT);
+	$self->_start_instances(@need_starting);
+    };
+    alarm(0);
+    croak "some servers did not start after ",SERVER_STARTUP_TIMEOUT," seconds"
+	if $@ =~ /timeout/;
+}
+
+sub _start_instances {
+    my $self = shift;
+    my @need_starting = @_;
+    $self->info("starting instances: @need_starting.\n");
+    $self->ec2->start_instances(@need_starting);
+    $self->_wait_for_instances(@need_starting);
+}
+
+sub _wait_for_instances {
+    my $self = shift;
+    my @instances = @_;
+    $self->ec2->wait_for_instances(@instances);
+    $self->info("waiting for ssh daemons on @instances.\n");
+    my %pending = map {$_=>$_} @instances;
+    while (%pending) {
+	for my $s (values %pending) {
+	    continue unless $s->ping;
+	    delete $pending{$s};
+	} continue {
+	    sleep 5;
+	}
     }
 }
 
@@ -413,23 +536,6 @@ sub _rsync_get {
     system("rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $dest")==0;
 }
 
-sub new_instance {
-    my $self = shift;
-    my $args = shift;
-    unless ($self->{instance}) {
-	my $instance = $self->_create_instance($args)
-	    or croak "Could not create an instance that satisfies requested criteria";
-	$self->ec2->wait_for_instances($instance)
-	    or croak "Instance did not come up in a reasonable time";
-	$self->{instance} = $instance;
-    }
-    do {
-	$self->info("Waiting for ssh daemon to become ready on staging server...");    
-	sleep 5;
-    } until eval{$self->scmd('pwd')};
-    return $self->{instance};
-}
-
 sub _create_instance {
     my $self = shift;
     my $args = shift;
@@ -437,8 +543,8 @@ sub _create_instance {
 
     # search for a matching instance
     $image ||= $self->search_for_image($args) or croak "No suitable image found";
-    my $sg   = $self->security_group();
-    my $kp   = $self->keypair();
+    my $sg   = $self->_security_group();
+    my $kp   = $self->_keypair();
     my $zone = $args->{-availability_zone};
     $self->info("Creating staging server from $image in $zone.\n");
     my $instance = $self->ec2->run_instances(-image_id          => $image,
@@ -507,12 +613,19 @@ sub _new_security_group {
     return $sg;
 }
 
-sub _new_keypair {
+sub _keypair {
     my $self = shift;
     my $ec2     = $self->ec2;
+    if ($self->reuse_key) {
+	my @candidates = $ec2->describe_key_pairs(-filter=>{'tag:Role' => 'StagingKeyPair'});
+	for my $c (@candidates) {
+	    my $name    = $c->keyName;
+	    my $keyfile = $self->key_path($name);
+	    return $c if -e $keyfile;
+	}
+    }
     my $name    = $ec2->token;
-
-    $self->info("Creating temporary keypair $name.\n");
+    $self->info("Creating keypair $name.\n");
     my $kp      = $ec2->create_key_pair($name);
     my $keyfile = $self->key_path($name);
     my $private_key = $kp->privateKey;
@@ -520,9 +633,26 @@ sub _new_keypair {
     chmod 0600,$keyfile     or die "Couldn't chmod  $keyfile: $!";
     print $k $private_key;
     close $k;
-
-    $self->{keyfile} = $keyfile;
+    $kp->add_tag(Role => 'StagingKeyPair');
     return $kp;
+}
+
+sub _security_group {
+    my $self = shift;
+    my $ec2  = $self->ec2;
+    my @groups = $ec2->describe_security_groups(-filter=>{'tag:Role' => 'StagingGroup'});
+    return $groups[0] if @groups;
+    my $name = $ec2->token;
+    $self->info("Creating staging security group $name.\n");
+    my $sg =  $ec2->create_security_group(-name  => $name,
+					  -description => "Temporary security group created by ".__PACKAGE__
+	) or die $ec2->error_str;
+    $sg->authorize_incoming(-protocol   => 'tcp',
+			    -port       => 'ssh');
+    $sg->update or die $ec2->error_str;
+    $sg->add_tag(Role  => 'StagingGroup');
+    return $sg;
+
 }
 
 sub _create_volume {
