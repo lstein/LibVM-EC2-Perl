@@ -852,10 +852,10 @@ sub accepts_key {
 
 sub DESTROY {
     my $self = shift;
-    return if $self->keep;
-    undef $Servers{$self->as_string};
-    undef $Zones{$self->instance->placement};
-    $self->cleanup;
+#    return if $self->keep;
+#    undef $Servers{$self->as_string};
+#    undef $Zones{$self->instance->placement};
+#    $self->cleanup;
 }
 
 # can be called as a class method
