@@ -137,7 +137,8 @@ sub scan {
 sub _scan_instances {
     my $self = shift;
     my $ec2  = shift;
-    my @instances = $ec2->describe_instances(-filter=>{'tag:Role'=>'StagingInstance'});
+    my @instances = $ec2->describe_instances({'tag:Role'            => 'StagingInstance',
+					      'instance-state-name' => ['running','stopped']});
     for my $instance (@instances) {
 	my $keyname  = $instance->keyName                   or next;
 	my $keyfile  = $self->_check_keyfile($keyname)      or next;
@@ -180,15 +181,19 @@ sub _scan_volumes {
 
 sub provision_server {
     my $self    = shift;
+    my @args    = @_;
+
+    # let subroutine arguments override manager's args
+    my %args    = ($self->_run_instance_args,@args); 
+
     my ($keyname,$keyfile) = $self->_security_key;
     my $security_group     = $self->_security_group;
-    my $image              = $self->_search_for_image() or croak "No suitable image found";
+    my $image              = $self->_search_for_image(%args) or croak "No suitable image found";
     my ($instance)         = $self->ec2->run_instances(
 	-image_id          => $image,
-	-instance_type     => $self->instance_type,
 	-security_group_id => $security_group,
 	-key_name          => $keyname,
-	-availability_zone => $self->availability_zone
+	%args,
 	);
     $instance or croak $self->ec2->error_str;
     $instance->add_tag(Role            => 'StagingInstance');
@@ -211,6 +216,15 @@ sub provision_server {
     return $server;
 }
 
+sub _run_instance_args {
+    my $self = shift;
+    my @args;
+    for my $arg (qw(instance_type availability_zone architecture image_name root_type)) {
+	push @args,("-${arg}" => $self->$arg);
+    }
+    return @args;
+}
+
 sub find_server_by_name {
     my $self  = shift;
     my $server = shift;
@@ -222,6 +236,13 @@ sub find_server_by_instance {
     my $self = shift;
     my $instance = shift;
     return $self->{Instances}{$instance};
+}
+
+sub _select_server_by_zone {
+    my $self = shift;
+    my $zone = shift;
+    my @servers = values %{$Zones{$zone}{Servers}};
+    return $servers[0];
 }
 
 sub register_server {
@@ -258,11 +279,6 @@ sub unregister_volume {
     my $zone = $vol->availability_zone;
     $Zones{$zone}{$vol};
     $Volumes{$vol->volumeId};
-}
-
-sub volumes {
-    my $self = shift;
-    return values %Volumes;
 }
 
 sub start_all_servers {
@@ -334,26 +350,32 @@ sub provision_volume {
     $args{-reuse}               = $self->reuse_volumes unless defined $args{-reuse};
     $args{-mount}             ||= '/mnt/DataTransfer/'.$args{-name};
     $args{-fstype}            ||= 'ext4';
-    $args{-availability_zone} ||= $self->_selected_used_zone;
+    $args{-availability_zone} ||= $self->_select_used_zone;
     
-    my $server = $self->_find_server_in_zone($args{-availability_zone});
+    my $server = $self->_find_server_in_zone($args{-availability_zone}) 
+	||       $self->provision_server(-availability_zone=>$args{-availability_zone});
     $server->start_and_wait unless $server->ping;
     my $volume = $server->provision_volume(\%args);
     $self->register_volume($volume);
     return $volume;
 }
 
+sub volumes {
+    my $self = shift;
+    return values %Volumes;
+}
+
 sub _search_for_image {
     my $self = shift;
+    my %args = @_;
+
     $self->info("Searching for a staging image...");
 
-    my $image_name   = $self->image_name;
-    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' : $self->root_type;
-    my $architecture = $self->architecture;
+    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' : $args{-root_type};
 
-    my @candidates = $self->ec2->describe_images({'name'             => "*$image_name*",
+    my @candidates = $self->ec2->describe_images({'name'             => "*$args{-image_name}*",
 						  'root-device-type' => $root_type,
-						  'architecture'     => $architecture});
+						  'architecture'     => $args{-architecture}});
     return unless @candidates;
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
@@ -500,6 +522,17 @@ sub _check_keyfile {
     }
     closedir $d;
     return;
+}
+
+sub _select_used_zone {
+    my $self = shift;
+    if (my @servers = $self->servers) {
+	my @up = grep {$_->ping} @servers;
+	return ($up[0] || $servers[0])->placement;
+    } else {
+	my @zones = $self->ec2->describe_availability_zones;
+	return $zones[rand @zones];
+    }
 }
 
 sub DESTROY {
