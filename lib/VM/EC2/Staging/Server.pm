@@ -92,7 +92,7 @@ sub AUTOLOAD {
     my $self = shift;
     my ($pack,$func_name) = $AUTOLOAD=~/(.+)::([^:]+)$/;
     return if $func_name eq 'DESTROY';
-    my $vol = eval {$self->ebs} or croak "Can't locate object method \"$func_name\" via package \"$pack\"";;
+    my $vol = eval {$self->instance} or croak "Can't locate object method \"$func_name\" via package \"$pack\"";;
     return $vol->$func_name(@_);
 }
 
@@ -109,7 +109,6 @@ sub can {
 
 sub new {
     my $class = shift;
-    my $ec2   = shift or croak "Usage: $class->new(\$ec2,\@args)";
     my %args  = @_;
     $args{-keyfile}        or croak 'need keyfile path';
     $args{-username}       or croak 'need username';
@@ -153,6 +152,15 @@ sub start_server {
 	return;
     }
     $self->is_up(1);
+}
+
+sub ping {
+    my $self = shift;
+    return 1 if $self->is_up;
+    return unless $self->instance->current_status eq 'running';
+    return unless $self->ssh('pwd');
+    $self->is_up(1);
+    return 1;
 }
 
 # probably not working

@@ -92,6 +92,7 @@ sub new {
     $args{-root_type}         ||= $class->default_root_type;
     $args{-instance_type}     ||= $class->default_instance_type;
     $args{-reuse_volumes}     ||= $class->default_reuse_volumes;
+    $args{-image_name}        ||= $class->default_image_name;
     $args{-availability_zone} ||= undef;
     $args{-quiet}             ||= undef;
 
@@ -105,7 +106,9 @@ sub ${class}::${func_name} {
     my \$d    = \$self->{$_};
     \$self->{$_} = shift if \@_;
     return \$d;
+}
 END
+    die $@ if $@;
     }
 
     return bless \%args,ref $class || $class;
@@ -126,7 +129,7 @@ sub default_reuse_volumes { 1               }
 # -on_exit => {'terminate','stop','run'}
 sub scan {
     my $self = shift;
-    my $ec2  = shift;
+    my $ec2  = shift || $self->ec2;
     $self->_scan_instances($ec2);
     $self->_scan_volumes($ec2);
 }
@@ -187,6 +190,7 @@ sub provision_server {
 	-key_name          => $keyname,
 	-availability_zone => $self->availability_zone
 	);
+    $instance or croak $self->ec2->error_str;
     $instance->add_tag(Role            => 'StagingInstance');
     $instance->add_tag(StagingUsername => $self->username  );
     $instance->add_tag(Name            => "Staging server created by ".__PACKAGE__);
@@ -210,7 +214,7 @@ sub provision_server {
 sub find_server_by_name {
     my $self  = shift;
     my $server = shift;
-    my $zone   = $server->availability_zone;
+    my $zone   = $server->placement;
     return $Zones{$zone}{Servers}{$server};
 }
 
@@ -223,7 +227,7 @@ sub find_server_by_instance {
 sub register_server {
     my $self   = shift;
     my $server = shift;
-    my $zone   = $server->availability_zone;
+    my $zone   = $server->placement;
     $Zones{$zone}{Servers}{$server} = $server;
     $Instances{$server->instance}   = $server;
 }
@@ -336,34 +340,18 @@ sub provision_volume {
     $self->register_volume($volume);
     return $volume;
 }
-sub _create_instance {
-    my $self = shift;
-    my $args = shift;
-    my $image = $args->{-image};
 
-    # search for a matching instance
-    $image ||= $self->search_for_image($args) or croak "No suitable image found";
-    my $sg   = $self->_security_group();
-    my $kp   = $self->_keypair();
-    my $zone = $args->{-availability_zone};
-    $self->info("Creating staging server from $image in $zone.\n");
-    my $instance = $self->ec2->run_instances(-image_id          => $image,
-					     -instance_type     => $args->{-instance_type},
-					     -security_group_id => $sg,
-					     -key_name          => $kp,
-					     -availability_zone => $zone) 
-	or die "Can't create instance: ",$self->ec2->error_str;
-    $instance->add_tag(Name=>"Staging server created by VM::EC2::Staging::Server");
-    return $instance;
-}
-
-sub search_for_image {
+sub _search_for_image {
     my $self = shift;
-    my $args = shift;
     $self->info("Searching for a staging image...");
-    my @candidates = $self->ec2->describe_images({'name'             => "*$args->{-image_name}*",
-						  'root-device-type' => $args->{-root_type},
-						  'architecture'     => $args->{-architecture}});
+
+    my $image_name   = $self->image_name;
+    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' : $self->root_type;
+    my $architecture = $self->architecture;
+
+    my @candidates = $self->ec2->describe_images({'name'             => "*$image_name*",
+						  'root-device-type' => $root_type,
+						  'architecture'     => $architecture});
     return unless @candidates;
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
@@ -413,28 +401,27 @@ sub _new_security_group {
     return $sg;
 }
 
-sub _keypair {
+sub _security_key {
     my $self = shift;
     my $ec2     = $self->ec2;
     if ($self->reuse_key) {
-	my @candidates = $ec2->describe_key_pairs(-filter=>{'tag:Role' => 'StagingKeyPair'});
+	my @candidates = $ec2->describe_key_pairs(-filter=>{'key-name' => 'staging-key-*'});
 	for my $c (@candidates) {
 	    my $name    = $c->keyName;
 	    my $keyfile = $self->key_path($name);
-	    return $c if -e $keyfile;
+	    return ($c,$keyfile) if -e $keyfile;
 	}
     }
-    my $name    = $ec2->token;
+    my $name    = 'staging-key-'.$ec2->token;
     $self->info("Creating keypair $name.\n");
-    my $kp      = $ec2->create_key_pair($name);
-    my $keyfile = $self->key_path($name);
+    my $kp          = $ec2->create_key_pair($name) or die $ec2->error_str;
+    my $keyfile     = $self->key_path($name);
     my $private_key = $kp->privateKey;
     open my $k,'>',$keyfile or die "Couldn't create $keyfile: $!";
     chmod 0600,$keyfile     or die "Couldn't chmod  $keyfile: $!";
     print $k $private_key;
     close $k;
-    $kp->add_tag(Role => 'StagingKeyPair');
-    return $kp;
+    return ($kp,$private_key);
 }
 
 sub _security_group {
@@ -445,7 +432,7 @@ sub _security_group {
     my $name = $ec2->token;
     $self->info("Creating staging security group $name.\n");
     my $sg =  $ec2->create_security_group(-name  => $name,
-					  -description => "Temporary security group created by ".__PACKAGE__
+					  -description => "SSH security group created by ".__PACKAGE__
 	) or die $ec2->error_str;
     $sg->authorize_incoming(-protocol   => 'tcp',
 			    -port       => 'ssh');
@@ -493,9 +480,8 @@ sub active_servers {
 
 sub key_path {
     my $self    = shift;
-    my ($keyname,$username)  = @_;
-    $username ||= $self->username;
-    return File::Spec->catfile($self->dot_directory_path,"${username}-${keyname}.pem")
+    my $keyname = shift;
+    return File::Spec->catfile($self->dot_directory_path,"${keyname}.pem")
 }
 
 sub dot_directory_path {
@@ -514,7 +500,7 @@ sub _check_keyfile {
     my $dotpath = $self->dot_directory_path;
     opendir my $d,$dotpath or die "Can't opendir $dotpath: $!";
     while (my $file = readdir($d)) {
-	if ($file =~ /^(.+)-$keyname.pem/) {
+	if ($file =~ /^$keyname.pem/) {
 	    return $1,$self->key_path($keyname,$1);
 	}
     }
