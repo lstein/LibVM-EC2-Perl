@@ -38,9 +38,9 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
  $server->create_snapshot($vol1 => 'snapshot of pictures');
  $server->terminate;  # automatically terminates when goes out of scope
 
- $staging->stop_all();
- $staging->start_all();
- $staging->terminate_all();
+ $staging->stop_all_servers();
+ $staging->start_all_servers();
+ $staging->terminate_all_servers();
 
 =head1 DESCRIPTION
 
@@ -77,21 +77,21 @@ use File::Basename 'dirname';
 use constant                     GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
 
-my %Servers;
-my %Zones;
-my %Volumes;
-my $LastHost;
+my $VolumeName = 'StagingVolume000';
+my $ServerName = 'StagingServer000';
+my (%Zones,%Instances,%Volumes);
 
 sub new {
     my $class = shift;
     my %args  = @_;
     $args{-ec2}               ||= VM::EC2->new();
     $args{-on_exit}           ||= $class->default_exit_behavior;
-    $args{-reuse_key}         ||= $class->default_reuse_key;
+    $args{-reuse_key}         ||= $class->default_reuse_keys;
     $args{-username}          ||= $class->default_user_name;
     $args{-architecture}      ||= $class->default_architecture;
     $args{-root_type}         ||= $class->default_root_type;
     $args{-instance_type}     ||= $class->default_instance_type;
+    $args{-reuse_volumes}     ||= $class->default_reuse_volumes;
     $args{-availability_zone} ||= undef;
     $args{-quiet}             ||= undef;
 
@@ -117,6 +117,8 @@ sub default_user_name     { 'ubuntu'      }
 sub default_architecture  { 'i386'        }
 sub default_root_type     { 'instance-store'}
 sub default_instance_type { 'm1.small'      }
+sub default_reuse_keys    { 1               }
+sub default_reuse_volumes { 1               }
 
 # scan for staging instances in current region and cache them
 # into memory
@@ -140,7 +142,8 @@ sub _scan_instances {
 	my $server   = VM::EC2::Staging::Server->new(
 	    -keyfile  => $keyfile,
 	    -username => $username,
-	    -instance => $instance
+	    -instance => $instance,
+	    -manager  => $self,
 	    );
 	$self->register_server($server);
     }
@@ -156,14 +159,11 @@ sub _scan_volumes {
 	my $status = $volume->status;
 	next unless $status eq 'in-use';
 	
-	# the server should have been found by _scan_instances() in the earlier step
-	# Must run _scan_instances before _scan_volumes.
-	my $server     = $self->find_server_by_instance($instance) or next;
-
 	my $zone       = $volume->availabilityZone;
 	my $attachment = $volume->attachment;
 	my $ebs_device = $attachment->device;
 	my $instance   = $attachment->instance;
+	my $name       = $volume->tags->{StagingName};
 	my $vol = VM::EC2::Staging::Volume->new(
 	    -volume => $volume,
 	    -name   => $name,
@@ -193,16 +193,25 @@ sub provision_server {
     my $server = VM::EC2::Staging::Server->new(
 	-keyfile  => $keyfile,
 	-username => $self->username,
-	-instance => $instance);
+	-instance => $instance,
+	-manager  => $self,
+	);
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
 	alarm(SERVER_STARTUP_TIMEOUT);
-	$self->_wait_for_instances($server);
+	$self->wait_for_instances($server);
     };
     alarm(0);
     croak "some servers did not start after ",SERVER_STARTUP_TIMEOUT," seconds"
 	if $@ =~ /timeout/;
     return $server;
+}
+
+sub find_server_by_name {
+    my $self  = shift;
+    my $server = shift;
+    my $zone   = $server->availability_zone;
+    return $Zones{$zone}{Servers}{$server};
 }
 
 sub find_server_by_instance {
@@ -215,41 +224,44 @@ sub register_server {
     my $self   = shift;
     my $server = shift;
     my $zone   = $server->availability_zone;
-    $self->{Zones}{$zone}{Servers}{$server} = $server;
-    $self->{Instances}{$server->instance}   = $server;
+    $Zones{$zone}{Servers}{$server} = $server;
+    $Instances{$server->instance}   = $server;
 }
 
 sub unregister_server {
     my $self   = shift;
     my $server = shift;
     my $zone   = $server->availability_zone;
-    delete $self->{Zones}{$zone}{Servers}{$server};
-    delete $self->{Instances}{$server->instance};
+    $Zones{$zone}{Servers}{$server};
+    $Instances{$server->instance};
 }
 
 sub servers {
     my $self = shift;
-    return values %{$self->{Instances}};
+    return values %Instances;
 }
 
 sub register_volume {
     my $self = shift;
     my $vol  = shift;
-    $self->{Volumes}{$vol->volumeId} = $vol;
+    $Zones{$vol->availability_zone}{Volumes}{$vol} = $vol;
+    $Volumes{$vol->volumeId} = $vol;
 }
 
 sub unregister_volume {
     my $self = shift;
     my $vol  = shift;
-    delete $self->{Volumes}{$vol->volumeId};
+    my $zone = $vol->availability_zone;
+    $Zones{$zone}{$vol};
+    $Volumes{$vol->volumeId};
 }
 
 sub volumes {
     my $self = shift;
-    return values %{$self->{Volumes}};
+    return values %Volumes;
 }
 
-sub start_all {
+sub start_all_servers {
     my $self = shift;
     my @servers = $self->servers;
     my @need_starting = grep {$_->current_status eq 'stopped'} @servers;
@@ -264,15 +276,31 @@ sub start_all {
 	if $@ =~ /timeout/;
 }
 
+sub stop_all_servers {
+    my $self = shift;
+    my @servers = $self->servers;
+    foreach (@servers) { $_->stop }
+}
+
+sub terminate_all_servers {
+    my $self = shift;
+    my @servers = $self->servers;
+    foreach (@servers) { $_->terminate }
+    if ($self->reuse_keys) {
+	$self->ec2->wait_for_instances(@servers);
+	$self->ec2->delete_key_pair($_->keyPair) foreach @servers;
+    }
+}
+
 sub _start_instances {
     my $self = shift;
     my @need_starting = @_;
     $self->info("starting instances: @need_starting.\n");
     $self->ec2->start_instances(@need_starting);
-    $self->_wait_for_instances(@need_starting);
+    $self->wait_for_instances(@need_starting);
 }
 
-sub _wait_for_instances {
+sub wait_for_instances {
     my $self = shift;
     my @instances = @_;
     $self->ec2->wait_for_instances(@instances);
@@ -280,10 +308,11 @@ sub _wait_for_instances {
     my %pending = map {$_=>$_} @instances;
     while (%pending) {
 	for my $s (values %pending) {
-	    continue unless $s->ping;
+	    unless ($s->ping) {
+		sleep 5;
+		next;
+	    }
 	    delete $pending{$s};
-	} continue {
-	    sleep 5;
 	}
     }
 }
@@ -292,250 +321,21 @@ sub provision_volume {
     my $self = shift;
     my %args = @_;
 
-    my $name   = $args{-name};
-    my $size   = $args{-size};
-    my $volid  = $args{-volume_id};
-    my $snapid = $args{-snapshot_id};
-    my $reuse  = $args{-reuse};
-
-    if ($volid || $snapid) {
-	$name  ||= $volid || $snapid;
-	$size  ||= -1;
-    } else {
-	$name        =~ /^[a-zA-Z0-9_.,&-]+$/
-	    or croak "Volume name must contain only characters [a-zA-Z0-9_.,&-]; you asked for '$name'";
-    }
-
-    my $ec2      = $self->ec2;
-    my $mtpt     = $args{-mount}  || '/mnt/DataTransfer/'.$name;
-    my $fstype   = $args{-fstype} || 'ext4';
-    my $username = $self->username;
+    $args{-name}              ||= ++$VolumeName;
+    $args{-size}              ||= 1;
+    $args{-volume_id}         ||= undef;
+    $args{-snapshot_id}       ||= undef;
+    $args{-reuse}               = $self->reuse_volumes unless defined $args{-reuse};
+    $args{-mount}             ||= '/mnt/DataTransfer/'.$args{-name};
+    $args{-fstype}            ||= 'ext4';
+    $args{-availability_zone} ||= $self->_selected_used_zone;
     
-    $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
-
-    
-    my $instance = $self->instance;
-    my $zone     = $instance->placement;
-    my ($vol,$needs_mkfs,$needs_resize) = $self->_create_volume($name,$size,$zone,$volid,$snapid,$reuse);
-    
-    my ($ebs_device,$mt_device) = eval{$self->unused_block_device()}           
-                      or die "Couldn't find suitable device to attach this volume to";
-    my $s = $instance->attach_volume($vol=>$ebs_device)  
-	              or die "Couldn't attach $vol to $instance via $ebs_device";
-    $ec2->wait_for_attachments($s)                   or croak "Couldn't attach $vol to $instance via $ebs_device";
-    $s->current_status eq 'attached'                 or croak "Couldn't attach $vol to $instance via $ebs_device";
-
-    if ($needs_resize) {
-	$self->scmd("sudo file -s $mt_device") =~ /ext[234]/   or croak "Sorry, but can only resize ext volumes ";
-	$self->info("Checking filesystem...\n");
-	$self->ssh("sudo /sbin/e2fsck -fy $mt_device")          or croak "Couldn't check $mt_device";
-	$self->info("Resizing previously-used volume to $size GB...\n");
-	$self->ssh("sudo /sbin/resize2fs $mt_device ${size}G") or croak "Couldn't resize $mt_device";
-    } elsif ($needs_mkfs) {
-	$self->info("Making $fstype filesystem on staging volume...\n");
-	$self->ssh("sudo /sbin/mkfs.$fstype -L '$name' $mt_device") or croak "Couldn't make filesystem on $mt_device";
-    }
-
-    my $vol = VM::EC2::Staging::Volume->new({
-	volume    => $vol,
-	device    => $mt_device,
-	mtpt      => $mtpt,
-	server    => $self,
-	symbolic_name => $name});
-
-    $self->mount_volume($vol);
-    $self->register_volume($vol);
-    return $vol;
+    my $server = $self->_find_server_in_zone($args{-availability_zone});
+    $server->start_and_wait unless $server->ping;
+    my $volume = $server->provision_volume(\%args);
+    $self->register_volume($volume);
+    return $volume;
 }
-
-sub register_volume {
-    my $self = shift;
-    my $vol  = shift;
-    weaken($Volumes{$vol->volumeId} = $vol);
-}
-
-sub unregister_volume {
-    my $self = shift;
-    my $vol  = shift;
-    delete $Volumes{$vol->volumeId};
-}
-
-sub mount_volume {
-    my $self = shift;
-    my $vol  = shift;
-    my $mtpt      = $vol->mtpt;
-    my $mt_device = $vol->device;
-    $self->info("Mounting staging volume.\n");
-    $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt");
-    $vol->mounted(1);
-}
-
-sub unmount_volume {
-    my $self = shift;
-    my $vol  = shift;
-    my $mtpt = $vol->mtpt;
-    $self->info("unmounting $vol...\n");
-    $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
-    $vol->mounted(0);
-}
-
-sub remount_volume {
-    my $self = shift;
-    my $vol  = shift;
-    my $mtpt = $vol->mtpt;
-    my $device = $vol->device;
-    $self->info("remounting $vol\n");
-    $self->ssh('sudo','mount',$device,$mtpt) or croak "Could not remount $mtpt";
-    $vol->mounted(1);
-}
-
-sub delete_volume {
-   my $self = shift;
-   my $vol  = shift;
-   my $ec2 = $self->ec2;
-   $self->unmount_volume($vol);
-   $ec2->wait_for_attachments( $vol->detach() );
-   $self->info("deleting $vol...\n");
-   $ec2->delete_volume($vol->volumeId);
-   $vol->mounted(0);
-}
-
-# take real or symbolic name and turn it into a two element
-# list consisting of server object and mount point
-# possible forms:
-#            /local/path
-#            vol-12345/relative/path
-#            vol-12345:/relative/path
-#            vol-12345:relative/path
-#            $server:/absolute/path
-#            $server:relative/path
-# 
-# treat path as symbolic if it does not start with a slash
-# or dot characters
-sub resolve_path {
-    my $self  = shift;
-    my $vpath = shift;
-
-    my ($servername,$pathname);
-    if ($vpath =~ m!^(vol-[0-9a-f]+):?(.*)! && $Volumes{$1}) {
-	my $vol  = $Volumes{$1};
-	my $path = $2;
-	$path       = "/$path" if $path && $path !~ m!^/!;
-	$servername = $LastHost = $vol->server;
-	my $mtpt    = $vol->mtpt;
-	$pathname   = $mtpt;
-	$pathname  .= $path if $path;
-    } elsif ($vpath =~ /^([^:]+):(.+)$/) {
-	$servername = $LastHost = $1;
-	$pathname   = $2;
-    } elsif ($vpath =~ /^:(.+)$/) {
-	$servername = $LastHost;
-	$pathname   = $2;
-    } else {
-	return [undef,$vpath];   # localhost
-    }
-
-    my $server = $Servers{$servername} || $servername;
-    unless (ref $server && $server->isa('VM::EC2::Staging::Server')) {
-	return [$server,$pathname];
-    }
-
-    return [$server,$pathname];
-}
-
-# most general form
-# 
-sub rsync {
-    my $self = shift;
-    undef $LastHost;
-    my @paths = map {$self->resolve_path($_)} @_;
-
-    my $dest   = pop @paths;
-    my @source = @paths;
-
-    my %hosts;
-    foreach (@source) {
-	$hosts{$_->[0]} = $_->[0];
-    }
-    croak "More than one source host specified" if keys %hosts > 1;
-    my ($source_host) = values %hosts;
-    my $dest_host     = $dest->[0];
-
-    my @source_paths      = map {$_->[1]} @source;
-    my $dest_path         = $dest->[1];
-
-    # localhost           => DataTransferServer
-    if (!$source_host && UNIVERSAL::isa($dest_host,__PACKAGE__)) {
-	return $dest_host->_rsync_put(@source_paths,$dest_path);
-    }
-
-    # DataTransferServer  => localhost
-    if (UNIVERSAL::isa($source_host,__PACKAGE__) && !$dest_host) {
-	return $source_host->_rsync_get(@source_paths,$dest_path);
-    }
-
-    if ($source_host eq $dest_host) {
-	return $source_host->ssh('sudo','rsync','-avz',@source_paths,$dest_path);
-    }
-
-    # DataTransferServer1 => DataTransferServer2
-    # this one is slightly more difficult because datatransferserver1 has to
-    # ssh authenticate against datatransferserver2.
-    my $keyname = "/tmp/${source_host}_to_${dest_host}";
-    unless ($source_host->has_key($keyname)) {
-	$source_host->info('creating ssh key for server to server data transfer');
-	$source_host->ssh("ssh-keygen -t dsa -q -f $keyname</dev/null 2>/dev/null");
-	$source_host->has_key($keyname=>1);
-    }
-    unless ($dest_host->accepts_key($keyname)) {
-	my $key_stuff = $source_host->scmd("cat ${keyname}.pub");
-	chomp($key_stuff);
-	$dest_host->ssh("mkdir -p .ssh; chmod 0700 .ssh; echo '$key_stuff' >> .ssh/authorized_keys");
-	$dest_host->accepts_key($keyname=>1);
-    }
-
-    my $username = $dest_host->username;
-    return $source_host->ssh('sudo','rsync','-avz',
-			     '-e',"'ssh -o \"StrictHostKeyChecking no\" -i $keyname -l $username'",
-			     "--rsync-path='sudo rsync'",
-			     @source_paths,"$dest_host:$dest_path");
-
-
-    # localhost           => localhost (local cp)
-    return system('rsync',@source_paths,$dest_path) == 0;
-}
-
-sub _rsync_put {
-    my $self   = shift;
-    my @source = @_;
-    my $dest   = pop @source;
-    # resolve symbolic name of $dest
-    $dest        =~ s/^.+://;  # get rid of hostname, if it is there
-    my $host     = $self->instance->dnsName;
-    my $keyfile  = $self->keyfile;
-    my $username = $self->username;
-    $self->info("Beginning rsync...\n");
-    system("rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $host:$dest") == 0;
-}
-
-sub _rsync_get {
-    my $self = shift;
-    my @source = @_;
-    my $dest   = pop @source;
-
-    # resolve symbolic names of src
-    my $host     = $self->instance->dnsName;
-    foreach (@source) {
-	(my $path = $_) =~ s/^.+://;  # get rid of host part, if it is there
-	$_ = "$host:$path";
-    }
-    my $keyfile  = $self->keyfile;
-    my $username = $self->username;
-    
-    $self->info("Beginning rsync...\n");
-    system("rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $dest")==0;
-}
-
 sub _create_instance {
     my $self = shift;
     my $args = shift;
@@ -603,9 +403,9 @@ sub _new_security_group {
     my $self = shift;
     my $ec2  = $self->ec2;
     my $name = $ec2->token;
-    $self->info("Creating temporary security group $name.\n");
-    my $sg =  $ec2->create_security_group(-name  => $name,
-				       -description => "Temporary security group created by ".__PACKAGE__
+    $self->info("Creating ssh security group $name.\n");
+    my $sg =  $ec2->create_security_group(-name     => $name,
+				       -description => "SSH security group created by ".__PACKAGE__
 	) or die $ec2->error_str;
     $sg->authorize_incoming(-protocol   => 'tcp',
 			    -port       => 'ssh');
@@ -655,73 +455,6 @@ sub _security_group {
 
 }
 
-sub _create_volume {
-    my $self = shift;
-    my ($name,$size,$zone,$volid,$snapid,$reuse_staging_volume) = @_;
-    my $ec2 = $self->ec2;
-
-    my (@vols,@snaps);
-
-    if ($volid) {
-	my $vol = $ec2->describe_volumes($volid) or croak "Unknown volume $volid";
-	croak "$volid is not in server availability zone $zone. Create staging volumes with VM::EC2->staging_volume() to avoid this."
-	    unless $vol->availabilityZone eq $zone;
-	croak "$vol is unavailable for use, status ",$vol->status
-	    unless $vol->status eq 'available';
-	@vols = $volid;
-    }
-
-    elsif ($snapid) {
-	my $snap = $ec2->describe_snapshots($snapid) or croak "Unknown snapshot $snapid";
-	@snaps   = $snap;
-    }
-
-    elsif ($reuse_staging_volume) {
-	@vols = sort {$b->createTime cmp $a->createTime} $ec2->describe_volumes({status              => 'available',
-										 'availability-zone' => $zone,
-										 'tag:StagingName'   => $name});
-	@snaps = sort {$b->startTime cmp $a->startTime} $ec2->describe_snapshots(-owner  => $ec2->account_id,
-										 -filter => {'tag:StagingName' => $name})
-	    unless @vols;
-    }
-
-    my ($vol,$needs_mkfs,$needs_resize);
-
-    if (@vols) {
-	$vol = $vols[0];
-	$size   = $vol->size unless $size > 0;
-	$self->info("Reusing existing volume $vol...\n");
-	$vol->size == $size or croak "Cannot (yet) resize live volumes. Please snapshot first and restore from the snapshot"
-    }
-
-    elsif (@snaps) {
-	my $snap = $snaps[0];
-	$size    = $snap->volumeSize unless $size > 0;
-	$self->info("Reusing existing snapshot $snap...\n");
-	$snap->volumeSize <= $size or croak "Cannot (yet) shrink volumes derived from snapshots. Please choose a size >= snapshot size";
-	$vol = $snap->create_volume(-availability_zone=>$zone,
-				    -size             => $size);
-	$needs_resize = $snap->volumeSize < $size;
-    }
-
-    else {
-	unless ($size > 0) {
-	    $self->info("No size provided. Defaulting to 10 GB.\n");
-	    $size = 10;
-	}
-	$self->info("Provisioning a new $size GB volume...\n");
-	$vol = $ec2->create_volume(-availability_zone=>$zone,
-				   -size             =>$size);
-	$needs_mkfs++;
-    }
-
-    return unless $vol;
-
-    $vol->add_tag(Name => $self->volume_description($name)) unless exists $vol->tags->{Name};
-    $vol->add_tag(StagingName => $name);
-    return ($vol,$needs_mkfs,$needs_resize);
-}
-
 sub volume_description {
     my $self = shift;
     my $vol  = shift;
@@ -729,125 +462,10 @@ sub volume_description {
     return "Staging volume for $name created by ".__PACKAGE__;
 }
 
-sub ssh {
-    my $self = shift;
-    my @cmd   = @_;
-    my $Instance = $self->instance or die "Remote instance not set up correctly";
-    my $username = $self->username;
-    my $keyfile  = $self->keyfile;
-    my $host     = $Instance->dnsName;
-    system('/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd)==0;
-}
-
-sub scmd {
-    my $self = shift;
-    my @cmd   = @_;
-    my $Instance = $self->instance or die "Remote instance not set up correctly";
-    my $username = $self->username;
-    my $keyfile  = $self->keyfile;
-    my $host     = $Instance->dnsName;
-
-    my $pid = open my $kid,"-|"; #this does a fork
-    die "Couldn't fork: $!" unless defined $pid;
-    if ($pid) {
-	my @results;
-	while (<$kid>) {
-	    push @results,$_;
-	}
-	close $kid;
-#	croak "ssh failed with status ",$?>>8 unless $?==0;
-	if (wantarray) {
-	    chomp(@results);
-	    return @results;
-	} else {
-	    return join '',@results;
-	}
-    }
-
-    # in child
-    exec '/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd;
-}
-
-sub shell {
-    my $self = shift;
-    fork() && return;
-    setsid(); # so that we are independent of parent signals
-    my $keyfile  = $self->keyfile;
-    my $username = $self->username;
-    my $host     = $self->instance->dnsName;
-    exec 'xterm',
-    '-e',"/usr/bin/ssh -o 'CheckHostIP no' -o 'StrictHostKeyChecking no' -i $keyfile -l $username $host";
-}
-
-# find an unused block device
-sub unused_block_device {
-    my $self        = shift;
-    my $major_start = shift || 'f';
-
-    my @devices = $self->scmd('ls -1 /dev/sd?* /dev/xvd?* 2>/dev/null');
-    return unless @devices;
-    my %used = map {$_ => 1} @devices;
-    
-    my $major_start = shift || 'f';
-
-    my $base =   $used{'/dev/sda1'}   ? "/dev/sd"
-               : $used{'/dev/xvda1'}  ? "/dev/xvd"
-               : '';
-    die "Device list contains neither /dev/sda1 nor /dev/xvda1; don't know how blocks are named on this system"
-	unless $base;
-
-    my $ebs = '/dev/sd';
-    for my $major ($major_start..'p') {
-        for my $minor (1..15) {
-            my $local_device = "${base}${major}${minor}";
-            next if $used{$local_device}++;
-            my $ebs_device = "/dev/sd${major}${minor}";
-            return ($ebs_device,$local_device);
-        }
-    }
-    return;
-}
-
 sub info {
     my $self = shift;
     return if $self->quiet;
     print STDERR @_;
-}
-
-sub cleanup {
-    my $self = shift;
-    if (-e $self->keyfile) {
-	$self->info('Deleting private key file...');
-	my $dir = dirname($self->keyfile);
-	remove_tree($dir);
-    }
-    if (my $i = $self->instance) {
-	$self->info('Terminating staging instance...');
-	$i->terminate();
-	$self->ec2->wait_for_instances($i);
-    }
-    if (my $kp = $self->{keypair}) {
-	$self->info('Removing key pair...');
-	$self->ec2->delete_key_pair($kp);
-    }
-    if (my $sg = $self->{security_group}) {
-	$self->info('Removing security group...');
-	$self->ec2->delete_security_group($sg);
-    }
-}
-
-sub has_key {
-    my $self = shift;
-    my $keyname = shift;
-    $self->{_has_key}{$keyname} = shift if @_;
-    return $self->{_has_key}{$keyname};
-}
-
-sub accepts_key {
-    my $self = shift;
-    my $keyname = shift;
-    $self->{_accepts_key}{$keyname} = shift if @_;
-    return $self->{_accepts_key}{$keyname};
 }
 
 sub DESTROY {
@@ -868,7 +486,7 @@ sub find_server_in_zone {
 sub active_servers {
     my $self = shift;
     my $ec2  = shift; # optional
-    my @servers = values %Servers;
+    my @servers = values %Instances;
     return @servers unless $ec2;
     return grep {$_->ec2 eq $ec2} @servers;
 }
@@ -882,10 +500,10 @@ sub key_path {
 
 sub dot_directory_path {
     my $class = shift;
-    my $dir = File::Spec->catfile($HOME,'.vm_ec2_staging');
+    my $dir = File::Spec->catfile($ENV{HOME},'.vm_ec2_staging');
     unless (-e $dir && -d $dir) {
 	mkdir $dir       or croak "mkdir $dir: $!";
-	chmod 0700 $dir  or croak "chmod 0700 $dir: $!";
+	chmod 0700,$dir  or croak "chmod 0700 $dir: $!";
     }
     return $dir;
 }
@@ -902,11 +520,6 @@ sub _check_keyfile {
     }
     closedir $d;
     return;
-}
-
-sub VM::EC2::new_data_transfer_server {
-    my $self = shift;
-    return VM::EC2::Staging::Server->new($self,@_)
 }
 
 1;

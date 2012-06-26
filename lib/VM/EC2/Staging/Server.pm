@@ -9,6 +9,8 @@ VM::EC2::Staging::Server - Automated VM for moving data in and out of cloud.
 
 =head1 SYNOPSIS
 
+ #SYNOPSIS IS OF DATE
+
  use VM::EC2::Staging::Manager;
 
  my $ec2     = VM::EC2->new;
@@ -77,94 +79,83 @@ use File::Basename 'dirname';
 use POSIX 'setsid';
 use overload
     '""'     => sub {my $self = shift;
-		     return $self->as_string;
-                  },
+ 		     return $self->short_name;  # "inherited" from VM::EC2::Volume
+},
     fallback => 1;
 
 use constant GB => 1_073_741_824;
-
-my %Servers;
-my %Zones;
-my %Volumes;
 my $LastHost;
+
+our $AUTOLOAD;
+
+sub AUTOLOAD {
+    my $self = shift;
+    my ($pack,$func_name) = $AUTOLOAD=~/(.+)::([^:]+)$/;
+    return if $func_name eq 'DESTROY';
+    my $vol = eval {$self->ebs} or croak "Can't locate object method \"$func_name\" via package \"$pack\"";;
+    return $vol->$func_name(@_);
+}
+
+sub can {
+    my $self = shift;
+    my $method = shift;
+
+    my $can  = $self->SUPER::can($method);
+    return $can if $can;
+
+    my $ebs  = $self->ebs or return;
+    return $ebs->can($method);
+}
 
 sub new {
     my $class = shift;
     my $ec2   = shift or croak "Usage: $class->new(\$ec2,\@args)";
     my %args  = @_;
-    $args{-image_name}        ||= $class->default_image_name;
-    $args{-username}          ||= $class->default_user_name;
-    $args{-architecture}      ||= $class->default_architecture;
-    $args{-root_type}         ||= $class->default_root_type;
-    $args{-instance_type}     ||= $class->default_instance_type;
-    $args{-availability_zone} ||= undef;
-    $args{-quiet}             ||= undef;
-    $args{-keep}              ||= undef;
-    $args{-image}             ||= '';
+    $args{-keyfile}        or croak 'need keyfile path';
+    $args{-username}       or croak 'need username';
+    $args{-instance}       or croak 'need a VM::EC2::Instance';
+    $args{-manager}        or croak 'need a VM::EC2::Staging::Manager object';
 
     my $self = bless {
-	ec2      => $ec2,
-	instance => undef,
+	manager  => $args{-manager},
+	instance => $args{-instance},
 	username => $args{-username},
-	quiet    => $args{-quiet},
-	keep     => $args{-keep},
+	keyfile  => $args{-keyfile},
     },ref $class || $class;
-    $self->new_instance(\%args);
-    weaken($Servers{$self->as_string}         = $self);
-    weaken($Zones{$self->instance->placement} = $self);
     return $self;
 }
 
-sub ec2      { shift->{ec2}      }
+sub ec2      { shift->manager->ec2    }
+sub manager  { shift->{manager}  }
 sub instance { shift->{instance} }
 sub keyfile  { shift->{keyfile}  }
 sub username { shift->{username} }
-sub quiet    { shift->{quiet}    }
-sub keep     { shift->{keep}     }
 
-sub default_image_name {
-    return 'ubuntu-maverick-10.10';  # launches faster
-#    return 'ubuntu-precise-12.04';  # LTS, but launches more slowly
-}
-
-sub default_user_name {
-    return 'ubuntu';
-}
-
-sub default_architecture {
-    return 'i386';
-}
-
-sub default_root_type {
-    return 'instance-store';
-}
-
-sub default_instance_type {
-    return 'm1.small';
-}
-
-sub as_string {
+sub is_up {
     my $self = shift;
-    my $ip   = eval {$self->instance->dnsName} || '1.2.3.4';
-    return $ip;
+    my $d    = $self->{_is_up};
+    $self->{_is_up} = shift if @_;
+    $d;
 }
 
-# scan for staging instances in current region and cache them
-# into memory
-# status should be...
-# -on_exit => {'terminate','stop','run'}
-sub scan {
+sub start_server {
     my $self = shift;
-    my $ec2  = shift;
-    my @instances = $ec2->describe_instances(-filter=>{'tag-key'=>'StagingName'});
-    for my $instance (@instances) {
-	my $keyname = $instance->keyName;
-	my ($username,$keyfile) = $self->_check_keyfile($keyname) or next;
-	my ($group) = $instance->groups;
-	my $server  = $self->new($ec2,-keep=>1,-username=>$username...
+    return if $self->is_up;
+    eval {
+	local $SIG{ALRM} = sub {die 'timeout'};
+	alarm(VM::EC2::Staging::Manager::SERVER_STARTUP_TIMEOUT());
+	$self->ec2->start_instances($self);
+	$self->manager->wait_for_instances($self);
+    };
+    alarm(0);
+    if ($@) {
+	$self->manager->info('could not start $self');
+	return;
     }
+    $self->is_up(1);
 }
 
+# probably not working
 sub provision_volume {
     my $self = shift;
     my %args = @_;
@@ -221,20 +212,7 @@ sub provision_volume {
 	symbolic_name => $name});
 
     $self->mount_volume($vol);
-    $self->register_volume($vol);
     return $vol;
-}
-
-sub register_volume {
-    my $self = shift;
-    my $vol  = shift;
-    weaken($Volumes{$vol->volumeId} = $vol);
-}
-
-sub unregister_volume {
-    my $self = shift;
-    my $vol  = shift;
-    delete $Volumes{$vol->volumeId};
 }
 
 sub mount_volume {
@@ -293,9 +271,9 @@ sub resolve_path {
     my $self  = shift;
     my $vpath = shift;
 
+    my $mgr = $self->manager;
     my ($servername,$pathname);
-    if ($vpath =~ m!^(vol-[0-9a-f]+):?(.*)! && $Volumes{$1}) {
-	my $vol  = $Volumes{$1};
+    if ($vpath =~ m!^(vol-[0-9a-f]+):?(.*)! && (my $vol = $mgr->find_volume_by_name($1))) {
 	my $path = $2;
 	$path       = "/$path" if $path && $path !~ m!^/!;
 	$servername = $LastHost = $vol->server;
@@ -312,10 +290,12 @@ sub resolve_path {
 	return [undef,$vpath];   # localhost
     }
 
-    my $server = $Servers{$servername} || $servername;
+    my $server = $self->manager->find_server_by_name($servername)|| $servername;
     unless (ref $server && $server->isa('VM::EC2::Staging::Server')) {
 	return [$server,$pathname];
     }
+
+    $server->start_server unless $server->is_up;
 
     return [$server,$pathname];
 }
@@ -372,14 +352,11 @@ sub rsync {
     }
 
     my $username = $dest_host->username;
+    my $dest_ip  = $dest_host->instance->dnsName;
     return $source_host->ssh('sudo','rsync','-avz',
 			     '-e',"'ssh -o \"StrictHostKeyChecking no\" -i $keyname -l $username'",
 			     "--rsync-path='sudo rsync'",
-			     @source_paths,"$dest_host:$dest_path");
-
-
-    # localhost           => localhost (local cp)
-    return system('rsync',@source_paths,$dest_path) == 0;
+			     @source_paths,"$dest_ip:$dest_path");
 }
 
 sub _rsync_put {
@@ -413,67 +390,54 @@ sub _rsync_get {
     system("rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $dest")==0;
 }
 
-sub new_instance {
+sub ssh {
     my $self = shift;
-    my $args = shift;
-    unless ($self->{instance}) {
-	my $instance = $self->_create_instance($args)
-	    or croak "Could not create an instance that satisfies requested criteria";
-	$self->ec2->wait_for_instances($instance)
-	    or croak "Instance did not come up in a reasonable time";
-	$self->{instance} = $instance;
+    my @cmd   = @_;
+    my $Instance = $self->instance or die "Remote instance not set up correctly";
+    my $username = $self->username;
+    my $keyfile  = $self->keyfile;
+    my $host     = $Instance->dnsName;
+    system('/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd)==0;
+}
+
+sub scmd {
+    my $self = shift;
+    my @cmd   = @_;
+    my $Instance = $self->instance or die "Remote instance not set up correctly";
+    my $username = $self->username;
+    my $keyfile  = $self->keyfile;
+    my $host     = $Instance->dnsName;
+
+    my $pid = open my $kid,"-|"; #this does a fork
+    die "Couldn't fork: $!" unless defined $pid;
+    if ($pid) {
+	my @results;
+	while (<$kid>) {
+	    push @results,$_;
+	}
+	close $kid;
+#	croak "ssh failed with status ",$?>>8 unless $?==0;
+	if (wantarray) {
+	    chomp(@results);
+	    return @results;
+	} else {
+	    return join '',@results;
+	}
     }
-    do {
-	$self->info("Waiting for ssh daemon to become ready on staging server...");    
-	sleep 5;
-    } until eval{$self->scmd('pwd')};
-    return $self->{instance};
+
+    # in child
+    exec '/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd;
 }
 
-sub _create_instance {
+sub shell {
     my $self = shift;
-    my $args = shift;
-    my $image = $args->{-image};
-
-    # search for a matching instance
-    $image ||= $self->search_for_image($args) or croak "No suitable image found";
-    my $sg   = $self->security_group();
-    my $kp   = $self->keypair();
-    my $zone = $args->{-availability_zone};
-    $self->info("Creating staging server from $image in $zone.\n");
-    my $instance = $self->ec2->run_instances(-image_id          => $image,
-					     -instance_type     => $args->{-instance_type},
-					     -security_group_id => $sg,
-					     -key_name          => $kp,
-					     -availability_zone => $zone) 
-	or die "Can't create instance: ",$self->ec2->error_str;
-    $instance->add_tag(Name=>"Staging server created by VM::EC2::Staging::Server");
-    return $instance;
-}
-
-sub search_for_image {
-    my $self = shift;
-    my $args = shift;
-    $self->info("Searching for a staging image...");
-    my @candidates = $self->ec2->describe_images({'name'             => "*$args->{-image_name}*",
-						  'root-device-type' => $args->{-root_type},
-						  'architecture'     => $args->{-architecture}});
-    return unless @candidates;
-    # this assumes that the name has some sort of timestamp in it, which is true
-    # of ubuntu images, but probably not others
-    my ($most_recent) = sort {$b->name cmp $a->name} @candidates;
-    $self->info("found $most_recent: ",$most_recent->name,"\n");
-    return $most_recent;
-}
-
-sub security_group {
-    my $self = shift;
-    return $self->{security_group} ||= $self->_new_security_group();
-}
-
-sub keypair {
-    my $self = shift;
-    return $self->{keypair} ||= $self->_new_keypair();
+    fork() && return;
+    setsid(); # so that we are independent of parent signals
+    my $keyfile  = $self->keyfile;
+    my $username = $self->username;
+    my $host     = $self->instance->dnsName;
+    exec 'xterm',
+    '-e',"/usr/bin/ssh -o 'CheckHostIP no' -o 'StrictHostKeyChecking no' -i $keyfile -l $username $host";
 }
 
 sub create_snapshot {
@@ -491,38 +455,6 @@ sub create_snapshot {
     $snap->add_tag(Name => "Staging volume ".$vol->name);
     $self->remount_volume($vol);
     return $snap;
-}
-
-sub _new_security_group {
-    my $self = shift;
-    my $ec2  = $self->ec2;
-    my $name = $ec2->token;
-    $self->info("Creating temporary security group $name.\n");
-    my $sg =  $ec2->create_security_group(-name  => $name,
-				       -description => "Temporary security group created by ".__PACKAGE__
-	) or die $ec2->error_str;
-    $sg->authorize_incoming(-protocol   => 'tcp',
-			    -port       => 'ssh');
-    $sg->update or die $ec2->error_str;
-    return $sg;
-}
-
-sub _new_keypair {
-    my $self = shift;
-    my $ec2     = $self->ec2;
-    my $name    = $ec2->token;
-
-    $self->info("Creating temporary keypair $name.\n");
-    my $kp      = $ec2->create_key_pair($name);
-    my $keyfile = $self->key_path($name);
-    my $private_key = $kp->privateKey;
-    open my $k,'>',$keyfile or die "Couldn't create $keyfile: $!";
-    chmod 0600,$keyfile     or die "Couldn't chmod  $keyfile: $!";
-    print $k $private_key;
-    close $k;
-
-    $self->{keyfile} = $keyfile;
-    return $kp;
 }
 
 sub _create_volume {
@@ -599,55 +531,6 @@ sub volume_description {
     return "Staging volume for $name created by ".__PACKAGE__;
 }
 
-sub ssh {
-    my $self = shift;
-    my @cmd   = @_;
-    my $Instance = $self->instance or die "Remote instance not set up correctly";
-    my $username = $self->username;
-    my $keyfile  = $self->keyfile;
-    my $host     = $Instance->dnsName;
-    system('/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd)==0;
-}
-
-sub scmd {
-    my $self = shift;
-    my @cmd   = @_;
-    my $Instance = $self->instance or die "Remote instance not set up correctly";
-    my $username = $self->username;
-    my $keyfile  = $self->keyfile;
-    my $host     = $Instance->dnsName;
-
-    my $pid = open my $kid,"-|"; #this does a fork
-    die "Couldn't fork: $!" unless defined $pid;
-    if ($pid) {
-	my @results;
-	while (<$kid>) {
-	    push @results,$_;
-	}
-	close $kid;
-#	croak "ssh failed with status ",$?>>8 unless $?==0;
-	if (wantarray) {
-	    chomp(@results);
-	    return @results;
-	} else {
-	    return join '',@results;
-	}
-    }
-
-    # in child
-    exec '/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd;
-}
-
-sub shell {
-    my $self = shift;
-    fork() && return;
-    setsid(); # so that we are independent of parent signals
-    my $keyfile  = $self->keyfile;
-    my $username = $self->username;
-    my $host     = $self->instance->dnsName;
-    exec 'xterm',
-    '-e',"/usr/bin/ssh -o 'CheckHostIP no' -o 'StrictHostKeyChecking no' -i $keyfile -l $username $host";
-}
 
 # find an unused block device
 sub unused_block_device {
@@ -680,8 +563,7 @@ sub unused_block_device {
 
 sub info {
     my $self = shift;
-    return if $self->quiet;
-    print STDERR @_;
+    $self->manager(@_);
 }
 
 sub cleanup {
@@ -718,65 +600,6 @@ sub accepts_key {
     my $keyname = shift;
     $self->{_accepts_key}{$keyname} = shift if @_;
     return $self->{_accepts_key}{$keyname};
-}
-
-sub DESTROY {
-    my $self = shift;
-    return if $self->keep;
-    undef $Servers{$self->as_string};
-    undef $Zones{$self->instance->placement};
-    $self->cleanup;
-}
-
-# can be called as a class method
-sub find_server_in_zone {
-    my $self = shift;
-    my $zone = shift;
-    return $Zones{$zone};
-}
-
-sub active_servers {
-    my $self = shift;
-    my $ec2  = shift; # optional
-    my @servers = values %Servers;
-    return @servers unless $ec2;
-    return grep {$_->ec2 eq $ec2} @servers;
-}
-
-sub key_path {
-    my $self    = shift;
-    my ($keyname,$username)  = @_;
-    $username ||= $self->username;
-    return File::Spec->catfile($self->dot_directory_path,"${username}-${keyname}.pem")
-}
-
-sub dot_directory_path {
-    my $class = shift;
-    my $dir = File::Spec->catfile($HOME,'.vm_ec2_staging');
-    unless (-e $dir && -d $dir) {
-	mkdir $dir       or croak "mkdir $dir: $!";
-	chmod 0700 $dir  or croak "chmod 0700 $dir: $!";
-    }
-    return $dir;
-}
-
-sub _check_keyfile {
-    my $self = shift;
-    my $keyname = shift;
-    my $dotpath = $self->dot_directory_path;
-    opendir my $d,$dotpath or die "Can't opendir $dotpath: $!";
-    while (my $file = readdir($d)) {
-	if ($file =~ /^(.+)-$keyname.pem/) {
-	    return $1,$self->key_path($keyname,$1);
-	}
-    }
-    closedir $d;
-    return;
-}
-
-sub VM::EC2::new_data_transfer_server {
-    my $self = shift;
-    return VM::EC2::Staging::Server->new($self,@_)
 }
 
 1;
