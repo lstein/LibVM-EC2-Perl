@@ -137,7 +137,7 @@ sub is_up {
     $d;
 }
 
-sub start_server {
+sub start {
     my $self = shift;
     return if $self->is_up;
     eval {
@@ -154,11 +154,18 @@ sub start_server {
     $self->is_up(1);
 }
 
+sub stop {
+    my $self = shift;
+    return unless $self->instance->current_status eq 'running';
+    $self->instance->stop;
+    $self->manager->wait_for_instances($self);
+}
+
 sub ping {
     my $self = shift;
     return 1 if $self->is_up;
     return unless $self->instance->current_status eq 'running';
-    return unless $self->ssh('pwd');
+    return unless $self->scmd('pwd');
     $self->is_up(1);
     return 1;
 }
@@ -303,7 +310,7 @@ sub resolve_path {
 	return [$server,$pathname];
     }
 
-    $server->start_server unless $server->is_up;
+    $server->start unless $server->is_up;
 
     return [$server,$pathname];
 }

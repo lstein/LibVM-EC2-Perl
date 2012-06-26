@@ -282,12 +282,14 @@ sub start_all_servers {
 
 sub stop_all_servers {
     my $self = shift;
+    $self->info("Stopping all servers.\n");
     my @servers = $self->servers;
     foreach (@servers) { $_->stop }
 }
 
 sub terminate_all_servers {
     my $self = shift;
+    $self->info("Terminating all servers.\n");
     my @servers = $self->servers;
     foreach (@servers) { $_->terminate }
     if ($self->reuse_keys) {
@@ -308,8 +310,8 @@ sub wait_for_instances {
     my $self = shift;
     my @instances = @_;
     $self->ec2->wait_for_instances(@instances);
-    $self->info("waiting for ssh daemons on @instances.\n");
-    my %pending = map {$_=>$_} @instances;
+    my %pending = map {$_=>$_} grep {$_->current_status eq 'running'} @instances;
+    $self->info("waiting for ssh daemons on @instances.\n") if %pending;
     while (%pending) {
 	for my $s (values %pending) {
 	    unless ($s->ping) {
@@ -421,7 +423,7 @@ sub _security_key {
     chmod 0600,$keyfile     or die "Couldn't chmod  $keyfile: $!";
     print $k $private_key;
     close $k;
-    return ($kp,$private_key);
+    return ($kp,$keyfile);
 }
 
 sub _security_group {
@@ -453,14 +455,6 @@ sub info {
     my $self = shift;
     return if $self->quiet;
     print STDERR @_;
-}
-
-sub DESTROY {
-    my $self = shift;
-#    return if $self->keep;
-#    undef $Servers{$self->as_string};
-#    undef $Zones{$self->instance->placement};
-#    $self->cleanup;
 }
 
 # can be called as a class method
@@ -506,6 +500,13 @@ sub _check_keyfile {
     }
     closedir $d;
     return;
+}
+
+sub DESTROY {
+    my $self = shift;
+    my $action = $self->on_exit;
+    $self->terminate_all_servers if $action eq 'terminate';
+    $self->stop_all_servers      if $action eq 'stop';
 }
 
 1;
