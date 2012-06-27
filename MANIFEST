@@ -1,3 +1,4 @@
+bin/provision_server.pl
 bin/sync_to_snapshot.pl
 Build.PL
 Changes
@@ -39,6 +40,9 @@ lib/VM/EC2/Spot/DatafeedSubscription.pm
 lib/VM/EC2/Spot/InstanceRequest.pm
 lib/VM/EC2/Spot/LaunchSpecification.pm
 lib/VM/EC2/Spot/PriceHistory.pm
+lib/VM/EC2/Staging/Manager.pm
+lib/VM/EC2/Staging/Server.pm
+lib/VM/EC2/Staging/Volume.pm
 lib/VM/EC2/Tag.pm
 lib/VM/EC2/Volume.pm
 Makefile.PL

@@ -163,8 +163,8 @@ sub stop {
 
 sub ping {
     my $self = shift;
-    return 1 if $self->is_up;
     return unless $self->instance->current_status eq 'running';
+    return 1 if $self->is_up;
     return unless $self->scmd('pwd');
     $self->is_up(1);
     return 1;
@@ -195,7 +195,6 @@ sub provision_volume {
     my $username = $self->username;
     
     $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
-
     
     my $instance = $self->instance;
     my $zone     = $instance->placement;

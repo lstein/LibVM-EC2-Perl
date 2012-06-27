@@ -184,7 +184,10 @@ sub provision_server {
     my @args    = @_;
 
     # let subroutine arguments override manager's args
-    my %args    = ($self->_run_instance_args,@args); 
+    my %args    = ($self->_run_instance_args,@args);
+
+    # fix possible gotcha -- instance store is not allowed for micro instances.
+    $args{-root_type} = 'ebs' if $args{-instance_type} eq 't1.micro';
 
     my ($keyname,$keyfile) = $self->_security_key;
     my $security_group     = $self->_security_group;
@@ -211,8 +214,9 @@ sub provision_server {
 	$self->wait_for_instances($server);
     };
     alarm(0);
-    croak "some servers did not start after ",SERVER_STARTUP_TIMEOUT," seconds"
+    croak "server did not start after ",SERVER_STARTUP_TIMEOUT," seconds"
 	if $@ =~ /timeout/;
+    $self->register_server($server);
     return $server;
 }
 
@@ -300,15 +304,16 @@ sub stop_all_servers {
     my $self = shift;
     $self->info("Stopping all servers.\n");
     my @servers = $self->servers;
-    foreach (@servers) { $_->stop }
+    $self->ec2->stop_instances(@servers);
+    $self->ec2->wait_for_instances(@servers);
 }
 
 sub terminate_all_servers {
     my $self = shift;
     $self->info("Terminating all servers.\n");
     my @servers = $self->servers;
-    foreach (@servers) { $_->terminate }
-    if ($self->reuse_keys) {
+    $self->ec2->stop_instances(@servers);
+    unless ($self->reuse_key) {
 	$self->ec2->wait_for_instances(@servers);
 	$self->ec2->delete_key_pair($_->keyPair) foreach @servers;
     }

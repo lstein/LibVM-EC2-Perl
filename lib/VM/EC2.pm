@@ -3126,6 +3126,8 @@ sub instance_parm {
     my %args;
     if ($_[0] =~ /^-/) {
 	%args = @_; 
+    } elsif (@_ > 1) {
+	%args = (-instance_id => [@_]);
     } else {
 	%args = (-instance_id => shift);
     }
