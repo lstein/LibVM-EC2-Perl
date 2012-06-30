@@ -139,7 +139,8 @@ sub is_up {
 
 sub start {
     my $self = shift;
-    return if $self->is_up;
+    return if $self->ping;
+    $self->manager->info("Starting server for mounted staging volume\n");
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
 	alarm(VM::EC2::Staging::Manager::SERVER_STARTUP_TIMEOUT());
@@ -199,6 +200,11 @@ sub provision_volume {
     my $instance = $self->instance;
     my $zone     = $instance->placement;
     my ($vol,$needs_mkfs,$needs_resize) = $self->_create_volume($name,$size,$zone,$volid,$snapid,$reuse);
+
+    $vol->add_tag(Name        => $self->volume_description($name)) unless exists $vol->tags->{Name};
+    $vol->add_tags(StagingName => $name,
+		   StagingMtPt => $mtpt,
+		   Role        => 'StagingVolume');
     
     my ($ebs_device,$mt_device) = eval{$self->unused_block_device()}           
                       or die "Couldn't find suitable device to attach this volume to";
@@ -223,20 +229,69 @@ sub provision_volume {
 	device    => $mt_device,
 	mtpt      => $mtpt,
 	server    => $self,
-	symbolic_name => $name});
+	name      => $name});
 
     $self->mount_volume($vol);
     return $vol;
 }
 
+sub _find_or_create_mount {
+    my $self = shift;
+    my $vol  = shift;
+
+    my ($mt_device,$mtpt);
+
+    if (my $attachment = $vol->attachment) {
+	$attachment->instanceId eq $self->instanceId or
+	    die "$vol is attached to wrong server";
+	($mt_device,$mtpt) = $self->_find_mount($attachment->device);
+	unless ($mtpt) {
+	    $mtpt = $vol->tags->{StagingMtPt} || '/mnt/DataTransfer/'.$vol->name;
+	    $self->_mount($mt_device,$mtpt);
+	}
+    } else {
+	my ($ebs_device,$mt_device) = $self->unused_block_device;
+	my $s = $vol->attach($self->instanceid,$mt_device);
+	$self->ec2->wait_for_attachments($s);
+	$mtpt = $vol->tags->{StagingMtPt};
+	$self->_mount($mt_device,$mtpt);
+    }
+
+    $vol->mtpt($mtpt);
+    $vol->mtdev($mt_device);
+}
+
+# this gets called to find a device that is already mounted
+sub _find_mount {
+    my $self       = shift;
+    my $device     = shift;
+    my @mounts = $self->scmd('cat /proc/mounts');
+    my (%mounts,$xvd);
+    for my $m (@mounts) {
+	my ($dev,$mtpt) = split /\s+/,$m;
+	$xvd++ if $dev =~ m!^/dev/xvd!;
+	$mounts{$dev} = $mtpt;
+    }
+    $device =~ s!^/dev/sd!/dev/xvd! if $xvd;
+    return ($device,$mounts{$device});
+}
+
 sub mount_volume {
     my $self = shift;
     my $vol  = shift;
-    my $mtpt      = $vol->mtpt;
-    my $mt_device = $vol->device;
+    if ($vol->mtpt) {
+	$self->_mount($vol->device,$vol->mtpt);
+    } else {
+	$self->_find_or_create_mount($vol);
+    }
+    $vol->mounted(1);
+}
+
+sub _mount {
+    my $self = shift;
+    my ($mt_device,$mtpt) = @_;
     $self->info("Mounting staging volume.\n");
     $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt");
-    $vol->mounted(1);
 }
 
 sub unmount_volume {
@@ -252,7 +307,7 @@ sub remount_volume {
     my $self = shift;
     my $vol  = shift;
     my $mtpt = $vol->mtpt;
-    my $device = $vol->device;
+    my $device = $vol->mtdev;
     $self->info("remounting $vol\n");
     $self->ssh('sudo','mount',$device,$mtpt) or croak "Could not remount $mtpt";
     $vol->mounted(1);
@@ -263,7 +318,7 @@ sub delete_volume {
    my $vol  = shift;
    my $ec2 = $self->ec2;
    $self->unmount_volume($vol);
-   $ec2->wait_for_attachments( $vol->detach() );
+   $ec2->wait_for_attachments( $vol->instance->detach() );
    $self->info("deleting $vol...\n");
    $ec2->delete_volume($vol->volumeId);
    $vol->mounted(0);
@@ -304,7 +359,7 @@ sub resolve_path {
 	return [undef,$vpath];   # localhost
     }
 
-    my $server = $self->manager->find_server_by_name($servername)|| $servername;
+    my $server = $self->manager->find_server_by_instance($servername)|| $servername;
     unless (ref $server && $server->isa('VM::EC2::Staging::Server')) {
 	return [$server,$pathname];
     }
@@ -458,7 +513,7 @@ sub create_snapshot {
     my $self = shift;
     my ($vol,$description) = @_;
     my @snaps;
-    my $device = $vol->device;
+    my $device = $vol->mtdev;
     my $mtpt   = $vol->mtpt;
     my $volume = $vol->ebs;
     $self->unmount_volume($vol);
@@ -533,8 +588,6 @@ sub _create_volume {
 
     return unless $vol;
 
-    $vol->add_tag(Name => $self->volume_description($name)) unless exists $vol->tags->{Name};
-    $vol->add_tag(StagingName => $name);
     return ($vol,$needs_mkfs,$needs_resize);
 }
 
@@ -577,7 +630,7 @@ sub unused_block_device {
 
 sub info {
     my $self = shift;
-    $self->manager(@_);
+    $self->manager->info(@_);
 }
 
 sub cleanup {

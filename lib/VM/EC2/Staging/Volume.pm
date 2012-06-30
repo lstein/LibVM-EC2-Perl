@@ -98,14 +98,14 @@ sub provision_volume {
     $args{-name}             ||= $args{-volume_id} || $args{-snapshot_id} || sprintf("Volume%02d",$Volume++);
     $args{-fstype}           ||= 'ext4';
     $args{-availability_zone}||= $self->_select_zone($ec2);
-    my $server = $self->_get_server($ec2,$args{-availability_zone}) or croak "Can't launch a server to provision volume";
+    my $server = $self->_get_server_in_zone($args{-availability_zone}) or croak "Can't launch a server to provision volume";
     my $vol    = $server->provision_volume(%args) or croak "Can't provision volume";
     return $vol;
 }
 
 # $stagingvolume->new({server => $server,  volume => $volume,
 #                      device => $device,  mtpt   => $mtpt,
-#                      symbolic_name => $name})
+#                      name => $name})
 #
 sub new {
     my $self = shift;
@@ -119,16 +119,40 @@ sub new {
     return bless $args,ref $self || $self;
 }
 
-sub server { shift->{server} }
-sub device { shift->{device} }
-sub ebs    { shift->{volume} }
-sub mtpt   { shift->{mtpt}   }
-sub name   { shift->{symbolic_name}   }
+# accessors:
+# sub volume
+# sub mtpt
+# sub name
+# sub manager
+foreach (qw(-server -volume -name -manager -mtpt -mtdev)) {
+    (my $function = $_) =~ s/^-//;
+    eval <<END;
+    sub $function {
+	my \$self = shift;
+	my \$d    = \$self->{$_};
+	\$self->{$_} = shift if \@_;
+	return \$d;
+    }
+END
+}
+
+sub ebs  {shift->volume(@_)}
+
 sub mounted {
     my $self = shift;
     my $m    = $self->{mounted};
     $self->{mounted} = shift if @_;
     return $m;
+}
+
+sub _spin_up {
+    my $self = shift;
+    unless ($self->server) {
+	my $server = $self->manager->get_server_in_zone($self->availabilityZone);
+	$self->server($server);
+    }
+    $self->server->start;
+    $self->server->mount_volume($self) unless $self->mounted();
 }
 
 #sub as_string {
@@ -166,10 +190,10 @@ sub get {
 # volume will be appended to it.
 sub put {
     my $self = shift;
-    my $dest = pop;
+    my $dest = pop || '.';
     my @source = @_;
 
-    $self->mounted or croak "Volume is not currently mounted";
+    $self->_spin_up;
     my $server = $self->server or croak "no staging server available";
     ($dest)    = $self->_rel2abs($dest);
     $server->rsync(@source,$dest);
@@ -190,6 +214,22 @@ sub chgrp { shift->_ssh('sudo chgrp',@_) }
 sub chmod { shift->_ssh('sudo chmod',@_) }
 sub rm    { shift->_ssh('sudo rm',@_)    }
 sub rmdir { shift->_ssh('sudo rmdir',@_) }
+
+# unmount volume from wherever it is
+sub unmount {
+    my $self = shift;
+    my $server = $self->server or return;
+    $self->_spin_up; # guarantees that server is running
+    $server->unmount_volume($self);
+}
+
+sub detach {
+    my $self = shift;
+    my $server = $self->server or return;
+    $self->current_status eq 'in-use' or return;
+    $self->unmount;  # make sure we are not mounted; this might involve starting a server
+    $self->volume->detach;
+}
 
 # remove volume entirely
 sub delete {
@@ -254,14 +294,6 @@ sub _select_zone {
 	my @zones = $ec2->describe_availability_zones;
 	return $zones[rand @zones];
     }
-}
-
-sub _get_server {
-    my $self = shift;
-    my ($ec2,$zone) = @_;
-    return VM::EC2::Staging::Server->find_server_in_zone($zone)
-	||
-	$ec2->new_data_transfer_server(-availability_zone=>$zone); # caches
 }
 
 sub _get_vol_zone {

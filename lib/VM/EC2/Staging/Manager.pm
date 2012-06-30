@@ -161,21 +161,32 @@ sub _scan_volumes {
     my @volumes = $ec2->describe_volumes(-filter=>{'tag:Role'=>'StagingVolume'});
     for my $volume (@volumes) {
 	my $status = $volume->status;
-	next unless $status eq 'in-use';
-	
 	my $zone       = $volume->availabilityZone;
-	my $attachment = $volume->attachment;
-	my $ebs_device = $attachment->device;
-	my $instance   = $attachment->instance;
-	my $name       = $volume->tags->{StagingName};
-	my $vol = VM::EC2::Staging::Volume->new(
-	    -volume => $volume,
-	    -name   => $name,
-	    # note - leave mtpt and device empty to avoid
-	    # starting up a server at this stage. The volume
-	    # will have to determine this info at use time.
-	    );
+
+	my %args;
+	$args{-manager} = $self;
+	$args{-volume}  = $volume;
+	$args{-name}    = $volume->tags->{StagingName};
+
+	if (my $attachment = $volume->attachment) {
+	    $args{-server} = $self->find_server_by_instance($attachment->instance);
+	    $args{-mtpt}   = undef; # leave blank - volume will fill in when server is up
+	}
+
+	my $vol = VM::EC2::Staging::Volume->new(%args);
 	$self->register_volume($vol);
+    }
+}
+
+
+sub get_server_in_zone {
+    my $self = shift;
+    my $zone = shift;
+    if (my $servers = $Zones{$zone}{Servers}) {
+	return (values %{$servers})[0];
+    }
+    else {
+	return $self->provision_server(-availability_zone => $zone);
     }
 }
 
@@ -229,17 +240,10 @@ sub _run_instance_args {
     return @args;
 }
 
-sub find_server_by_name {
+sub find_server_by_instance {
     my $self  = shift;
     my $server = shift;
-    my $zone   = $server->placement;
-    return $Zones{$zone}{Servers}{$server};
-}
-
-sub find_server_by_instance {
-    my $self = shift;
-    my $instance = shift;
-    return $self->{Instances}{$instance};
+    return $Instances{$server};
 }
 
 sub _select_server_by_zone {
@@ -273,7 +277,7 @@ sub servers {
 sub register_volume {
     my $self = shift;
     my $vol  = shift;
-    $Zones{$vol->availability_zone}{Volumes}{$vol} = $vol;
+    $Zones{$vol->availabilityZone}{Volumes}{$vol} = $vol;
     $Volumes{$vol->volumeId} = $vol;
 }
 
@@ -357,10 +361,9 @@ sub provision_volume {
     $args{-fstype}            ||= 'ext4';
     $args{-availability_zone} ||= $self->_select_used_zone;
     
-    my $server = $self->_find_server_in_zone($args{-availability_zone}) 
-	||       $self->provision_server(-availability_zone=>$args{-availability_zone});
+    my $server = $self->get_server_in_zone($args{-availability_zone});
     $server->start_and_wait unless $server->ping;
-    my $volume = $server->provision_volume(\%args);
+    my $volume = $server->provision_volume(%args);
     $self->register_volume($volume);
     return $volume;
 }
@@ -485,10 +488,12 @@ sub info {
 }
 
 # can be called as a class method
-sub find_server_in_zone {
+sub _find_server_in_zone {
     my $self = shift;
     my $zone = shift;
-    return $Zones{$zone};
+    my @servers = sort {$a->ping cmp $b->ping} values %{$Zones{$zone}{Servers}};
+    return unless @servers;
+    return $servers[-1];
 }
 
 sub active_servers {
