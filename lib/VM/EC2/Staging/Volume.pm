@@ -153,10 +153,14 @@ sub mounted {
 sub _spin_up {
     my $self = shift;
     unless ($self->server) {
+	$self->manager->info("provisioning server to mount $self\n");
 	my $server = $self->manager->get_server_in_zone($self->availabilityZone);
 	$self->server($server);
     }
-    $self->server->start;
+    unless ($self->server->status eq 'running') {
+	$self->manager->info("starting server to mount $self\n");
+	$self->server->start;
+    }
     $self->server->mount_volume($self) unless $self->mounted();
 }
 
@@ -182,6 +186,10 @@ sub create_snapshot {
 # volume will be appended to it.
 sub get {
     my $self = shift;
+    croak 'usage: ',ref($self),'->get($source1,$source2,$source3....,$dest_path)'
+	unless @_;
+    unshift @_,'./' if @_ < 2;
+    
     my $dest   = pop;
     my $server = $self->server or croak "no staging server available";
 
@@ -195,7 +203,11 @@ sub get {
 # volume will be appended to it.
 sub put {
     my $self = shift;
-    my $dest = pop || '.';
+    croak 'usage: ',ref($self),'->put($source1,$source2,$source3....,$dest_path)'
+	unless @_;
+    push @_,'.' if @_ < 2;
+
+    my $dest = pop;
     my @source = @_;
 
     $self->_spin_up;

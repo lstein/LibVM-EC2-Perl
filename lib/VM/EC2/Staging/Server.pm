@@ -197,7 +197,7 @@ sub provision_volume {
     my $username = $self->username;
     
     $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
-    
+
     my $instance = $self->instance;
     my $zone     = $instance->placement;
     my ($vol,$needs_mkfs,$needs_resize) = $self->_create_volume($name,$size,$zone,$volid,$snapid,$reuse);
@@ -210,7 +210,7 @@ sub provision_volume {
     my ($ebs_device,$mt_device) = eval{$self->unused_block_device()}           
                       or die "Couldn't find suitable device to attach this volume to";
     my $s = $instance->attach_volume($vol=>$ebs_device)  
-	              or die "Couldn't attach $vol to $instance via $ebs_device";
+	              or die "Couldn't attach $vol to $instance via $ebs_device: ",$ec2->error_str;
     $ec2->wait_for_attachments($s)                   or croak "Couldn't attach $vol to $instance via $ebs_device";
     $s->current_status eq 'attached'                 or croak "Couldn't attach $vol to $instance via $ebs_device";
 

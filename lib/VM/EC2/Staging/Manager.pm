@@ -289,8 +289,7 @@ sub register_server {
 sub unregister_server {
     my $self   = shift;
     my $server = shift;
-    warn "unregister $server";
-    my $zone   = $server->availability_zone;
+    my $zone   = eval{$server->availability_zone} or return; # avoids problems at global destruction
     $Zones{$zone}{Servers}{$server};
     $Instances{$server->instance};
 }
@@ -332,25 +331,30 @@ sub start_all_servers {
 
 sub stop_all_servers {
     my $self = shift;
-    $self->info("Stopping all servers.\n");
-    my @servers = keys %Instances;  # allows this to run correctly during global destruct
+    # my @servers = keys %Instances;  # allows this to run correctly during global destruct
+    my $ec2 = $self->ec2;
+    my @servers  = grep {$_->ec2 eq $ec2} $self->servers;
+    @servers or return;
+    $self->info("Stopping servers @servers.\n");
     $self->ec2->stop_instances(@servers);
     $self->ec2->wait_for_instances(@servers);
+    $self->unregister_server($_) foreach @servers;
 }
 
 sub terminate_all_servers {
     my $self = shift;
     my $ec2 = $self->ec2 or return;
-    my @servers = keys %Instances; # allows this to run correctly during global destruct
+#    my @servers = keys %Instances; # allows this to run correctly during global destruct
+    my @servers  = grep {$_->ec2 eq $ec2} $self->servers;
     @servers or return;
-
-    $self->info("Terminating all servers.\n");
-    warn "terminating @servers";
+    
+    $self->info("Terminating servers @servers.\n");
     $ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
     $ec2->wait_for_instances(@servers);
     unless ($self->reuse_key) {
 	$ec2->delete_key_pair($_) foreach $ec2->describe_key_pairs(-filter=>{'key-name' => 'staging-key-*'});
     }
+    $self->unregister_server($_) foreach @servers;
 }
 
 sub _start_instances {
@@ -401,6 +405,8 @@ sub provision_volume {
     $args{-fstype}            ||= 'ext4';
     $args{-availability_zone} ||= $self->_select_used_zone;
     
+    $self->info("provisioning a $args{-size} $args{-fstype} volume in $args{-availability_zone}\n");
+
     my $server = $self->get_server_in_zone($args{-availability_zone});
     $server->start unless $server->ping;
     my $volume = $server->provision_volume(%args);
@@ -585,6 +591,8 @@ sub _select_used_zone {
 	my @up     = grep {$_->ping} @servers;
 	my $server = $up[0] || $servers[0];
 	return $server->placement;
+    } elsif (my $zone = $self->availability_zone) {
+	return $zone;
     } else {
 	my @zones = $self->ec2->describe_availability_zones;
 	return $zones[rand @zones];
@@ -596,6 +604,7 @@ sub DESTROY {
     my $action = $self->on_exit;
     $self->terminate_all_servers if $action eq 'terminate';
     $self->stop_all_servers      if $action eq 'stop';
+    delete $Managers{$self->ec2->endpoint};
 }
 
 1;
