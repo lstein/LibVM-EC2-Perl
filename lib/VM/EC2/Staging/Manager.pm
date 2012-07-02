@@ -158,7 +158,8 @@ sub _scan_volumes {
     my $ec2  = shift;
 
     # now the volumes
-    my @volumes = $ec2->describe_volumes(-filter=>{'tag:Role'=>'StagingVolume'});
+    my @volumes = $ec2->describe_volumes(-filter=>{'tag:Role'          => 'StagingVolume',
+						   'status'            => ['available','in-use']});
     for my $volume (@volumes) {
 	my $status = $volume->status;
 	my $zone       = $volume->availabilityZone;
@@ -284,7 +285,7 @@ sub register_volume {
 sub unregister_volume {
     my $self = shift;
     my $vol  = shift;
-    my $zone = $vol->availability_zone;
+    my $zone = $vol->availabilityZone;
     $Zones{$zone}{$vol};
     $Volumes{$vol->volumeId};
 }
@@ -362,7 +363,7 @@ sub provision_volume {
     $args{-availability_zone} ||= $self->_select_used_zone;
     
     my $server = $self->get_server_in_zone($args{-availability_zone});
-    $server->start_and_wait unless $server->ping;
+    $server->start unless $server->ping;
     my $volume = $server->provision_volume(%args);
     $self->register_volume($volume);
     return $volume;
@@ -537,8 +538,9 @@ sub _check_keyfile {
 sub _select_used_zone {
     my $self = shift;
     if (my @servers = $self->servers) {
-	my @up = grep {$_->ping} @servers;
-	return ($up[0] || $servers[0])->placement;
+	my @up     = grep {$_->ping} @servers;
+	my $server = $up[0] || $servers[0];
+	return $server->placement;
     } else {
 	my @zones = $self->ec2->describe_availability_zones;
 	return $zones[rand @zones];

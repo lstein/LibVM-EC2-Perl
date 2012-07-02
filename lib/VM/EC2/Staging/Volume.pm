@@ -72,7 +72,7 @@ sub AUTOLOAD {
     my $self = shift;
     my ($pack,$func_name) = $AUTOLOAD=~/(.+)::([^:]+)$/;
     return if $func_name eq 'DESTROY';
-    my $vol = eval {$self->ebs} or croak "Can't locate object method \"$func_name\" via package \"$pack\"";;
+    my $vol = eval {$self->ebs} or croak overload::StrVal($self)," no longer connected to an Amazon EBS object, so can't execute $func_name()";
     return $vol->$func_name(@_);
 }
 
@@ -103,9 +103,9 @@ sub provision_volume {
     return $vol;
 }
 
-# $stagingvolume->new({server => $server,  volume => $volume,
-#                      device => $device,  mtpt   => $mtpt,
-#                      name => $name})
+# $stagingvolume->new({-server => $server,  -volume => $volume,
+#                      -mtdev => $device,   -mtpt   => $mtpt,
+#                      -name => $name})
 #
 sub new {
     my $self = shift;
@@ -228,6 +228,7 @@ sub detach {
     my $server = $self->server or return;
     $self->current_status eq 'in-use' or return;
     $self->unmount;  # make sure we are not mounted; this might involve starting a server
+    $server->info("detaching $self\n");
     $self->volume->detach;
 }
 
@@ -304,9 +305,10 @@ sub _get_vol_zone {
 }
 
 sub DESTROY {
-    my $self = shift;
-    my $server = $self->server or return;
-    $server->unregister_volume($self);
+    my $self    = shift;
+    my $manager = $self->manager or return;
+    my $ebs     = $self->ebs     or return;
+    $manager->unregister_volume($self);
 }
 
 sub VM::EC2::staging_volume {

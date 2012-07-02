@@ -140,7 +140,7 @@ sub is_up {
 sub start {
     my $self = shift;
     return if $self->ping;
-    $self->manager->info("Starting server for mounted staging volume\n");
+    $self->manager->info("Starting staging server\n");
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
 	alarm(VM::EC2::Staging::Manager::SERVER_STARTUP_TIMEOUT());
@@ -157,16 +157,16 @@ sub start {
 
 sub stop {
     my $self = shift;
-    return unless $self->instance->current_status eq 'running';
+    return unless $self->instance->status eq 'running';
     $self->instance->stop;
     $self->manager->wait_for_instances($self);
 }
 
 sub ping {
     my $self = shift;
-    return unless $self->instance->current_status eq 'running';
+    return unless $self->instance->status eq 'running';
     return 1 if $self->is_up;
-    return unless $self->scmd('pwd');
+    return unless $self->ssh('pwd >/dev/null 2>&1');
     $self->is_up(1);
     return 1;
 }
@@ -225,11 +225,11 @@ sub provision_volume {
     }
 
     my $vol = VM::EC2::Staging::Volume->new({
-	volume    => $vol,
-	device    => $mt_device,
-	mtpt      => $mtpt,
-	server    => $self,
-	name      => $name});
+	-volume    => $vol,
+	-mtdev     => $mt_device,
+	-mtpt      => $mtpt,
+	-server    => $self,
+	-name      => $name});
 
     $self->mount_volume($vol);
     return $vol;
@@ -239,21 +239,33 @@ sub _find_or_create_mount {
     my $self = shift;
     my $vol  = shift;
 
-    my ($mt_device,$mtpt);
-
+    my ($ebs_device,$mt_device,$mtpt);
+    
+    # handle the case of the volme already being attached
     if (my $attachment = $vol->attachment) {
-	$attachment->instanceId eq $self->instanceId or
-	    die "$vol is attached to wrong server";
-	($mt_device,$mtpt) = $self->_find_mount($attachment->device);
-	unless ($mtpt) {
-	    $mtpt = $vol->tags->{StagingMtPt} || '/mnt/DataTransfer/'.$vol->name;
-	    $self->_mount($mt_device,$mtpt);
+	if ($attachment->status eq 'attached') {
+	    $attachment->instanceId eq $self->instanceId or
+		die "$vol is attached to wrong server";
+	    ($mt_device,$mtpt) = $self->_find_mount($attachment->device);
+	    unless ($mtpt) {
+		$mtpt = $vol->tags->{StagingMtPt} || '/mnt/DataTransfer/'.$vol->name;
+		$self->_mount($mt_device,$mtpt);
+	    }
+
+	    #oops, device is in a semi-attached state. Let it settle then reattach.
+	} else {
+	    $self->info("$vol was recently used. Waiting for attachment state to settle...\n");
+	    $self->ec2->wait_for_attachments($attachment);
 	}
-    } else {
-	my ($ebs_device,$mt_device) = $self->unused_block_device;
-	my $s = $vol->attach($self->instanceid,$mt_device);
+    }
+
+    unless ($mt_device && $mtpt) {
+	($ebs_device,$mt_device) = $self->unused_block_device;
+	$self->info("attaching $vol to $self via $mt_device\n");
+	my $s = $vol->attach($self->instanceId,$mt_device);
 	$self->ec2->wait_for_attachments($s);
-	$mtpt = $vol->tags->{StagingMtPt};
+	$s->current_status eq 'attached' or croak "Can't attach $vol to $self";
+	$mtpt = $vol->tags->{StagingMtPt} || '/mnt/DataTransfer/'.$vol->name;
 	$self->_mount($mt_device,$mtpt);
     }
 
@@ -280,7 +292,7 @@ sub mount_volume {
     my $self = shift;
     my $vol  = shift;
     if ($vol->mtpt) {
-	$self->_mount($vol->device,$vol->mtpt);
+	$self->_mount($vol->mtdev,$vol->mtpt);
     } else {
 	$self->_find_or_create_mount($vol);
     }
@@ -291,7 +303,7 @@ sub _mount {
     my $self = shift;
     my ($mt_device,$mtpt) = @_;
     $self->info("Mounting staging volume.\n");
-    $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt");
+    $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt") or croak "mount failed";
 }
 
 sub unmount_volume {
@@ -317,6 +329,7 @@ sub delete_volume {
    my $self = shift;
    my $vol  = shift;
    my $ec2 = $self->ec2;
+   $self->unregister_volume($vol);
    $self->unmount_volume($vol);
    $ec2->wait_for_attachments( $vol->instance->detach() );
    $self->info("deleting $vol...\n");
@@ -485,7 +498,6 @@ sub scmd {
 	    push @results,$_;
 	}
 	close $kid;
-#	croak "ssh failed with status ",$?>>8 unless $?==0;
 	if (wantarray) {
 	    chomp(@results);
 	    return @results;
