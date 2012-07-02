@@ -330,7 +330,7 @@ sub delete_volume {
    my $self = shift;
    my $vol  = shift;
    my $ec2 = $self->ec2;
-   $self->unregister_volume($vol);
+   $self->manager->unregister_volume($vol);
    $self->unmount_volume($vol);
    $ec2->wait_for_attachments( $vol->instance->detach() );
    $self->info("deleting $vol...\n");
@@ -387,8 +387,10 @@ sub resolve_path {
 # 
 sub rsync {
     my $self = shift;
+    my @p    = @_;
+
     undef $LastHost;
-    my @paths = map {$self->resolve_path($_)} @_;
+    my @paths = map {$self->resolve_path($_)} @p;
 
     my $dest   = pop @paths;
     my @source = @paths;

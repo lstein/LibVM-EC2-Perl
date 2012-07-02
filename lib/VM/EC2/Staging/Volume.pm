@@ -130,10 +130,7 @@ foreach (qw(-server -volume -name -endpoint -mtpt -mtdev)) {
     sub $function {
 	my \$self = shift;
 	my \$d    = \$self->{$_};
-	if (\@_) {
-	    warn "Changing value of '$_'";
-	    \$self->{$_} = shift;
-	}
+	\$self->{$_} = shift if \@_;
 	return \$d;
     }
 END
