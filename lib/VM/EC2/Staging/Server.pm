@@ -438,8 +438,11 @@ sub rsync {
 
     my $username = $dest_host->username;
     my $dest_ip  = $dest_host->instance->dnsName;
+    my $ssh_args = $self->_ssh_escaped_args;
+    my $keyfile  = $self->keyfile;
+    $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
     return $source_host->ssh('sudo','rsync','-avz',
-			     '-e',"'ssh -o \"StrictHostKeyChecking no\" -i $keyname -l $username'",
+			     '-e',"'ssh $ssh_args'",
 			     "--rsync-path='sudo rsync'",
 			     @source_paths,"$dest_ip:$dest_path");
 }
@@ -451,10 +454,9 @@ sub _rsync_put {
     # resolve symbolic name of $dest
     $dest        =~ s/^.+://;  # get rid of hostname, if it is there
     my $host     = $self->instance->dnsName;
-    my $keyfile  = $self->keyfile;
-    my $username = $self->username;
+    my $ssh_args = $self->_ssh_escaped_args;
     $self->info("Beginning rsync...\n");
-    system("rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $host:$dest") == 0;
+    system("rsync -avz -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest") == 0;
 }
 
 sub _rsync_get {
@@ -468,21 +470,18 @@ sub _rsync_get {
 	(my $path = $_) =~ s/^.+://;  # get rid of host part, if it is there
 	$_ = "$host:$path";
     }
-    my $keyfile  = $self->keyfile;
-    my $username = $self->username;
+    my $ssh_args = $self->_ssh_escaped_args;
     
     $self->info("Beginning rsync...\n");
-    system("rsync -avz -e'ssh -o \"StrictHostKeyChecking no\" -i $keyfile -l $username' --rsync-path='sudo rsync' @source $dest")==0;
+    system("rsync -avz -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
 }
 
 sub ssh {
     my $self = shift;
     my @cmd   = @_;
     my $Instance = $self->instance or die "Remote instance not set up correctly";
-    my $username = $self->username;
-    my $keyfile  = $self->keyfile;
     my $host     = $Instance->dnsName;
-    system('/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd)==0;
+    system('/usr/bin/ssh',$self->_ssh_args,$host,@cmd)==0;
 }
 
 sub scmd {
@@ -510,18 +509,38 @@ sub scmd {
     }
 
     # in child
-    exec '/usr/bin/ssh','-o','CheckHostIP no','-o','StrictHostKeyChecking no','-i',$keyfile,'-l',$username,$host,@cmd;
+    exec '/usr/bin/ssh',$self->_ssh_args,$host,@cmd;
 }
 
 sub shell {
     my $self = shift;
     fork() && return;
     setsid(); # so that we are independent of parent signals
-    my $keyfile  = $self->keyfile;
-    my $username = $self->username;
     my $host     = $self->instance->dnsName;
+    my $ssh_args = $self->_ssh_escaped_args;
     exec 'xterm',
-    '-e',"/usr/bin/ssh -o 'CheckHostIP no' -o 'StrictHostKeyChecking no' -i $keyfile -l $username $host";
+    '-e',"/usr/bin/ssh $ssh_args $host";
+}
+
+sub _ssh_args {
+    my $self = shift;
+    return (
+	'-o','CheckHostIP no',
+	'-o','StrictHostKeyChecking no',
+	'-o','UserKnownHostsFile /dev/null',
+	'-o','LogLevel QUIET',
+	'-i',$self->keyfile,
+	'-l',$self->username,
+	);
+}
+
+sub _ssh_escaped_args {
+    my $self = shift;
+    my %args = $self->_ssh_args;
+    for my $k (keys %args) {
+	$args{$k} = qq("$args{$k}");
+    }
+    return join ' ',%args;
 }
 
 sub create_snapshot {

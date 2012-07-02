@@ -297,7 +297,9 @@ sub _rel2abs {
 	    push @result,"$server:".$_;
 	} 
 	else {
-	    push @result,"$server:".File::Spec->rel2abs($_,$self->mtpt);
+	    my $p = "$server:".File::Spec->rel2abs($_,$self->mtpt);
+	    $p   .= '/' if m!/$!;
+	    push @result,$p;
 	}
     }
     return @result;
