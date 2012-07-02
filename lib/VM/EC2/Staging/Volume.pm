@@ -124,19 +124,27 @@ sub new {
 # sub mtpt
 # sub name
 # sub manager
-foreach (qw(-server -volume -name -manager -mtpt -mtdev)) {
+foreach (qw(-server -volume -name -endpoint -mtpt -mtdev)) {
     (my $function = $_) =~ s/^-//;
     eval <<END;
     sub $function {
 	my \$self = shift;
 	my \$d    = \$self->{$_};
-	\$self->{$_} = shift if \@_;
+	if (\@_) {
+	    warn "Changing value of '$_'";
+	    \$self->{$_} = shift;
+	}
 	return \$d;
     }
 END
 }
 
 sub ebs  {shift->volume(@_)}
+sub manager {
+    my $self = shift;
+    my $ep   = $self->endpoint;
+    return VM::EC2::Staging::Manager->find_manager($ep);
+}
 
 sub mounted {
     my $self = shift;

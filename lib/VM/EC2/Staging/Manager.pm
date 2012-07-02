@@ -73,18 +73,24 @@ use Carp 'croak';
 use File::Spec;
 use File::Path 'make_path','remove_tree';
 use File::Basename 'dirname';
+use Scalar::Util 'weaken';
 
 use constant                     GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
 
 my $VolumeName = 'StagingVolume000';
 my $ServerName = 'StagingServer000';
-my (%Zones,%Instances,%Volumes);
+my (%Zones,%Instances,%Volumes,%Managers);
 
 sub new {
     my $class = shift;
     my %args  = @_;
     $args{-ec2}               ||= VM::EC2->new();
+
+    if (my $manager = $class->find_manager($args{-ec2}->endpoint)) {
+	return $manager;
+    }
+
     $args{-on_exit}           ||= $class->default_exit_behavior;
     $args{-reuse_key}         ||= $class->default_reuse_keys;
     $args{-username}          ||= $class->default_user_name;
@@ -111,7 +117,20 @@ END
     die $@ if $@;
     }
 
-    return bless \%args,ref $class || $class;
+    my $self = bless \%args,ref $class || $class;
+    weaken($Managers{$self->ec2->endpoint} = $self);
+    $self->info("scanning for existing staging servers and volumes\n");
+    $self->scan;
+    return $self;
+}
+
+# class method
+# the point of this somewhat odd way of storing managers is to ensure that there is only one
+# manager per endpoint, and to avoid circular references in the Server and Volume objects.
+sub find_manager {
+    my $class    = shift;
+    my $endpoint = shift;
+    return $Managers{$endpoint};
 }
 
 sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
@@ -147,7 +166,7 @@ sub _scan_instances {
 	    -keyfile  => $keyfile,
 	    -username => $username,
 	    -instance => $instance,
-	    -manager  => $self,
+	    -endpoint => $self->ec2->endpoint,
 	    );
 	$self->register_server($server);
     }
@@ -162,12 +181,12 @@ sub _scan_volumes {
 						   'status'            => ['available','in-use']});
     for my $volume (@volumes) {
 	my $status = $volume->status;
-	my $zone       = $volume->availabilityZone;
+	my $zone   = $volume->availabilityZone;
 
 	my %args;
-	$args{-manager} = $self;
-	$args{-volume}  = $volume;
-	$args{-name}    = $volume->tags->{StagingName};
+	$args{-endpoint} = $self->ec2->endpoint;
+	$args{-volume}   = $volume;
+	$args{-name}     = $volume->tags->{StagingName};
 
 	if (my $attachment = $volume->attachment) {
 	    $args{-server} = $self->find_server_by_instance($attachment->instance);
@@ -178,7 +197,6 @@ sub _scan_volumes {
 	$self->register_volume($vol);
     }
 }
-
 
 sub get_server_in_zone {
     my $self = shift;
@@ -218,7 +236,7 @@ sub provision_server {
 	-keyfile  => $keyfile,
 	-username => $self->username,
 	-instance => $instance,
-	-manager  => $self,
+	-endpoint => $self->ec2->endpoint,
 	);
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
@@ -247,6 +265,12 @@ sub find_server_by_instance {
     return $Instances{$server};
 }
 
+sub find_volume_by_name {
+    my $self   = shift;
+    my $volume = shift;
+    return $Volumes{$volume};
+}
+
 sub _select_server_by_zone {
     my $self = shift;
     my $zone = shift;
@@ -265,6 +289,7 @@ sub register_server {
 sub unregister_server {
     my $self   = shift;
     my $server = shift;
+    warn "unregister $server";
     my $zone   = $server->availability_zone;
     $Zones{$zone}{Servers}{$server};
     $Instances{$server->instance};
@@ -308,19 +333,23 @@ sub start_all_servers {
 sub stop_all_servers {
     my $self = shift;
     $self->info("Stopping all servers.\n");
-    my @servers = $self->servers;
+    my @servers = keys %Instances;  # allows this to run correctly during global destruct
     $self->ec2->stop_instances(@servers);
     $self->ec2->wait_for_instances(@servers);
 }
 
 sub terminate_all_servers {
     my $self = shift;
+    my $ec2 = $self->ec2 or return;
+    my @servers = keys %Instances; # allows this to run correctly during global destruct
+    @servers or return;
+
     $self->info("Terminating all servers.\n");
-    my @servers = $self->servers;
-    $self->ec2->stop_instances(@servers);
+    warn "terminating @servers";
+    $ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
+    $ec2->wait_for_instances(@servers);
     unless ($self->reuse_key) {
-	$self->ec2->wait_for_instances(@servers);
-	$self->ec2->delete_key_pair($_->keyPair) foreach @servers;
+	$ec2->delete_key_pair($_) foreach $ec2->describe_key_pairs(-filter=>{'key-name' => 'staging-key-*'});
     }
 }
 
@@ -337,7 +366,7 @@ sub wait_for_instances {
     my @instances = @_;
     $self->ec2->wait_for_instances(@instances);
     my %pending = map {$_=>$_} grep {$_->current_status eq 'running'} @instances;
-    $self->info("waiting for ssh daemons on @instances.\n") if %pending;
+    $self->info("waiting for ssh daemon on @instances.\n") if %pending;
     while (%pending) {
 	for my $s (values %pending) {
 	    unless ($s->ping) {
@@ -347,6 +376,16 @@ sub wait_for_instances {
 	    delete $pending{$s};
 	}
     }
+}
+
+sub get_volume {
+    my $self = shift;
+    my %args = @_;
+    $args{-name}              ||= ++$VolumeName;
+
+    # find volume of same name
+    my %vols = map {$_->name => $_} $self->volumes;
+    return $vols{$args{-name}} || $self->provision_volume(%args);
 }
 
 sub provision_volume {
@@ -473,6 +512,11 @@ sub _security_group {
     $sg->add_tag(Role  => 'StagingGroup');
     return $sg;
 
+}
+
+sub rsync {
+    my $self = shift;
+    VM::EC2::Staging::Server->rsync(@_);
 }
 
 sub volume_description {

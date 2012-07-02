@@ -41,10 +41,6 @@ VM::EC2::Staging::Server - Automated VM for moving data in and out of cloud.
  $server->create_snapshot($vol1 => 'snapshot of pictures');
  $server->terminate;  # automatically terminates when goes out of scope
 
- $staging->stop_all();
- $staging->start_all();
- $staging->terminate_all();
-
 =head1 DESCRIPTION
 
 =head1 SEE ALSO
@@ -113,10 +109,10 @@ sub new {
     $args{-keyfile}        or croak 'need keyfile path';
     $args{-username}       or croak 'need username';
     $args{-instance}       or croak 'need a VM::EC2::Instance';
-    $args{-manager}        or croak 'need a VM::EC2::Staging::Manager object';
+    $args{-endpoint}       or croak 'need an endpoint argument';
 
     my $self = bless {
-	manager  => $args{-manager},
+	endpoint => $args{-endpoint},
 	instance => $args{-instance},
 	username => $args{-username},
 	keyfile  => $args{-keyfile},
@@ -125,10 +121,15 @@ sub new {
 }
 
 sub ec2      { shift->manager->ec2    }
-sub manager  { shift->{manager}  }
+sub endpoint { shift->{endpoint}  }
 sub instance { shift->{instance} }
 sub keyfile  { shift->{keyfile}  }
 sub username { shift->{username} }
+sub manager {
+    my $self = shift;
+    my $ep   = $self->endpoint;
+    return VM::EC2::Staging::Manager->find_manager($ep);
+}
 
 sub is_up {
     my $self = shift;
@@ -353,11 +354,11 @@ sub resolve_path {
     my $self  = shift;
     my $vpath = shift;
 
-    my $mgr = $self->manager;
     my ($servername,$pathname);
-    if ($vpath =~ m!^(vol-[0-9a-f]+):?(.*)! && (my $vol = $mgr->find_volume_by_name($1))) {
+    if ($vpath =~ m!^(vol-[0-9a-f]+):?(.*)! && (my $vol = VM::EC2::Staging::Manager->find_volume_by_name($1))) {
 	my $path = $2;
 	$path       = "/$path" if $path && $path !~ m!^/!;
+	$vol->_spin_up;
 	$servername = $LastHost = $vol->server;
 	my $mtpt    = $vol->mtpt;
 	$pathname   = $mtpt;
@@ -372,7 +373,7 @@ sub resolve_path {
 	return [undef,$vpath];   # localhost
     }
 
-    my $server = $self->manager->find_server_by_instance($servername)|| $servername;
+    my $server = VM::EC2::Staging::Manager->find_server_by_instance($servername)|| $servername;
     unless (ref $server && $server->isa('VM::EC2::Staging::Server')) {
 	return [$server,$pathname];
     }
@@ -422,14 +423,14 @@ sub rsync {
     # ssh authenticate against datatransferserver2.
     my $keyname = "/tmp/${source_host}_to_${dest_host}";
     unless ($source_host->has_key($keyname)) {
-	$source_host->info('creating ssh key for server to server data transfer');
+	$source_host->info("creating ssh key for server to server data transfer\n");
 	$source_host->ssh("ssh-keygen -t dsa -q -f $keyname</dev/null 2>/dev/null");
 	$source_host->has_key($keyname=>1);
     }
     unless ($dest_host->accepts_key($keyname)) {
 	my $key_stuff = $source_host->scmd("cat ${keyname}.pub");
 	chomp($key_stuff);
-	$dest_host->ssh("mkdir -p .ssh; chmod 0700 .ssh; echo '$key_stuff' >> .ssh/authorized_keys");
+	$dest_host->ssh("mkdir -p .ssh; chmod 0700 .ssh; (echo '$key_stuff' && cat .ssh/authorized_keys) | sort | uniq > .ssh/authorized_keys.tmp; mv .ssh/authorized_keys.tmp .ssh/authorized_keys; chmod 0600 .ssh/authorized_keys");
 	$dest_host->accepts_key($keyname=>1);
     }
 
@@ -645,33 +646,12 @@ sub info {
     $self->manager->info(@_);
 }
 
-sub cleanup {
-    my $self = shift;
-    if (-e $self->keyfile) {
-	$self->info('Deleting private key file...');
-	my $dir = dirname($self->keyfile);
-	remove_tree($dir);
-    }
-    if (my $i = $self->instance) {
-	$self->info('Terminating staging instance...');
-	$i->terminate();
-	$self->ec2->wait_for_instances($i);
-    }
-    if (my $kp = $self->{keypair}) {
-	$self->info('Removing key pair...');
-	$self->ec2->delete_key_pair($kp);
-    }
-    if (my $sg = $self->{security_group}) {
-	$self->info('Removing security group...');
-	$self->ec2->delete_security_group($sg);
-    }
-}
-
 sub has_key {
-    my $self = shift;
+    my $self    = shift;
     my $keyname = shift;
     $self->{_has_key}{$keyname} = shift if @_;
-    return $self->{_has_key}{$keyname};
+    return $self->{_has_key}{$keyname} if exists $self->{_has_key}{$keyname};
+    return $self->{_has_key}{$keyname} = $self->scmd("if [ -e $keyname ]; then echo 1; fi");
 }
 
 sub accepts_key {
