@@ -106,6 +106,8 @@ sub provision_volume {
 # look up our filesystem type
 sub get_fstype {
     my $self = shift;
+    return 'raw' if $self->mtpt eq 'none';
+
     $self->_spin_up;
     my $dev    = $self->mtdev;
     my @mounts = $self->server->scmd('cat /etc/mtab');
@@ -113,12 +115,12 @@ sub get_fstype {
 	my ($mtdev,undef,$type) = split /\s+/,$m;
 	return $type if $mtdev eq $dev;
     }
-    return;
+    return 'none';
 }
 
 # $stagingvolume->new({-server => $server,  -volume => $volume,
 #                      -mtdev => $device,   -mtpt   => $mtpt,
-#                      -name => $name})
+#                      -name => $name,      -fstype => $fstype})
 #
 sub new {
     my $self = shift;
@@ -137,7 +139,7 @@ sub new {
 # sub mtpt
 # sub name
 # sub manager
-foreach (qw(-server -volume -name -endpoint -mtpt -mtdev)) {
+foreach (qw(-server -volume -name -endpoint -mtpt -mtdev -fstype)) {
     (my $function = $_) =~ s/^-//;
     eval <<END;
     sub $function {
@@ -229,11 +231,14 @@ sub put {
     $server->rsync(@source,$dest);
 }
 
-sub copy {
+sub rsync {
     my $self = shift;
     $self->mounted or croak "Volume is not currently mounted";
     $self->server->rsync(@_);
 }
+
+sub copy { shift->rsync(@_)      }
+sub dd   { shift->server->dd(@_) }
 
 sub ls    { shift->_cmd('sudo ls',@_)    }
 sub df    { shift->_cmd('df',@_)    }

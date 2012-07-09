@@ -15,7 +15,6 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
                                               -scan        => 1,      # default
                                               -image_name  => 'ubuntu-maverick-10.10', # default
                                               -user_name   => 'ubuntu',                # default
-                                              -scan        => 1,      # default
                                          );
 
 
@@ -127,7 +126,7 @@ END
     weaken($Managers{$self->ec2->endpoint} = $self);
     if ($args{-scan}) {
 	$self->info("scanning for existing staging servers and volumes\n");
-	$self->scan;
+	$self->scan_region;
     }
     return $self;
 }
@@ -154,7 +153,7 @@ sub default_reuse_volumes { 1               }
 # into memory
 # status should be...
 # -on_exit => {'terminate','stop','run'}
-sub scan {
+sub scan_region {
     my $self = shift;
     my $ec2  = shift || $self->ec2;
     $self->_scan_instances($ec2);
@@ -413,7 +412,7 @@ sub provision_volume {
     $args{-fstype}            ||= 'ext4';
     $args{-availability_zone} ||= $self->_select_used_zone;
     
-    $self->info("provisioning a $args{-size} $args{-fstype} volume in $args{-availability_zone}\n");
+    $self->info("provisioning a $args{-size} GB $args{-fstype} volume in $args{-availability_zone}\n");
 
     my $server = $self->get_server_in_zone($args{-availability_zone});
     $server->start unless $server->ping;
@@ -670,22 +669,51 @@ sub _copy_ebs_image {
     my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @$block_devices;
 
     # create the new block device mapping
-    my $tgt_devices = '';
+    my @mappings;
     for my $source_ebs (@$block_devices) {
 	my $snapshot    = shift @dest_snapshots;
 	my $dest        = "$source_ebs";  # interpolates into correct format
 	$dest          =~ s/=[\w-]+/$snapshot/;  # replace source snap with dest snap
-	$tgt_devices .= $dest;
+	push @mappings,$dest;
     }
 
     return $dest_manager->ec2->register_image(-name                 => $name,
 					      -root_device_name     => $root_device,
-					      -block_device_mapping => $tgt_devices,
+					      -block_device_mapping => \@mappings,
 					      -description          => $description,
 					      -architecture         => $architecture,
 					      -kernel_id            => $kernel,
 					      $ramdisk ? (-ramdisk_id  => $ramdisk): ()
 	);
+}
+
+sub copy_snapshot {
+    my $self = shift;
+    my ($snapId,$dest_manager) = @_;
+    my $snap   = $self->ec2->describe_snapshots($snapId) 
+	or croak "Couldn't find snapshot for $snapId";
+    my $description = $snap->description;
+
+    my $source = $self->provision_volume(-snapshot_id=>$snapId) 
+	or croak "Couldn't mount volume for $snapId";
+    my $fstype = $source->fstype;
+    my $dest   = $dest_manager->provision_volume(-fstype => $fstype,
+						 -size   => $source->size) 
+	or croak "Couldn't create new destination volume for $snapId";
+
+    if ($fstype eq 'raw') {
+	$source->dd($dest)    or croak "dd failed";
+    } else {
+	$source->rsync($dest) or croak "rsync failed";
+    }
+    
+    my $snap = $dest->create_snapshot($description);
+    
+    # we don't need these volumes now
+    $source->delete;
+    $dest->delete;
+
+    return $snap;
 }
 
 sub _gather_image_info {

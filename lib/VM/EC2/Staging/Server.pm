@@ -192,8 +192,8 @@ sub provision_volume {
     }
 
     my $ec2      = $self->ec2;
-    my $mtpt     = $args{-mount}  || '/mnt/DataTransfer/'.$name;
     my $fstype   = $args{-fstype} || 'ext4';
+    my $mtpt     = $fstype eq 'raw' ? 'none' : ($args{-mount}  || '/mnt/DataTransfer/'.$name);
     my $username = $self->username;
     
     $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
@@ -220,7 +220,7 @@ sub provision_volume {
 	$self->ssh("sudo /sbin/e2fsck -fy $mt_device")          or croak "Couldn't check $mt_device";
 	$self->info("Resizing previously-used volume to $size GB...\n");
 	$self->ssh("sudo /sbin/resize2fs $mt_device ${size}G") or croak "Couldn't resize $mt_device";
-    } elsif ($needs_mkfs) {
+    } elsif ($needs_mkfs && $fstype ne 'raw') {
 	$self->info("Making $fstype filesystem on staging volume...\n");
 	$self->ssh("sudo /sbin/mkfs.$fstype -L '$name' $mt_device") or croak "Couldn't make filesystem on $mt_device";
     }
@@ -232,8 +232,17 @@ sub provision_volume {
 	-server    => $self,
 	-name      => $name});
 
-    $self->mount_volume($volobj);
-    $vol->get_fstype if $volid || $snapid;
+    # make sure the guy is mountable before trying it
+    if ($volid || $snapid) {
+	my $isfs = $self->scmd("sudo file -s $mt_device") =~ /filesystem/i;
+	$self->mount_volume($volobj) if $isfs;
+	$volobj->mtpt('none')    unless $isfs;
+	$fstype = $volobj->get_fstype;
+	$volobj->fstype($fstype);
+    } else {
+	$self->mount_volume($volobj);
+    }
+
     return $volobj;
 }
 
@@ -293,10 +302,12 @@ sub _find_mount {
 sub mount_volume {
     my $self = shift;
     my $vol  = shift;
-    if ($vol->mtpt) {
-	$self->_mount($vol->mtdev,$vol->mtpt);
-    } else {
-	$self->_find_or_create_mount($vol);
+    if ($vol->mtpt ne 'none') {
+	if ($vol->mtpt) {
+	    $self->_mount($vol->mtdev,$vol->mtpt);
+	} else {
+	    $self->_find_or_create_mount($vol);
+	}
     }
     $vol->mounted(1);
 }
@@ -312,6 +323,7 @@ sub unmount_volume {
     my $self = shift;
     my $vol  = shift;
     my $mtpt = $vol->mtpt;
+    return if $mtpt eq 'none';
     $self->info("unmounting $vol...\n");
     $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
     $vol->mounted(0);
@@ -321,6 +333,7 @@ sub remount_volume {
     my $self = shift;
     my $vol  = shift;
     my $mtpt = $vol->mtpt;
+    return if $mtpt eq 'none';
     my $device = $vol->mtdev;
     $self->info("remounting $vol\n");
     $self->ssh('sudo','mount',$device,$mtpt) or croak "Could not remount $mtpt";
@@ -333,7 +346,7 @@ sub delete_volume {
    my $ec2 = $self->ec2;
    $self->manager->unregister_volume($vol);
    $self->unmount_volume($vol);
-   $ec2->wait_for_attachments( $vol->instance->detach() );
+   $ec2->wait_for_attachments( $vol->detach() );
    $self->info("deleting $vol...\n");
    $ec2->delete_volume($vol->volumeId);
    $vol->mounted(0);
@@ -441,7 +454,6 @@ sub rsync {
 sub dd {
     my $self = shift;
     my ($vol1,$vol2) = @_;
-    croak "unimplemented";
     my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
     my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
     my $keyname  = $self->_authorize($server1,$server2);
@@ -449,7 +461,7 @@ sub dd {
     my $ssh_args = $self->_ssh_escaped_args;
     my $keyfile  = $self->keyfile;
     $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-    $server1->ssh("sudo dd if=$device1 | gzip -1 - | ssh $ssh_args $dest_ip gunzip -1 - | dd of=$device2");
+    $server1->ssh("sudo dd if=$device1 | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2'");
 }
 
 sub _authorize {
