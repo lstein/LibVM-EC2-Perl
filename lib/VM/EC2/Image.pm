@@ -55,7 +55,7 @@ These object methods are supported:
                   creation.
  rootDeviceType -- The root device type. One of "ebs" or
                   "instance-store".
- rootDeviceMape -- Name of the root device, e.g. "/dev/sda1"
+ rootDeviceName -- Name of the root device, e.g. "/dev/sda1"
  blockDeviceMapping -- List of block devices attached to this
                    image. Each element is a
                    VM::EC2::BlockDevice.

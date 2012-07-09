@@ -103,6 +103,19 @@ sub provision_volume {
     return $vol;
 }
 
+# look up our filesystem type
+sub get_fstype {
+    my $self = shift;
+    $self->_spin_up;
+    my $dev    = $self->mtdev;
+    my @mounts = $self->server->scmd('cat /etc/mtab');
+    for my $m (@mounts) {
+	my ($mtdev,undef,$type) = split /\s+/,$m;
+	return $type if $mtdev eq $dev;
+    }
+    return;
+}
+
 # $stagingvolume->new({-server => $server,  -volume => $volume,
 #                      -mtdev => $device,   -mtpt   => $mtpt,
 #                      -name => $name})

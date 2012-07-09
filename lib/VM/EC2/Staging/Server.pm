@@ -225,15 +225,16 @@ sub provision_volume {
 	$self->ssh("sudo /sbin/mkfs.$fstype -L '$name' $mt_device") or croak "Couldn't make filesystem on $mt_device";
     }
 
-    my $vol = VM::EC2::Staging::Volume->new({
+    my $volobj = VM::EC2::Staging::Volume->new({
 	-volume    => $vol,
 	-mtdev     => $mt_device,
 	-mtpt      => $mtpt,
 	-server    => $self,
 	-name      => $name});
 
-    $self->mount_volume($vol);
-    return $vol;
+    $self->mount_volume($volobj);
+    $vol->get_fstype if $volid || $snapid;
+    return $volobj;
 }
 
 sub _find_or_create_mount {
@@ -423,6 +424,37 @@ sub rsync {
     # DataTransferServer1 => DataTransferServer2
     # this one is slightly more difficult because datatransferserver1 has to
     # ssh authenticate against datatransferserver2.
+    my $keyname = $self->_authorize($source_host => $dest_host);
+
+    my $dest_ip  = $dest_host->instance->dnsName;
+    my $ssh_args = $self->_ssh_escaped_args;
+    my $keyfile  = $self->keyfile;
+    $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
+    return $source_host->ssh('sudo','rsync','-avz',
+			     '-e',"'ssh $ssh_args'",
+			     "--rsync-path='sudo rsync'",
+			     @source_paths,"$dest_ip:$dest_path");
+}
+
+# for this to work, we have to create the concept of a "raw" staging volume
+# that is attached, but not mounted
+sub dd {
+    my $self = shift;
+    my ($vol1,$vol2) = @_;
+    croak "unimplemented";
+    my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
+    my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
+    my $keyname  = $self->_authorize($server1,$server2);
+    my $dest_ip  = $server2->instance->dnsName;
+    my $ssh_args = $self->_ssh_escaped_args;
+    my $keyfile  = $self->keyfile;
+    $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
+    $server1->ssh("sudo dd if=$device1 | gzip -1 - | ssh $ssh_args $dest_ip gunzip -1 - | dd of=$device2");
+}
+
+sub _authorize {
+    my $self = shift;
+    my ($source_host,$dest_host) = @_;
     my $keyname = "/tmp/${source_host}_to_${dest_host}";
     unless ($source_host->has_key($keyname)) {
 	$source_host->info("creating ssh key for server to server data transfer\n");
@@ -436,15 +468,7 @@ sub rsync {
 	$dest_host->accepts_key($keyname=>1);
     }
 
-    my $username = $dest_host->username;
-    my $dest_ip  = $dest_host->instance->dnsName;
-    my $ssh_args = $self->_ssh_escaped_args;
-    my $keyfile  = $self->keyfile;
-    $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-    return $source_host->ssh('sudo','rsync','-avz',
-			     '-e',"'ssh $ssh_args'",
-			     "--rsync-path='sudo rsync'",
-			     @source_paths,"$dest_ip:$dest_path");
+    return $keyname;
 }
 
 sub _rsync_put {
@@ -642,8 +666,6 @@ sub unused_block_device {
     return unless @devices;
     my %used = map {$_ => 1} @devices;
     
-    my $major_start = shift || 'f';
-
     my $base =   $used{'/dev/sda1'}   ? "/dev/sd"
                : $used{'/dev/xvda1'}  ? "/dev/xvd"
                : '';

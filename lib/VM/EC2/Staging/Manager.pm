@@ -15,8 +15,10 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
                                               -scan        => 1,      # default
                                               -image_name  => 'ubuntu-maverick-10.10', # default
                                               -user_name   => 'ubuntu',                # default
+                                              -scan        => 1,      # default
                                          );
- $staging->scan();  # populate with preexisting servers & volumes
+
+
  
  # reuse or provision new server as needed
  my $server = $staging->provision_server(-architecture      => 'i386',
@@ -41,6 +43,9 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
  $staging->stop_all_servers();
  $staging->start_all_servers();
  $staging->terminate_all_servers();
+
+ # cross-region copying of EBS images.
+ my $new_image = $staging->copy_image('ami-12345',$new_region);
 
 =head1 DESCRIPTION
 
@@ -101,6 +106,7 @@ sub new {
     $args{-image_name}        ||= $class->default_image_name;
     $args{-availability_zone} ||= undef;
     $args{-quiet}             ||= undef;
+    $args{-scan}                = 1 unless exists $args{-scan};
 
     # create accessors
     foreach (keys %args) {
@@ -119,8 +125,10 @@ END
 
     my $self = bless \%args,ref $class || $class;
     weaken($Managers{$self->ec2->endpoint} = $self);
-    $self->info("scanning for existing staging servers and volumes\n");
-    $self->scan;
+    if ($args{-scan}) {
+	$self->info("scanning for existing staging servers and volumes\n");
+	$self->scan;
+    }
     return $self;
 }
 
@@ -290,8 +298,8 @@ sub unregister_server {
     my $self   = shift;
     my $server = shift;
     my $zone   = eval{$server->availability_zone} or return; # avoids problems at global destruction
-    $Zones{$zone}{Servers}{$server};
-    $Instances{$server->instance};
+    delete $Zones{$zone}{Servers}{$server};
+    delete $Instances{$server->instance};
 }
 
 sub servers {
@@ -310,8 +318,8 @@ sub unregister_volume {
     my $self = shift;
     my $vol  = shift;
     my $zone = $vol->availabilityZone;
-    $Zones{$zone}{$vol};
-    $Volumes{$vol->volumeId};
+    delete $Zones{$zone}{$vol};
+    delete $Volumes{$vol->volumeId};
 }
 
 sub start_all_servers {
@@ -597,6 +605,122 @@ sub _select_used_zone {
 	my @zones = $self->ec2->describe_availability_zones;
 	return $zones[rand @zones];
     }
+}
+
+#############################################
+# copying AMIs from one zone to another
+#############################################
+sub copy_image {
+    my $self = shift;
+    my ($image,$dest_region) = @_;
+    my $ec2 = $self->ec2;
+
+    $image = $ec2->describe_images($image)
+	unless ref $image && $image->isa('VM::EC2::Image');
+    
+    $dest_region = $ec2->describe_regions($dest_region)
+	unless ref $dest_region && $dest_region->isa('VM::EC2::Region');
+
+    $image       or croak "Invalid image '$image'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+    $dest_region or croak "Invalid EC2 Region '$dest_region'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+
+    $image->imageType eq 'machine' or croak "$image is not an AMI: usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+    
+    my $dest_endpoint = $dest_region->regionEndpoint;
+    my $dest_ec2      = VM::EC2->new(-endpoint    => $dest_endpoint,
+				     -access_key  => $ec2->access_key,
+				     -secret_key  => $ec2->secret)
+	or croak "Could not create new VM::EC2 in $dest_region";
+    my $dest_manager = $self->new(-ec2     => $dest_ec2,
+				  -scan    => 1,
+				  -on_exit => 'destroy');
+
+    my $root_type = $image->rootDeviceType;
+    if ($root_type eq 'ebs') {
+	return $self->_copy_ebs_image($image,$dest_manager);
+    } else {
+	return $self->_copy_instance_image($image,$dest_manager);
+    }
+}
+
+sub _copy_ebs_image {
+    my $self = shift;
+    my ($image,$dest_manager) = @_;
+
+    # hashref with keys 'name', 'description','architecture','kernel','ramdisk','block_devices','root_device'
+    $self->info("Gathering information about image $image\n");
+    my $info = $self->_gather_image_info($image);
+
+    my $name         = $info->{name};
+    my $description  = $info->{description};
+    my $architecture = $info->{architecture};
+    my $kernel       = $self->_match_kernel($info->{kernel},$dest_manager->ec2,'kernel')
+	or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
+    
+    my $ramdisk;
+    if ($info->{ramdisk}) {
+	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager->ec2,'ramdisk')
+	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;	
+    }
+
+    my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
+    my $root_device     = $info->{root_device};
+
+    $self->info("Copying EBS volumes attached to this image (this may take a long time)\n");
+    my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @$block_devices;
+
+    # create the new block device mapping
+    my $tgt_devices = '';
+    for my $source_ebs (@$block_devices) {
+	my $snapshot    = shift @dest_snapshots;
+	my $dest        = "$source_ebs";  # interpolates into correct format
+	$dest          =~ s/=[\w-]+/$snapshot/;  # replace source snap with dest snap
+	$tgt_devices .= $dest;
+    }
+
+    return $dest_manager->ec2->register_image(-name                 => $name,
+					      -root_device_name     => $root_device,
+					      -block_device_mapping => $tgt_devices,
+					      -description          => $description,
+					      -architecture         => $architecture,
+					      -kernel_id            => $kernel,
+					      $ramdisk ? (-ramdisk_id  => $ramdisk): ()
+	);
+}
+
+sub _gather_image_info {
+    my $self  = shift;
+    my $image = shift;
+    return {
+	name         =>   $image->name,
+	description  =>   $image->description,
+	architecture =>   $image->architecture,
+	kernel       =>   $image->kernelId  || undef,
+	ramdisk      =>   $image->ramdiskId || undef,
+	root_device  =>   $image->rootDeviceName,
+	block_devices=>   [$image->blockDeviceMapping],
+    };
+}
+
+sub _match_kernel {
+    my $self = shift;
+    my ($imageId,$dest_manager) = @_;
+    my $home_ec2 = $self->ec2;
+    my $dest_ec2 = $dest_manager->ec2;  # different endpoints!
+    my $image    = $home_ec2->describe_images($imageId) or return;
+    my $name     = $image->name;
+    my $type     = $image->imageType;
+    my @candidates = $dest_ec2->describe_images({'name'        => $name,
+						 'image-type'  => $type,
+						});
+    return $candidates[0];
+}
+
+sub copy_snapshot {
+    my $self = shift;
+    my ($snapId,$dest_manager) = @_;
+    $self->info("staging snapshotshot $snapId\n");
+    my $vol = $self->provision_volume(-snapshot_id=>$snapId);
 }
 
 sub DESTROY {
