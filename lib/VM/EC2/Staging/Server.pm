@@ -116,6 +116,7 @@ sub new {
 	instance => $args{-instance},
 	username => $args{-username},
 	keyfile  => $args{-keyfile},
+	name     => $args{-name} || undef,
     },ref $class || $class;
     return $self;
 }
@@ -125,6 +126,7 @@ sub endpoint { shift->{endpoint}  }
 sub instance { shift->{instance} }
 sub keyfile  { shift->{keyfile}  }
 sub username { shift->{username} }
+sub name     { shift->{name}     }
 sub manager {
     my $self = shift;
     my $ep   = $self->endpoint;
@@ -572,11 +574,11 @@ sub _ssh_args {
 
 sub _ssh_escaped_args {
     my $self = shift;
-    my %args = $self->_ssh_args;
-    for my $k (keys %args) {
-	$args{$k} = qq("$args{$k}");
+    my @args = $self->_ssh_args;
+    for (my $i=1;$i<@args;$i+=2) {
+	$args[$i] = qq("$args[$i]");
     }
-    return join ' ',%args;
+    return join ' ',@args;
 }
 
 sub create_snapshot {
@@ -605,11 +607,11 @@ sub _create_volume {
 
     if ($volid) {
 	my $vol = $ec2->describe_volumes($volid) or croak "Unknown volume $volid";
-	croak "$volid is not in server availability zone $zone. Create staging volumes with VM::EC2->staging_volume() to avoid this."
+	croak "$volid is not in server availability zone $zone."
 	    unless $vol->availabilityZone eq $zone;
 	croak "$vol is unavailable for use, status ",$vol->status
 	    unless $vol->status eq 'available';
-	@vols = $volid;
+	@vols = $vol;
     }
 
     elsif ($snapid) {

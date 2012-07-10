@@ -169,7 +169,9 @@ sub _scan_instances {
 	my $keyname  = $instance->keyName                   or next;
 	my $keyfile  = $self->_check_keyfile($keyname)      or next;
 	my $username = $instance->tags->{'StagingUsername'} or next;
+	my $name     = $instance->tags->{StagingName} || ++$ServerName;
 	my $server   = VM::EC2::Staging::Server->new(
+	    -name     => $name,
 	    -keyfile  => $keyfile,
 	    -username => $username,
 	    -instance => $instance,
@@ -216,6 +218,16 @@ sub get_server_in_zone {
     }
 }
 
+sub get_server {
+    my $self = shift;
+    my %args = @_;
+    $args{-name}              ||= ++$ServerName;
+
+    # find servers of same name
+    my %servers = map {$_->name => $_} $self->servers;
+    return $servers{$args{-name}} || $self->provision_server(%args);
+}
+
 sub provision_server {
     my $self    = shift;
     my @args    = @_;
@@ -225,6 +237,7 @@ sub provision_server {
 
     # fix possible gotcha -- instance store is not allowed for micro instances.
     $args{-root_type} = 'ebs' if $args{-instance_type} eq 't1.micro';
+    $args{-name}    ||= ++$ServerName;
 
     my ($keyname,$keyfile) = $self->_security_key;
     my $security_group     = $self->_security_group;
@@ -236,9 +249,11 @@ sub provision_server {
 	%args,
 	);
     $instance or croak $self->ec2->error_str;
-    $instance->add_tag(Role            => 'StagingInstance');
-    $instance->add_tag(StagingUsername => $self->username  );
-    $instance->add_tag(Name            => "Staging server created by ".__PACKAGE__);
+    $instance->add_tags(Role            => 'StagingInstance',
+			Name            => "Staging server $args{-name} created by ".__PACKAGE__,
+			StagingUsername => $self->username,
+			StagingName     => $args{-name});
+			
     my $server = VM::EC2::Staging::Server->new(
 	-keyfile  => $keyfile,
 	-username => $self->username,
@@ -412,7 +427,16 @@ sub provision_volume {
     $args{-fstype}            ||= 'ext4';
     $args{-availability_zone} ||= $self->_select_used_zone;
     
-    $self->info("provisioning a $args{-size} GB $args{-fstype} volume in $args{-availability_zone}\n");
+    if ($args{-snapshot_id}) {
+	$self->info("reprovisioning volume from snapshot $args{-snapshot_id}\n");
+    } elsif ($args{-volume_id}) {
+	$self->info("reprovisioning volume from volume $args{-volume_id}\n");
+	my $v = $self->ec2->describe_volumes($args{-volume_id});
+	$args{-availability_zone} = $v->availabilityZone if $v;
+	$args{-size}              = $v->size             if $v;
+    } else {
+	$self->info("provisioning a $args{-size} GB $args{-fstype} volume in $args{-availability_zone}\n");
+    }
 
     my $server = $self->get_server_in_zone($args{-availability_zone});
     $server->start unless $server->ping;
