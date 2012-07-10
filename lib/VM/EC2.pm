@@ -381,13 +381,20 @@ Create a new Amazon access object. Required parameters are:
 
  -endpoint     The URL for making API requests
 
+ -region       The region to make API requests
+
  -raise_error  If true, throw an exception.
 
  -print_error  If true, print errors to STDERR.
 
-One or more of -access_key, -secret_key and -endpoint can be omitted
-if the environment variables EC2_ACCESS_KEY, EC2_SECRET_KEY and
-EC2_URL are defined.
+One or more of -access_key, -secret_key can be omitted if the
+environment variables EC2_ACCESS_KEY and EC2_SECRET_KEY are
+defined. If no endpoint is specified, then the environment variable
+EC2_URL is consulted; otherwise the generic endpoint
+http://ec2.amazonaws.com/ is used. You can also select the endpoint by
+specifying one of the Amazon regions, such as "us-west-2", with the
+-region argument. The endpoint specified by -region will override
+-endpoint.
 
 To use a Eucalyptus cloud, please provide the appropriate endpoint
 URL.
@@ -422,7 +429,7 @@ sub new {
 
     my $raise_error  = $args{-raise_error};
     my $print_error  = $args{-print_error};
-    return bless {
+    my $obj = bless {
 	id              => $id,
 	secret          => $secret,
 	endpoint        => $endpoint_url,
@@ -430,6 +437,13 @@ sub new {
 	raise_error     => $raise_error,
 	print_error     => $print_error,
     },ref $self || $self;
+
+    if ($args{-region}) {
+	my $region = $obj->describe_regions($args{-region}) or croak "unknown region $args{-region}";
+	$obj->endpoint($region->regionEndpoint);
+    }
+
+    return $obj;
 }
 
 =head2 $access_key = $ec2->access_key(<$new_access_key>)
