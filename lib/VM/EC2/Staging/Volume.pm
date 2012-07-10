@@ -348,9 +348,4 @@ sub DESTROY {
     $manager->unregister_volume($self);
 }
 
-sub VM::EC2::staging_volume {
-    my $self = shift;
-    return VM::EC2::Staging::Volume->provision_volume($self,@_)
-}
-
 1;

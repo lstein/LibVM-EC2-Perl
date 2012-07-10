@@ -759,5 +759,10 @@ sub DESTROY {
     delete $Managers{$self->ec2->endpoint};
 }
 
+sub VM::EC2::staging_manager {
+    my $self = shift;
+    return VM::EC2::Staging::Manager->new(@_,-ec2=>$self)
+}
+
 1;
 

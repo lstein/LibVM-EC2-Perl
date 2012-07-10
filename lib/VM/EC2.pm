@@ -483,7 +483,12 @@ Get or set the ENDPOINT URL.
 sub endpoint { 
     my $self = shift;
     my $d    = $self->{endpoint};
-    $self->{endpoint} = shift if @_;
+    if (@_) {
+	my $new_endpoint = shift;
+	$new_endpoint    = 'http://'.$new_endpoint
+	    unless $new_endpoint =~ /^https?:/;
+	$self->{endpoint} = $new_endpoint;
+    }
     $d;
  }
 

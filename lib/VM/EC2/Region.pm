@@ -32,6 +32,10 @@ These object methods are supported:
                     region, as VM::EC2::AvailabilityZone
                     objects.
 
+Note that you should prefix the endpoint with http:// or https://
+before using it to change the VM::EC2 endpoint with the endpoint()
+call. If you do not do so, then http:// will be assumed.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
