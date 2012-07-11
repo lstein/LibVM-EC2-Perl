@@ -465,7 +465,9 @@ sub get_server {
 
     # find servers of same name
     my %servers = map {$_->name => $_} $self->servers;
-    return $servers{$args{-name}} || $self->provision_server(%args);
+    my $server = $servers{$args{-name}} || $self->provision_server(%args);
+    $server->start unless $server->is_up;
+    return $server;
 }
 
 sub provision_server {
@@ -551,7 +553,7 @@ sub register_server {
 sub unregister_server {
     my $self   = shift;
     my $server = shift;
-    my $zone   = eval{$server->availability_zone} or return; # avoids problems at global destruction
+    my $zone   = eval{$server->placement} or return; # avoids problems at global destruction
     delete $Zones{$zone}{Servers}{$server};
     delete $Instances{$server->instance};
 }

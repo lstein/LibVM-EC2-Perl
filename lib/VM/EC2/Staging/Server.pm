@@ -174,7 +174,6 @@ sub ping {
     return 1;
 }
 
-# probably not working
 sub provision_volume {
     my $self = shift;
     my %args = @_;
@@ -260,6 +259,7 @@ sub provision_volume {
 	$self->mount_volume($volobj);
     }
 
+    $self->manager->register_volume($volobj);
     return $volobj;
 }
 
@@ -717,6 +717,13 @@ sub _create_volume {
     return unless $vol;
 
     return ($vol,$needs_mkfs,$needs_resize);
+}
+
+sub volumes {
+    my $self   = shift;
+    my @volIds = map {$_->volumeId} $self->blockDeviceMapping;
+    my @volumes = map {$self->manager->find_volume_by_name($_)} @volIds;
+    return grep {defined $_} @volumes;
 }
 
 sub volume_description {

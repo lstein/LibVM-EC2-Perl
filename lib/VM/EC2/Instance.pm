@@ -308,7 +308,7 @@ optionally the description of the resulting image.
 
 =head2 $attachment = $instance->attach_volume($volume_id,$device)
 
-    =head2 $attachment = $instance->attach_volume(-volume_id=>$volume_id,-device=>$device)
+=head2 $attachment = $instance->attach_volume(-volume_id=>$volume_id,-device=>$device)
 
 Attach volume $volume_id to this instance using virtual device
 $device. Both arguments are required. The result is a
