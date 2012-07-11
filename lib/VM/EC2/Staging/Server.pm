@@ -526,8 +526,6 @@ sub scmd {
     my $self = shift;
     my @cmd   = @_;
     my $Instance = $self->instance or die "Remote instance not set up correctly";
-    my $username = $self->username;
-    my $keyfile  = $self->keyfile;
     my $host     = $Instance->dnsName;
 
     my $pid = open my $kid,"-|"; #this does a fork
@@ -549,6 +547,39 @@ sub scmd {
     # in child
     exec '/usr/bin/ssh',$self->_ssh_args,$host,@cmd;
 }
+
+# return a filehandle that you can write to:
+# e.g.
+# my $fh = $server->scmd_write('cat >/tmp/foobar');
+# print $fh, "testing\n";
+# close $fh;
+sub scmd_write {
+    my $self = shift;
+    return $self->_scmd_pipe('write',@_);
+}
+
+# same thing, but you read from it:
+# my $fh = $server->scmd_read('cat /tmp/foobar');
+# while (<$fh>) {
+#    print $_;
+#}
+sub scmd_read {
+    my $self = shift;
+    return $self->_scmd_pipe('read',@_);
+}
+
+sub _scmd_pipe {
+    my $self = shift;
+    my ($op,@cmd) = @_;
+    my $operation = $op eq 'write' ? '|-' : '-|';
+    my $host = $self->dnsName;
+    my $pid = open my $fh,$operation; # this does a fork
+    defined $pid or croak "piped open failed: $!" ;
+    return $fh if $pid;         # writing to the filehandle writes to an ssh session
+    exec '/usr/bin/ssh',$self->_ssh_args,$host,@cmd;
+    exit 0;
+}
+
 
 sub shell {
     my $self = shift;
