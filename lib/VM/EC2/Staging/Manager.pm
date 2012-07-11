@@ -9,63 +9,117 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
  use VM::EC2::Staging::Manager;
 
  my $ec2     = VM::EC2->new;
- my $staging = VM::EC2::Staging::Manager->new(-ec2         => $ec2,
-                                              -on_exit     => 'stop', # default, choose root volume type based on behavior
-                                              -quiet       => 0,      # default
-                                              -scan        => 1,      # default
-                                              -image_name  => 'ubuntu-maverick-10.10', # default
-                                              -user_name   => 'ubuntu',                # default
-                                         );
+ my $staging = $ec2->staging_manager(-on_exit     => 'stop', # default, stop servers when process exists
+                                     -quiet       => 0,      # default, verbose progress messages
+                                     -scan        => 1,      # default, scan region for existing staging servers and volumes
+                                     -image_name  => 'ubuntu-maverick-10.10', # default server image
+                                     -user_name   => 'ubuntu',                # default server login name
+                                     );
 
+ # provision a new server, using defaults. Name will be assigned automatically
+ my $server = $staging->provision_server(-availability_zone => 'us-east-1a');
 
- 
- # reuse or provision new server as needed
- my $server = $staging->provision_server(-architecture      => 'i386',
-                                         -availability_zone => 'us-east-1a');
+ # retrieve a new server named "my_server", if one exists. If not, it creates one
+ # using the specified options
+ my $server = $staging->get_server(-name              => 'my_server',
+                                   -availability_zone => 'us-east-1a',
+                                   -instance_type     => 't1.micro');
 
- my $volume = $staging->provision_volume(-name    => 'Pictures',
-                                         -fstype  => 'ext4',
-                                         -size    => 2) or die $staging->error_str;
+ # open up an ssh session in an xterm
+ $server->shell;
 
- # localhost to remote transfer using symbolic names of volumes
- $server->put('/usr/local/pictures/'   => 'Pictures');
+ # run a command over ssh on the server. See VM::EC2::Staging::Server
+ $server->ssh('whoami');
 
- # remote to local transfer
- $server->get('Pictures' => '/tmp/pictures');
+ # run a command over ssh on the server, returning the result as an array of lines or a
+ # scalar string, similar to backticks (``)
+ my @password_lines = $server->scmd('cat /etc/passwd');
 
- # remote to remote transfer - useful for interzone transfers
- $server->rsync('Pictures' => "$server2:/home/ubuntu/pictures");
+ # run a command on the server and read from it using a filehandle
+ my $fh  = $server->scmd_read('ls -R /usr/lib');
+ while (<$fh>) { # do something }
 
- $server->create_snapshot($vol1 => 'snapshot of pictures');
- $server->terminate;  # automatically terminates when goes out of scope
+ # run a command on the server and write to it using a filehandle
+ my $fh  = $server->scmd_write('sudo -s "cat >>/etc/fstab"');
+ print $fh "/dev/sdf3 /mnt/demo ext3 0 2\n";
+ close $fh;
+
+ # Provision a new volume named "Pictures". Will automatically be mounted to a staging server in
+ # the specified zone. Server will be created if needed.
+ my $volume = $staging->provision_volume(-name              => 'Pictures',
+                                         -fstype            => 'ext4',
+                                         -availability_zone => 'us-east-1a',
+                                         -size              => 2) or die $staging->error_str;
+
+ # gets an existing volume named "Pictures" if it exists. Otherwise provisions a new volume;
+ my $volume = $staging->get_volume(-name              => 'Pictures',
+                                   -fstype            => 'ext4',
+                                   -availability_zone => 'us-east-1a',
+                                   -size              => 2) or die $staging->error_str;
+
+ # copy contents of local directory /opt/test to remote volume $volume using rsync
+ # See VM::EC2::Staging::Volume
+ $volume->put('/opt/test/');
+
+ # same thing, but first creating a subdirectory on the remote volume
+ $volume->put('/opt/test/' => './mirrors/');
+
+ # copy contents of remote volume $volume to local directory /tmp/test using rsync
+ $volume->get('/tmp/test');
+
+ # same thing, but from a subdirectory of the remote volume
+ $volume->get('./mirrors/' => '/tmp/test');
+
+ # server to server transfer (works both within and between availability regions)
+ my $south_america = VM::EC2->new(-region=>'sa-east-1')->staging_manager;    # create a staging manager in Sao Paolo
+ my $volume2 = $south_america->provision_volume(-name              => 'Videos',
+                                                -availability_zone => 'sa-east-1a',
+                                                -size              => 2);
+ $staging->rsync("$volume/mirrors" => "$volume2/us-east");
 
  $staging->stop_all_servers();
  $staging->start_all_servers();
  $staging->terminate_all_servers();
 
- # cross-region copying of EBS images.
- my $new_image = $staging->copy_image('ami-12345',$new_region);
+ # Assuming an EBS image named ami-12345 is located in the US, copy it into 
+ # the South American region, returning the AMI ID in South America
+ my $new_image = $staging->copy_image('ami-12345','sa-east-1');
 
 =head1 DESCRIPTION
 
-=head1 SEE ALSO
+VM::EC2::Staging::Manager manages a set of EC2 volumes and servers
+in a single AWS region. It was primarily designed to simplify the
+process of provisioning and populating volumes, but it also provides a
+handy set of ssh commands that allow you to run remote commands
+programmatically.
 
-L<VM::EC2>
-L<VM::EC2::Instance>
-L<VM::EC2::Volume>
-L<VM::EC2::Snapshot>
+The manager also allows you to copy AMIs from one region to another,
+something that is otherwise hard to do right.
 
-=head1 AUTHOR
+The main classes are:
 
-Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
+ VM::EC2::Staging::Manager -- A set of volume and server resources in
+                              a single AWS region.
 
-Copyright (c) 2011 Ontario Institute for Cancer Research
+ VM::EC2::Staging::Server -- A named server running somewhere in the
+                             region. It is a VM::EC2::Instance
+                             extended to provide remote command and
+                             copy facilities.
 
-This package and its accompanying libraries is free software; you can
-redistribute it and/or modify it under the terms of the GPL (either
-version 1, or at your option, any later version) or the Artistic
-License 2.0.  Refer to LICENSE for the full license text. In addition,
-please see DISCLAIMER.txt for disclaimers of warranty.
+ VM::EC2::Staging::Volume -- A named disk volume running somewhere in the
+                             region. It is a VM::EC2::Volume
+                             extended to provide remote copy
+                             facilities.
+
+See the perldoc for more information on Server and Volume
+    capabilities.
+
+=head1 Constructors
+
+The following methods allow you to create new
+VM::EC2::Staging::Manager instances. Be aware that only one manager is
+allowed per EC2 region; attempting to create additional managers in
+the same region will return the same one each time.
 
 =cut
 
@@ -85,6 +139,116 @@ use constant SERVER_STARTUP_TIMEOUT => 120;
 my $VolumeName = 'StagingVolume000';
 my $ServerName = 'StagingServer000';
 my (%Zones,%Instances,%Volumes,%Managers);
+
+=head2 $manager = $ec2->staging_manager(@args)
+
+This is a simplified way to create a staging manager. First create the
+EC2 object in the desired region, and then call its staging_manager()
+method:
+
+ $manager = VM::EC2->new(-region=>'us-west-2')->staging_manager()
+
+=over 4
+
+=item Required Arguments
+
+None.
+
+=item Optional Arguments
+
+The optional arguments change the way that the manager creates new
+servers and volumes.
+
+ -on_exit       What to do with running servers when the manager goes 
+                out of scope or the script exits. One of 'run', 
+                'stop' (default), or 'terminate'. "run" keeps all
+                created instances running, so beware!
+
+ -architecture  Architecture for newly-created server
+                instances (default "i386"). Can be overridden in calls to get_server()
+                and provision_server().
+
+ -instance_type Type of newly-created servers (default "m1.small"). Can be overridden
+                in calls to get_server() and provision_server().
+
+ -root_type     Root type for newly-created servers (default depends
+                on the -on_exit behavior; "ebs" for exit behavior of 
+                "stop" and "instance-store" for exit behavior of "run"
+                or "terminate".
+
+ -image_name    Name or ami ID of the AMI to use for creating the
+                instances of new servers. Defaults to 'ubuntu-maverick-10.10'.
+                If the image name begins with "ami-", then it is 
+                treated as an AMI ID. Otherwise it is treated as
+                a name pattern and will be used to search the AMI
+                name field using the wildcard search "*$name*".
+                Names work better than AMI ids here, because the
+                latter change from one region to another. If multiple
+                matching image candidates are found, then an alpha
+                sort on the name is used to find the image with the
+                highest alpha sort value, which happens to work with
+                Ubuntu images to find the latest release.
+
+ -availability_zone Availability zone for newly-created
+                servers. Default is undef, in which case a random
+                zone is selected.
+
+ -username      Username to use for ssh connections. Defaults to 
+                "ubuntu". Note that this user must be able to use
+                sudo on the instance without providing a password,
+                or functionality of this module will be limited.
+  
+ -quiet         Boolean, default false. If true, turns off most informational
+                messages.
+
+ -scan          Boolean, default true. If true, scans region for
+                volumes and servers created by earlier manager
+                instances.
+
+ -reuse_key     Boolean, default true. If true, creates a single
+                ssh keypair for each region and reuses it. Note that
+                the private key is kept on the local computer in the
+                directory ~/.vm-ec2-staging, and so additional
+                keypairs may be created if you use this module on
+                multiple local machines. If this option is false,
+                then a new keypair will be created for every server
+                you partition.
+
+ -reuse_volumes Boolean, default true. If this flag is true, then
+                calls to provision_volume() will return existing
+                volumes if they share the same name as the requested
+                volume. If no suitable existing volume exists, then
+                the most recent snapshot of this volume is used to 
+                create it in the specified availability zone. Only
+                if no volume or snapshot exist will a new volume be
+                created from scratch.
+
+=back
+
+=head2 $manager = VM::EC2::Staging::Manager(-ec2 => $ec2,@args)
+
+This is a more traditional constructur for the staging manager.
+
+=over 4
+
+=item Required Arguments
+ 
+  -ec2     A VM::EC2 object.
+
+=item Optional Arguments
+
+All of the arguments listed in the description of
+VM::EC2->staging_manager().
+
+=back
+
+=cut
+
+sub VM::EC2::staging_manager {
+    my $self = shift;
+    return VM::EC2::Staging::Manager->new(@_,-ec2=>$self)
+}
+
 
 sub new {
     my $class = shift;
@@ -142,13 +306,87 @@ sub find_manager {
     return $Managers{$endpoint};
 }
 
+=head2 $name = $manager->default_exit_behavior
+
+Return the default exit behavior ("stop") when the manager terminates.
+Intended to be overridden in subclasses.
+
+=cut
+
+sub default_exit_behavior { 'stop'        }
+
+=head2 $name = $manager->default_image_name
+
+Return the default image name ('ubuntu-maverick-10.10') for use in
+creating new instances. Intended to be overridden in subclasses.
+
+=cut
+
 sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
-sub default_exit_behavior { 'terminate'   }
+
+=head2 $name = $manager->default_user_name
+
+Return the default user name ('ubuntu') for use in creating new
+instances. Intended to be overridden in subclasses.
+
+=cut
+
 sub default_user_name     { 'ubuntu'      }
+
+=head2 $name = $manager->default_architecture
+
+Return the default instance architecture ('i386') for use in creating
+new instances. Intended to be overridden in subclasses.
+
+=cut
+
 sub default_architecture  { 'i386'        }
+
+=head2 $name = $manager->default_root_type
+
+Return the default instance root type ('instance-store') for use in
+creating new instances. Intended to be overridden in subclasses. Note
+that this value is ignored if the exit behavior is "stop", in which case an
+ebs-backed instance will be used. Also, the m1.micro instance type
+does not come in an instance-store form, so ebs will be used in this
+case as well.
+
+=cut
+
 sub default_root_type     { 'instance-store'}
+
+=head2 $name = $manager->default_instance_type
+
+Return the default instance type ('m1.small') for use in
+creating new instances. Intended to be overridden in subclasses. We default
+to m1.small rather than a micro instance because the I/O in m1.small
+is far faster than in t1.micro.
+
+=cut
+
 sub default_instance_type { 'm1.small'      }
+
+=head2 $name = $manager->default_reuse_keys
+
+Return the default value of the -reuse_keys argument ('true'). This
+value allows the manager to create an ssh keypair once, and use the
+same one for all servers it creates over time. If false, then a new
+keypair is created for each server and then discarded when the server
+terminates.
+
+=cut
+
 sub default_reuse_keys    { 1               }
+
+=head2 $name = $manager->default_reuse_keys
+
+Return the default value of the -reuse_volumes argument ('true'). This
+value instructs the manager to use the symbolic name of the volume to
+return an existing volume whenever a request is made to provision a
+new one of the same name.
+
+=cut
+
 sub default_reuse_volumes { 1               }
 
 # scan for staging instances in current region and cache them
@@ -455,14 +693,17 @@ sub volumes {
 sub _search_for_image {
     my $self = shift;
     my %args = @_;
+    my $name = $args{-image_name};
 
     $self->info("Searching for a staging image...");
 
-    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' : $args{-root_type};
+    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' :
+    $args{-root_type};
 
-    my @candidates = $self->ec2->describe_images({'name'             => "*$args{-image_name}*",
-						  'root-device-type' => $root_type,
-						  'architecture'     => $args{-architecture}});
+    my @candidates = $name =~ /^ami-[0-9a-f]+/ ? $self->ec2->describe_images($name)
+	                                       : $self->ec2->describe_images({'name'             => "*$args{-image_name}*",
+									      'root-device-type' => $root_type,
+									      'architecture'     => $args{-architecture}});
     return unless @candidates;
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
@@ -801,4 +1042,25 @@ sub VM::EC2::staging_manager {
 }
 
 1;
+
+
+=head1 SEE ALSO
+
+L<VM::EC2>
+L<VM::EC2::Staging::Server>
+L<VM::EC2::Staging::Volume>
+
+=head1 AUTHOR
+
+Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
+
+Copyright (c) 2012 Ontario Institute for Cancer Research
+
+This package and its accompanying libraries is free software; you can
+redistribute it and/or modify it under the terms of the GPL (either
+version 1, or at your option, any later version) or the Artistic
+License 2.0.  Refer to LICENSE for the full license text. In addition,
+please see DISCLAIMER.txt for disclaimers of warranty.
+
+=cut
 

@@ -223,8 +223,22 @@ sub provision_volume {
 	$self->info("Resizing previously-used volume to $size GB...\n");
 	$self->ssh("sudo /sbin/resize2fs $mt_device ${size}G") or croak "Couldn't resize $mt_device";
     } elsif ($needs_mkfs && $fstype ne 'raw') {
+	local $_ = $fstype;
+	my $label = /^ext/     ? "-L '$name'"
+                   :/^xfs/     ? "-L '$name'"
+                   :/^reiser/  ? "-l '$name'"
+                   :/^jfs/     ? "-L '$name'"
+                   :/^vfat/    ? "-n '$name'"
+                   :/^msdos/   ? "-n '$name'"
+                   :/^ntfs/    ? "-L '$name'"
+                   :'';
+	my $apt_packages = $self->_mkfs_packages();
+	if (my $package = $apt_packages->{$fstype}) {
+	    $self->info("checking for /sbin/mkfs.$fstype\n");
+	    $self->ssh("if [ ! -e /sbin/mkfs.$fstype ]; then sudo apt-get update; sudo apt-get -y install $package; fi");
+	}
 	$self->info("Making $fstype filesystem on staging volume...\n");
-	$self->ssh("sudo /sbin/mkfs.$fstype -L '$name' $mt_device") or croak "Couldn't make filesystem on $mt_device";
+	$self->ssh("sudo /sbin/mkfs.$fstype $label $mt_device") or croak "Couldn't make filesystem on $mt_device";
     }
 
     my $volobj = VM::EC2::Staging::Volume->new({
@@ -247,6 +261,16 @@ sub provision_volume {
     }
 
     return $volobj;
+}
+
+sub _mkfs_packages {
+    my $self = shift;
+    return {
+	xfs       => 'xfsprogs',
+	reiserfs  => 'reiserfsprogs',
+	jfs       => 'jfsutils',
+	ntfs      => 'ntfsprogs',
+    }
 }
 
 sub _find_or_create_mount {
@@ -527,8 +551,6 @@ sub scmd {
     my $self = shift;
     my @cmd   = @_;
     my $Instance = $self->instance or die "Remote instance not set up correctly";
-    my $username = $self->username;
-    my $keyfile  = $self->keyfile;
     my $host     = $Instance->dnsName;
 
     my $pid = open my $kid,"-|"; #this does a fork
@@ -550,6 +572,39 @@ sub scmd {
     # in child
     exec '/usr/bin/ssh',$self->_ssh_args,$host,@cmd;
 }
+
+# return a filehandle that you can write to:
+# e.g.
+# my $fh = $server->scmd_write('cat >/tmp/foobar');
+# print $fh, "testing\n";
+# close $fh;
+sub scmd_write {
+    my $self = shift;
+    return $self->_scmd_pipe('write',@_);
+}
+
+# same thing, but you read from it:
+# my $fh = $server->scmd_read('cat /tmp/foobar');
+# while (<$fh>) {
+#    print $_;
+#}
+sub scmd_read {
+    my $self = shift;
+    return $self->_scmd_pipe('read',@_);
+}
+
+sub _scmd_pipe {
+    my $self = shift;
+    my ($op,@cmd) = @_;
+    my $operation = $op eq 'write' ? '|-' : '-|';
+    my $host = $self->dnsName;
+    my $pid = open my $fh,$operation; # this does a fork
+    defined $pid or croak "piped open failed: $!" ;
+    return $fh if $pid;         # writing to the filehandle writes to an ssh session
+    exec '/usr/bin/ssh',$self->_ssh_args,$host,@cmd;
+    exit 0;
+}
+
 
 sub shell {
     my $self = shift;
