@@ -148,6 +148,14 @@ method:
 
  $manager = VM::EC2->new(-region=>'us-west-2')->staging_manager()
 
+=over 4
+
+=item Required Arguments
+
+None.
+
+=item Optional Arguments
+
 The optional arguments change the way that the manager creates new
 servers and volumes.
 
@@ -167,6 +175,19 @@ servers and volumes.
                 on the -on_exit behavior; "ebs" for exit behavior of 
                 "stop" and "instance-store" for exit behavior of "run"
                 or "terminate".
+
+ -image_name    Name or ami ID of the AMI to use for creating the
+                instances of new servers. Defaults to 'ubuntu-maverick-10.10'.
+                If the image name begins with "ami-", then it is 
+                treated as an AMI ID. Otherwise it is treated as
+                a name pattern and will be used to search the AMI
+                name field using the wildcard search "*$name*".
+                Names work better than AMI ids here, because the
+                latter change from one region to another. If multiple
+                matching image candidates are found, then an alpha
+                sort on the name is used to find the image with the
+                highest alpha sort value, which happens to work with
+                Ubuntu images to find the latest release.
 
  -availability_zone Availability zone for newly-created
                 servers. Default is undef, in which case a random
@@ -202,6 +223,8 @@ servers and volumes.
                 if no volume or snapshot exist will a new volume be
                 created from scratch.
 
+=back
+
 =head2 $manager = VM::EC2::Staging::Manager(-ec2 => $ec2,@args)
 
 This is a more traditional constructur for the staging manager.
@@ -214,7 +237,7 @@ This is a more traditional constructur for the staging manager.
 
 =item Optional Arguments
 
-Any of the arguments listed in the description of
+All of the arguments listed in the description of
 VM::EC2->staging_manager().
 
 =back
@@ -281,13 +304,87 @@ sub find_manager {
     return $Managers{$endpoint};
 }
 
-sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
+=head2 $name = $manager->default_exit_behavior
+
+Return the default exit behavior ("stop") when the manager terminates.
+Intended to be overridden in subclasses.
+
+=cut
+
 sub default_exit_behavior { 'stop'        }
+
+=head2 $name = $manager->default_image_name
+
+Return the default image name ('ubuntu-maverick-10.10') for use in
+creating new instances. Intended to be overridden in subclasses.
+
+=cut
+
+sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
+
+=head2 $name = $manager->default_user_name
+
+Return the default user name ('ubuntu') for use in creating new
+instances. Intended to be overridden in subclasses.
+
+=cut
+
 sub default_user_name     { 'ubuntu'      }
+
+=head2 $name = $manager->default_architecture
+
+Return the default instance architecture ('i386') for use in creating
+new instances. Intended to be overridden in subclasses.
+
+=cut
+
 sub default_architecture  { 'i386'        }
+
+=head2 $name = $manager->default_root_type
+
+Return the default instance root type ('instance-store') for use in
+creating new instances. Intended to be overridden in subclasses. Note
+that this value is ignored if the exit behavior is "stop", in which case an
+ebs-backed instance will be used. Also, the m1.micro instance type
+does not come in an instance-store form, so ebs will be used in this
+case as well.
+
+=cut
+
 sub default_root_type     { 'instance-store'}
+
+=head2 $name = $manager->default_instance_type
+
+Return the default instance type ('m1.small') for use in
+creating new instances. Intended to be overridden in subclasses. We default
+to m1.small rather than a micro instance because the I/O in m1.small
+is far faster than in t1.micro.
+
+=cut
+
 sub default_instance_type { 'm1.small'      }
+
+=head2 $name = $manager->default_reuse_keys
+
+Return the default value of the -reuse_keys argument ('true'). This
+value allows the manager to create an ssh keypair once, and use the
+same one for all servers it creates over time. If false, then a new
+keypair is created for each server and then discarded when the server
+terminates.
+
+=cut
+
 sub default_reuse_keys    { 1               }
+
+=head2 $name = $manager->default_reuse_keys
+
+Return the default value of the -reuse_volumes argument ('true'). This
+value instructs the manager to use the symbolic name of the volume to
+return an existing volume whenever a request is made to provision a
+new one of the same name.
+
+=cut
+
 sub default_reuse_volumes { 1               }
 
 # scan for staging instances in current region and cache them
@@ -594,14 +691,17 @@ sub volumes {
 sub _search_for_image {
     my $self = shift;
     my %args = @_;
+    my $name = $args{-image_name};
 
     $self->info("Searching for a staging image...");
 
-    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' : $args{-root_type};
+    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' :
+    $args{-root_type};
 
-    my @candidates = $self->ec2->describe_images({'name'             => "*$args{-image_name}*",
-						  'root-device-type' => $root_type,
-						  'architecture'     => $args{-architecture}});
+    my @candidates = $name =~ /^ami-[0-9a-f]+/ ? $self->ec2->describe_images($name)
+	                                       : $self->ec2->describe_images({'name'             => "*$args{-image_name}*",
+									      'root-device-type' => $root_type,
+									      'architecture'     => $args{-architecture}});
     return unless @candidates;
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
