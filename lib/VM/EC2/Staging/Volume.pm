@@ -252,7 +252,7 @@ sub rmdir { shift->_ssh('sudo rmdir',@_) }
 
 sub fstab_line {
     my $self = shift;
-    return join "\t",$self->mtdev,$self->mtpt,$self->fstype,0,2;
+    return join "\t",$self->mtdev,$self->mtpt,$self->fstype,'defaults,nobootwait',0,2;
 }
 
 # unmount volume from wherever it is
