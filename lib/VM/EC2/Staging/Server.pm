@@ -223,8 +223,22 @@ sub provision_volume {
 	$self->info("Resizing previously-used volume to $size GB...\n");
 	$self->ssh("sudo /sbin/resize2fs $mt_device ${size}G") or croak "Couldn't resize $mt_device";
     } elsif ($needs_mkfs && $fstype ne 'raw') {
+	local $_ = $fstype;
+	my $label = /^ext/     ? "-L '$name'"
+                   :/^xfs/     ? "-L '$name'"
+                   :/^reiser/  ? "-l '$name'"
+                   :/^jfs/     ? "-L '$name'"
+                   :/^vfat/    ? "-n '$name'"
+                   :/^msdos/   ? "-n '$name'"
+                   :/^ntfs/    ? "-L '$name'"
+                   :'';
+	my $apt_packages = $self->_mkfs_packages();
+	if (my $package = $apt_packages->{$fstype}) {
+	    $self->info("checking for /sbin/mkfs.$fstype\n");
+	    $self->ssh("if [ ! -e /sbin/mkfs.$fstype ]; then sudo apt-get update; sudo apt-get -y install $package; fi");
+	}
 	$self->info("Making $fstype filesystem on staging volume...\n");
-	$self->ssh("sudo /sbin/mkfs.$fstype -L '$name' $mt_device") or croak "Couldn't make filesystem on $mt_device";
+	$self->ssh("sudo /sbin/mkfs.$fstype $label $mt_device") or croak "Couldn't make filesystem on $mt_device";
     }
 
     my $volobj = VM::EC2::Staging::Volume->new({
@@ -246,6 +260,16 @@ sub provision_volume {
     }
 
     return $volobj;
+}
+
+sub _mkfs_packages {
+    my $self = shift;
+    return {
+	xfs       => 'xfsprogs',
+	reiserfs  => 'reiserfsprogs',
+	jfs       => 'jfsutils',
+	ntfs      => 'ntfsprogs',
+    }
 }
 
 sub _find_or_create_mount {

@@ -9,57 +9,96 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
  use VM::EC2::Staging::Manager;
 
  my $ec2     = VM::EC2->new;
- my $staging = VM::EC2::Staging::Manager->new(-ec2         => $ec2,
-                                              -on_exit     => 'stop', # default, choose root volume type based on behavior
-                                              -quiet       => 0,      # default
-                                              -scan        => 1,      # default
-                                              -image_name  => 'ubuntu-maverick-10.10', # default
-                                              -user_name   => 'ubuntu',                # default
-                                         );
+ my $staging = $ec2->staging_manager(-on_exit     => 'stop', # default, stop servers when process exists
+                                     -quiet       => 0,      # default, verbose progress messages
+                                     -scan        => 1,      # default, scan region for existing staging servers and volumes
+                                     -image_name  => 'ubuntu-maverick-10.10', # default server image
+                                     -user_name   => 'ubuntu',                # default server login name
+                                     );
 
+ # provision a new server, using defaults. Name will be assigned automatically
+ my $server = $staging->provision_server(-availability_zone => 'us-east-1a');
 
- 
- # reuse or provision new server as needed
- my $server = $staging->provision_server(-architecture      => 'i386',
-                                         -availability_zone => 'us-east-1a');
+ # retrieve a new server named "my_server", if one exists. If not, it creates one
+ # using the specified options
+ my $server = $staging->get_server(-name              => 'my_server',
+                                   -availability_zone => 'us-east-1a',
+                                   -instance_type     => 't1.micro');
 
- my $volume = $staging->provision_volume(-name    => 'Pictures',
-                                         -fstype  => 'ext4',
-                                         -size    => 2) or die $staging->error_str;
+ # run a command over ssh on the server. See VM::EC2::Staging::Server
+ $server->ssh('whoami');
 
- # localhost to remote transfer using symbolic names of volumes
- $server->put('/usr/local/pictures/'   => 'Pictures');
+ # run a command over ssh on the server, returning the result as an array of lines or a
+ # scalar string, similar to backticks (``)
+ my @password_lines = $server->scmd('cat /etc/passwd');
 
- # remote to local transfer
- $server->get('Pictures' => '/tmp/pictures');
+ # run a command on the server and read from it using a filehandle
+ my $fh  = $server->scmd_read('ls -R /usr/lib');
+ while (<$fh>) { # do something }
 
- # remote to remote transfer - useful for interzone transfers
- $server->rsync('Pictures' => "$server2:/home/ubuntu/pictures");
+ # run a command on the server and write to it using a filehandle
+ my $fh  = $server->scmd_write('sudo -s "cat >>/etc/fstab"');
+ print $fh "/dev/sdf3 /mnt/demo ext3 0 2\n";
+ close $fh;
 
- $server->create_snapshot($vol1 => 'snapshot of pictures');
- $server->terminate;  # automatically terminates when goes out of scope
+ # Provision a new volume named "Pictures". Will automatically be mounted to a staging server in
+ # the specified zone. Server will be created if needed.
+ my $volume = $staging->provision_volume(-name              => 'Pictures',
+                                         -fstype            => 'ext4',
+                                         -availability_zone => 'us-east-1a',
+                                         -size              => 2) or die $staging->error_str;
+
+ # gets an existing volume named "Pictures" if it exists. Otherwise provisions a new volume;
+ my $volume = $staging->get_volume(-name              => 'Pictures',
+                                   -fstype            => 'ext4',
+                                   -availability_zone => 'us-east-1a',
+                                   -size              => 2) or die $staging->error_str;
+
+ # copy contents of local directory /opt/test to remote volume $volume using rsync
+ # See VM::EC2::Staging::Volume
+ $volume->put('/opt/test/');
+
+ # same thing, but first creating a subdirectory on the remote volume
+ $volume->put('/opt/test/' => './mirrors/');
+
+ # copy contents of remote volume $volume to local directory /tmp/test using rsync
+ $volume->get('/tmp/test');
+
+ # same thing, but from a subdirectory of the remote volume
+ $volume->get('./mirrors/' => '/tmp/test');
+
+ # server to server transfer (works both within and between availability regions)
+ my $south_america = VM::EC2->new(-region=>'sa-east-1')->staging_manager;    # create a staging manager in Sao Paolo
+ my $volume2 = $south_america->provision_volume(-name              => 'Videos',
+                                                -availability_zone => 'sa-east-1a',
+                                                -size              => 2);
+ $staging->rsync("$volume/mirrors" => "$volume2/us-east");
 
  $staging->stop_all_servers();
  $staging->start_all_servers();
  $staging->terminate_all_servers();
 
- # cross-region copying of EBS images.
- my $new_image = $staging->copy_image('ami-12345',$new_region);
+ # Assuming an EBS image named ami-12345 is located in the US, copy it into 
+ # the South American region, returning the AMI ID in South America
+ my $new_image = $staging->copy_image('ami-12345','sa-east-1');
 
 =head1 DESCRIPTION
+
+VM::EC2::Staging::Manager manages a set of EC2 volumes and instances
+in a single AWS region. It was designed to simplify the process of
+creating and provisioning volumes.
 
 =head1 SEE ALSO
 
 L<VM::EC2>
-L<VM::EC2::Instance>
-L<VM::EC2::Volume>
-L<VM::EC2::Snapshot>
+L<VM::EC2::Staging::Server>
+L<VM::EC2::Staging::Volume>
 
 =head1 AUTHOR
 
 Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
 
-Copyright (c) 2011 Ontario Institute for Cancer Research
+Copyright (c) 2012 Ontario Institute for Cancer Research
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
@@ -141,7 +180,7 @@ sub find_manager {
 }
 
 sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
-sub default_exit_behavior { 'terminate'   }
+sub default_exit_behavior { 'stop'        }
 sub default_user_name     { 'ubuntu'      }
 sub default_architecture  { 'i386'        }
 sub default_root_type     { 'instance-store'}
