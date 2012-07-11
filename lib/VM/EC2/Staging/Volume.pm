@@ -250,6 +250,11 @@ sub chmod { shift->_ssh('sudo chmod',@_) }
 sub rm    { shift->_ssh('sudo rm',@_)    }
 sub rmdir { shift->_ssh('sudo rmdir',@_) }
 
+sub fstab_line {
+    my $self = shift;
+    return join "\t",$self->mtdev,$self->mtpt,$self->fstype,0,2;
+}
+
 # unmount volume from wherever it is
 sub unmount {
     my $self = shift;

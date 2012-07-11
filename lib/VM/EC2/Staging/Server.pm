@@ -179,7 +179,7 @@ sub provision_volume {
     my $self = shift;
     my %args = @_;
 
-    my $name   = $args{-name};
+    my $name   = $args{-name} ||= VM::EC2::Staging::Manager->new_volume_name;
     my $size   = $args{-size};
     my $volid  = $args{-volume_id};
     my $snapid = $args{-snapshot_id};
@@ -195,7 +195,7 @@ sub provision_volume {
 
     my $ec2      = $self->ec2;
     my $fstype   = $args{-fstype} || 'ext4';
-    my $mtpt     = $fstype eq 'raw' ? 'none' : ($args{-mount}  || '/mnt/DataTransfer/'.$name);
+    my $mtpt     = $fstype eq 'raw' ? 'none' : ($args{-mount}  || $args{-mtpt} || '/mnt/DataTransfer/'.$name);
     my $username = $self->username;
     
     $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
@@ -242,6 +242,7 @@ sub provision_volume {
 	$fstype = $volobj->get_fstype;
 	$volobj->fstype($fstype);
     } else {
+	$volobj->fstype($fstype);
 	$self->mount_volume($volobj);
     }
 

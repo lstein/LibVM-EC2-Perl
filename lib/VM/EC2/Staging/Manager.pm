@@ -106,6 +106,7 @@ sub new {
     $args{-availability_zone} ||= undef;
     $args{-quiet}             ||= undef;
     $args{-scan}                = 1 unless exists $args{-scan};
+    $args{-pid}                 = $$;
 
     # create accessors
     foreach (keys %args) {
@@ -130,6 +131,7 @@ END
     }
     return $self;
 }
+
 
 # class method
 # the point of this somewhat odd way of storing managers is to ensure that there is only one
@@ -777,10 +779,20 @@ sub copy_snapshot {
 
 sub DESTROY {
     my $self = shift;
-    my $action = $self->on_exit;
-    $self->terminate_all_servers if $action eq 'terminate';
-    $self->stop_all_servers      if $action eq 'stop';
+    if ($$ == $self->pid) {
+	my $action = $self->on_exit;
+	$self->terminate_all_servers if $action eq 'terminate';
+	$self->stop_all_servers      if $action eq 'stop';
+    }
     delete $Managers{$self->ec2->endpoint};
+}
+
+sub new_volume_name {
+    return ++$VolumeName;
+}
+
+sub new_server_name {
+    return ++$ServerName;
 }
 
 sub VM::EC2::staging_manager {
