@@ -25,6 +25,9 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
                                    -availability_zone => 'us-east-1a',
                                    -instance_type     => 't1.micro');
 
+ # open up an ssh session in an xterm
+ $server->shell;
+
  # run a command over ssh on the server. See VM::EC2::Staging::Server
  $server->ssh('whoami');
 
@@ -84,27 +87,39 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
 
 =head1 DESCRIPTION
 
-VM::EC2::Staging::Manager manages a set of EC2 volumes and instances
-in a single AWS region. It was designed to simplify the process of
-creating and provisioning volumes.
+VM::EC2::Staging::Manager manages a set of EC2 volumes and servers
+in a single AWS region. It was primarily designed to simplify the
+process of provisioning and populating volumes, but it also provides a
+handy set of ssh commands that allow you to run remote commands
+programmatically.
 
-=head1 SEE ALSO
+The manager also allows you to copy AMIs from one region to another,
+something that is otherwise hard to do right.
 
-L<VM::EC2>
-L<VM::EC2::Staging::Server>
-L<VM::EC2::Staging::Volume>
+The main classes are:
 
-=head1 AUTHOR
+ VM::EC2::Staging::Manager -- A set of volume and server resources in
+                              a single AWS region.
 
-Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
+ VM::EC2::Staging::Server -- A named server running somewhere in the
+                             region. It is a VM::EC2::Instance
+                             extended to provide remote command and
+                             copy facilities.
 
-Copyright (c) 2012 Ontario Institute for Cancer Research
+ VM::EC2::Staging::Volume -- A named disk volume running somewhere in the
+                             region. It is a VM::EC2::Volume
+                             extended to provide remote copy
+                             facilities.
 
-This package and its accompanying libraries is free software; you can
-redistribute it and/or modify it under the terms of the GPL (either
-version 1, or at your option, any later version) or the Artistic
-License 2.0.  Refer to LICENSE for the full license text. In addition,
-please see DISCLAIMER.txt for disclaimers of warranty.
+See the perldoc for more information on Server and Volume
+    capabilities.
+
+=head1 Constructors
+
+The following methods allow you to create new
+VM::EC2::Staging::Manager instances. Be aware that only one manager is
+allowed per EC2 region; attempting to create additional managers in
+the same region will return the same one each time.
 
 =cut
 
@@ -124,6 +139,93 @@ use constant SERVER_STARTUP_TIMEOUT => 120;
 my $VolumeName = 'StagingVolume000';
 my $ServerName = 'StagingServer000';
 my (%Zones,%Instances,%Volumes,%Managers);
+
+=head2 $manager = $ec2->staging_manager(@args)
+
+This is a simplified way to create a staging manager. First create the
+EC2 object in the desired region, and then call its staging_manager()
+method:
+
+ $manager = VM::EC2->new(-region=>'us-west-2')->staging_manager()
+
+The optional arguments change the way that the manager creates new
+servers and volumes.
+
+ -on_exit       What to do with running servers when the manager goes 
+                out of scope or the script exits. One of 'run', 
+                'stop' (default), or 'terminate'. "run" keeps all
+                created instances running, so beware!
+
+ -architecture  Architecture for newly-created server
+                instances (default "i386"). Can be overridden in calls to get_server()
+                and provision_server().
+
+ -instance_type Type of newly-created servers (default "m1.small"). Can be overridden
+                in calls to get_server() and provision_server().
+
+ -root_type     Root type for newly-created servers (default depends
+                on the -on_exit behavior; "ebs" for exit behavior of 
+                "stop" and "instance-store" for exit behavior of "run"
+                or "terminate".
+
+ -availability_zone Availability zone for newly-created
+                servers. Default is undef, in which case a random
+                zone is selected.
+
+ -username      Username to use for ssh connections. Defaults to 
+                "ubuntu". Note that this user must be able to use
+                sudo on the instance without providing a password,
+                or functionality of this module will be limited.
+  
+ -quiet         Boolean, default false. If true, turns off most informational
+                messages.
+
+ -scan          Boolean, default true. If true, scans region for
+                volumes and servers created by earlier manager
+                instances.
+
+ -reuse_key     Boolean, default true. If true, creates a single
+                ssh keypair for each region and reuses it. Note that
+                the private key is kept on the local computer in the
+                directory ~/.vm-ec2-staging, and so additional
+                keypairs may be created if you use this module on
+                multiple local machines. If this option is false,
+                then a new keypair will be created for every server
+                you partition.
+
+ -reuse_volumes Boolean, default true. If this flag is true, then
+                calls to provision_volume() will return existing
+                volumes if they share the same name as the requested
+                volume. If no suitable existing volume exists, then
+                the most recent snapshot of this volume is used to 
+                create it in the specified availability zone. Only
+                if no volume or snapshot exist will a new volume be
+                created from scratch.
+
+=head2 $manager = VM::EC2::Staging::Manager(-ec2 => $ec2,@args)
+
+This is a more traditional constructur for the staging manager.
+
+=over 4
+
+=item Required Arguments
+ 
+  -ec2     A VM::EC2 object.
+
+=item Optional Arguments
+
+Any of the arguments listed in the description of
+VM::EC2->staging_manager().
+
+=back
+
+=cut
+
+sub VM::EC2::staging_manager {
+    my $self = shift;
+    return VM::EC2::Staging::Manager->new(@_,-ec2=>$self)
+}
+
 
 sub new {
     my $class = shift;
@@ -822,10 +924,26 @@ sub DESTROY {
     delete $Managers{$self->ec2->endpoint};
 }
 
-sub VM::EC2::staging_manager {
-    my $self = shift;
-    return VM::EC2::Staging::Manager->new(@_,-ec2=>$self)
-}
-
 1;
+
+
+=head1 SEE ALSO
+
+L<VM::EC2>
+L<VM::EC2::Staging::Server>
+L<VM::EC2::Staging::Volume>
+
+=head1 AUTHOR
+
+Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
+
+Copyright (c) 2012 Ontario Institute for Cancer Research
+
+This package and its accompanying libraries is free software; you can
+redistribute it and/or modify it under the terms of the GPL (either
+version 1, or at your option, any later version) or the Artistic
+License 2.0.  Refer to LICENSE for the full license text. In addition,
+please see DISCLAIMER.txt for disclaimers of warranty.
+
+=cut
 
