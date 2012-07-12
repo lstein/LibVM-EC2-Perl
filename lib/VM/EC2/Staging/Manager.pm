@@ -710,7 +710,7 @@ sub provision_volume {
 	$args{-availability_zone} = $v->availabilityZone if $v;
 	$args{-size}              = $v->size             if $v;
     } else {
-	$self->info("provisioning a $args{-size} GB $args{-fstype} volume in $args{-availability_zone}\n");
+	$self->info("provisioning a new $args{-size} GB $args{-fstype} volume\n");
     }
 
     my $server = $self->get_server_in_zone($args{-availability_zone});
