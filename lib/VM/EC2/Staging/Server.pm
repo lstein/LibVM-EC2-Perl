@@ -598,7 +598,7 @@ sub _scmd_pipe {
     my ($op,@cmd) = @_;
     my $operation = $op eq 'write' ? '|-' : '-|';
     my $host = $self->dnsName;
-    my $pid = open my $fh,$operation; # this does a fork
+    my $pid = open(my $fh,$operation); # this does a fork
     defined $pid or croak "piped open failed: $!" ;
     return $fh if $pid;         # writing to the filehandle writes to an ssh session
     exec '/usr/bin/ssh',$self->_ssh_args,$host,@cmd;

@@ -223,6 +223,13 @@ servers and volumes.
                 if no volume or snapshot exist will a new volume be
                 created from scratch.
 
+ -dotdir        Path to the directory that contains keyfiles and other
+                stable configuration information for this module.
+                Defaults to ~/.vm_ec2_staging. You may wish to change
+                this to, say, a private dropbox directory or an NFS-mount
+                in order to share keyfiles among machines. Be aware of
+                the security implications of sharing private key files.
+
 =back
 
 =head2 $manager = VM::EC2::Staging::Manager(-ec2 => $ec2,@args)
@@ -271,6 +278,7 @@ sub new {
     $args{-quiet}             ||= undef;
     $args{-scan}                = 1 unless exists $args{-scan};
     $args{-pid}                 = $$;
+    $args{-dotdir}            ||= $class->default_dot_directory_path;
 
     # create accessors
     foreach (keys %args) {
@@ -378,7 +386,7 @@ terminates.
 
 sub default_reuse_keys    { 1               }
 
-=head2 $name = $manager->default_reuse_keys
+=head2 $name = $manager->default_reuse_volumes
 
 Return the default value of the -reuse_volumes argument ('true'). This
 value instructs the manager to use the symbolic name of the volume to
@@ -388,6 +396,31 @@ new one of the same name.
 =cut
 
 sub default_reuse_volumes { 1               }
+
+=head2 $name = $manager->default_dot_directory_path
+
+Return the default value of the -dotdir argument
+("$ENV{HOME}/.vm_ec2_staging"). This value instructs the manager to
+use the symbolic name of the volume to return an existing volume
+whenever a request is made to provision a new one of the same name.
+
+=cut
+
+sub default_dot_directory_path {
+    my $class = shift;
+    my $dir = File::Spec->catfile($ENV{HOME},'.vm_ec2_staging');
+    return $dir;
+}
+
+sub dot_directory {
+    my $self = shift;
+    my $dir  = $self->dotdir;
+    unless (-e $dir && -d $dir) {
+	mkdir $dir       or croak "mkdir $dir: $!";
+	chmod 0700,$dir  or croak "chmod 0700 $dir: $!";
+    }
+    return $dir;
+}
 
 # scan for staging instances in current region and cache them
 # into memory
@@ -834,23 +867,13 @@ sub active_servers {
 sub key_path {
     my $self    = shift;
     my $keyname = shift;
-    return File::Spec->catfile($self->dot_directory_path,"${keyname}.pem")
-}
-
-sub dot_directory_path {
-    my $class = shift;
-    my $dir = File::Spec->catfile($ENV{HOME},'.vm_ec2_staging');
-    unless (-e $dir && -d $dir) {
-	mkdir $dir       or croak "mkdir $dir: $!";
-	chmod 0700,$dir  or croak "chmod 0700 $dir: $!";
-    }
-    return $dir;
+    return File::Spec->catfile($self->dot_directory,"${keyname}.pem")
 }
 
 sub _check_keyfile {
     my $self = shift;
     my $keyname = shift;
-    my $dotpath = $self->dot_directory_path;
+    my $dotpath = $self->dot_directory;
     opendir my $d,$dotpath or die "Can't opendir $dotpath: $!";
     while (my $file = readdir($d)) {
 	if ($file =~ /^$keyname.pem/) {
@@ -976,13 +999,13 @@ sub copy_snapshot {
 	$source->rsync($dest) or croak "rsync failed";
     }
     
-    my $snap = $dest->create_snapshot($description);
+    my $snapshot = $dest->create_snapshot($description);
     
     # we don't need these volumes now
     $source->delete;
     $dest->delete;
 
-    return $snap;
+    return $snapshot;
 }
 
 sub _gather_image_info {
@@ -1013,13 +1036,6 @@ sub _match_kernel {
     return $candidates[0];
 }
 
-sub copy_snapshot {
-    my $self = shift;
-    my ($snapId,$dest_manager) = @_;
-    $self->info("staging snapshotshot $snapId\n");
-    my $vol = $self->provision_volume(-snapshot_id=>$snapId);
-}
-
 sub DESTROY {
     my $self = shift;
     if ($$ == $self->pid) {
@@ -1036,11 +1052,6 @@ sub new_volume_name {
 
 sub new_server_name {
     return ++$ServerName;
-}
-
-sub VM::EC2::staging_manager {
-    my $self = shift;
-    return VM::EC2::Staging::Manager->new(@_,-ec2=>$self)
 }
 
 1;
