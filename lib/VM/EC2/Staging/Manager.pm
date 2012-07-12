@@ -593,7 +593,7 @@ sub unregister_server {
 
 sub servers {
     my $self = shift;
-    return values %Instances;
+    return grep {$_->ec2->endpoint eq $self->ec2->endpoint} values %Instances;
 }
 
 sub register_volume {
@@ -694,7 +694,7 @@ sub provision_volume {
     my %args = @_;
 
     $args{-name}              ||= ++$VolumeName;
-    $args{-size}              ||= 1;
+    $args{-size}              ||= 1 unless $args{-snapshot_id} || $args{-volume_id};
     $args{-volume_id}         ||= undef;
     $args{-snapshot_id}       ||= undef;
     $args{-reuse}               = $self->reuse_volumes unless defined $args{-reuse};
@@ -722,7 +722,7 @@ sub provision_volume {
 
 sub volumes {
     my $self = shift;
-    return values %Volumes;
+    return grep {$_->ec2->endpoint eq $self->ec2->endpoint} values %Volumes;
 }
 
 sub _search_for_image {
@@ -893,8 +893,7 @@ sub _select_used_zone {
     } elsif (my $zone = $self->availability_zone) {
 	return $zone;
     } else {
-	my @zones = $self->ec2->describe_availability_zones;
-	return $zones[rand @zones];
+	return;
     }
 }
 
@@ -903,28 +902,34 @@ sub _select_used_zone {
 #############################################
 sub copy_image {
     my $self = shift;
-    my ($image,$dest_region) = @_;
+    my ($image,$destination) = @_;
     my $ec2 = $self->ec2;
 
     $image = $ec2->describe_images($image)
 	unless ref $image && $image->isa('VM::EC2::Image');
     
-    $dest_region = $ec2->describe_regions($dest_region)
-	unless ref $dest_region && $dest_region->isa('VM::EC2::Region');
-
     $image       or croak "Invalid image '$image'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
-    $dest_region or croak "Invalid EC2 Region '$dest_region'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
-
     $image->imageType eq 'machine' or croak "$image is not an AMI: usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
     
-    my $dest_endpoint = $dest_region->regionEndpoint;
-    my $dest_ec2      = VM::EC2->new(-endpoint    => $dest_endpoint,
-				     -access_key  => $ec2->access_key,
-				     -secret_key  => $ec2->secret)
-	or croak "Could not create new VM::EC2 in $dest_region";
-    my $dest_manager = $self->new(-ec2     => $dest_ec2,
-				  -scan    => 1,
-				  -on_exit => 'destroy');
+    my $dest_manager;
+    if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
+	$dest_manager = $destination;
+    } else {
+	my $dest_region = ref $destination && $destination->isa('VM::EC2::Region') 
+	    ? $destination
+	    : $ec2->describe_regions($destination);
+	$dest_region 
+	    or croak "Invalid EC2 Region '$dest_region'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";	
+	my $dest_endpoint = $dest_region->regionEndpoint;
+	my $dest_ec2      = VM::EC2->new(-endpoint    => $dest_endpoint,
+					 -access_key  => $ec2->access_key,
+					 -secret_key  => $ec2->secret) 
+	    or croak "Could not create new VM::EC2 in $dest_region";
+	$dest_manager = $self->new(-ec2     => $dest_ec2,
+				   -scan    => 1,
+				   -on_exit => 'destroy');
+    }
+
 
     my $root_type = $image->rootDeviceType;
     if ($root_type eq 'ebs') {
@@ -945,12 +950,12 @@ sub _copy_ebs_image {
     my $name         = $info->{name};
     my $description  = $info->{description};
     my $architecture = $info->{architecture};
-    my $kernel       = $self->_match_kernel($info->{kernel},$dest_manager->ec2,'kernel')
+    my $kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
 	or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
     
     my $ramdisk;
     if ($info->{ramdisk}) {
-	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager->ec2,'ramdisk')
+	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
 	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;	
     }
 
@@ -996,7 +1001,9 @@ sub copy_snapshot {
     if ($fstype eq 'raw') {
 	$source->dd($dest)    or croak "dd failed";
     } else {
-	$source->rsync($dest) or croak "rsync failed";
+	# this should work, but doesn't:
+	# $source->copy($dest) or croak "rsync failed";
+	$source->copy("$source/"=>$dest) or croak "rsync failed";
     }
     
     my $snapshot = $dest->create_snapshot($description);
@@ -1028,11 +1035,22 @@ sub _match_kernel {
     my $home_ec2 = $self->ec2;
     my $dest_ec2 = $dest_manager->ec2;  # different endpoints!
     my $image    = $home_ec2->describe_images($imageId) or return;
-    my $name     = $image->name;
     my $type     = $image->imageType;
-    my @candidates = $dest_ec2->describe_images({'name'        => $name,
-						 'image-type'  => $type,
-						});
+    my @candidates;
+
+    if (my $name     = $image->name) { # will sometimes have a name
+	@candidates = $dest_ec2->describe_images({'name'        => $name,
+						  'image-type'  => $type,
+						    });
+    }
+    unless (@candidates) {
+	my $location = $image->imageLocation; # will always have a location
+	my @path     = split '/',$location;
+	$location    = $path[-1];
+	@candidates  = $dest_ec2->describe_images(-filter=>{'image-type'=>'kernel',
+							    'manifest-location'=>"*/$location"},
+						  -executable_by=>['all','self']);
+    }
     return $candidates[0];
 }
 
