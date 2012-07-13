@@ -158,6 +158,12 @@ sub manager {
     return VM::EC2::Staging::Manager->find_manager($ep);
 }
 
+sub mount {
+    my $self = shift;
+    $self->_spin_up;
+    $self->fstype($self->get_fstype) unless $self->fstype;
+}
+
 sub mounted {
     my $self = shift;
     my $m    = $self->{mounted};
@@ -167,6 +173,7 @@ sub mounted {
 
 sub _spin_up {
     my $self = shift;
+    my $nomount = shift;
     unless ($self->server) {
 	$self->manager->info("provisioning server to mount $self\n");
 	my $server = $self->manager->get_server_in_zone($self->availabilityZone);
@@ -176,7 +183,7 @@ sub _spin_up {
 	$self->manager->info("starting server to mount $self\n");
 	$self->server->start;
     }
-    $self->server->mount_volume($self) unless $self->mounted();
+    $self->server->mount_volume($self) unless $nomount || $self->mounted();
 }
 
 #sub as_string {
@@ -239,7 +246,11 @@ sub rsync {
 }
 
 sub copy { shift->rsync(@_)      }
-sub dd   { shift->server->dd(@_) }
+sub dd   { 
+    my $self = shift;
+    unshift @_,$self if @_ < 2;
+    $self->server->dd(@_);
+}
 
 sub ls    { shift->_cmd('sudo ls',@_)    }
 sub df    { shift->_cmd('df',@_)    }
@@ -260,7 +271,9 @@ sub fstab_line {
 sub unmount {
     my $self = shift;
     my $server = $self->server or return;
-    $self->_spin_up; # guarantees that server is running
+    # guarantees that server is running, but avoids mounting the disk
+    # prior to unmounting it again.
+    $self->_spin_up('nomount'); 
     $server->unmount_volume($self);
 }
 
@@ -271,6 +284,8 @@ sub detach {
     $self->unmount;  # make sure we are not mounted; this might involve starting a server
     $server->info("detaching $self\n");
     $self->volume->detach;
+    $self->mtpt(undef);
+    $self->mtdev(undef);
 }
 
 # remove volume entirely
@@ -285,6 +300,10 @@ sub delete {
     } else {
 	croak "Cannot delete volume, status is $status";
     }
+    $self->mounted(0);
+    $self->mtpt(undef);
+    $self->mtdev(undef);
+    $self->fstype(undef);
 }
 
 sub _cmd {

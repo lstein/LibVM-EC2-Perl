@@ -370,6 +370,7 @@ sub unmount_volume {
     my $vol  = shift;
     my $mtpt = $vol->mtpt;
     return if $mtpt eq 'none';
+    return unless $vol->mounted;
     $self->info("unmounting $vol...\n");
     $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
     $vol->mounted(0);
@@ -392,7 +393,9 @@ sub delete_volume {
    my $ec2 = $self->ec2;
    $self->manager->unregister_volume($vol);
    $self->unmount_volume($vol);
-   $ec2->wait_for_attachments( $vol->detach() );
+   # call underlying EBS function to avoid the volume trying to spin up the
+   # server just to unmount itself.
+   $ec2->wait_for_attachments( $vol->ebs->detach() ); 
    $self->info("deleting $vol...\n");
    $ec2->delete_volume($vol->volumeId);
    $vol->mounted(0);
@@ -501,15 +504,22 @@ sub rsync {
 # that is attached, but not mounted
 sub dd {
     my $self = shift;
+
+    @_==2 or croak "usage: dd(\$source_vol=>\$dest_vol)";
+
     my ($vol1,$vol2) = @_;
     my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
     my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
-    my $keyname  = $self->_authorize($server1,$server2);
-    my $dest_ip  = $server2->instance->dnsName;
-    my $ssh_args = $self->_ssh_escaped_args;
-    my $keyfile  = $self->keyfile;
-    $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-    $server1->ssh("sudo dd if=$device1 | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2'");
+    if ($server1 eq $server2) {
+	$server1->ssh("sudo dd if=$device1 of=$device2");
+    }  else {
+	my $keyname  = $self->_authorize($server1,$server2);
+	my $dest_ip  = $server2->instance->dnsName;
+	my $ssh_args = $self->_ssh_escaped_args;
+	my $keyfile  = $self->keyfile;
+	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
+	$server1->ssh("sudo dd if=$device1 | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2'");
+    }
 }
 
 sub _authorize {

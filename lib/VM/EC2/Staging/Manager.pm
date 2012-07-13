@@ -801,7 +801,7 @@ sub _security_group {
     my $ec2  = $self->ec2;
     my @groups = $ec2->describe_security_groups(-filter=>{'tag:Role' => 'StagingGroup'});
     return $groups[0] if @groups;
-    my $name = $ec2->_token('ssh');
+    my $name = $self->_token('ssh');
     $self->info("Creating staging security group $name.\n");
     my $sg =  $ec2->create_security_group(-name  => $name,
 					  -description => "SSH security group created by ".__PACKAGE__
