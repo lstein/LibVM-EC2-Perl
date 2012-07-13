@@ -136,8 +136,6 @@ use Scalar::Util 'weaken';
 use constant                     GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
 
-my $VolumeName = 'StagingVolume000';
-my $ServerName = 'StagingServer000';
 my (%Zones,%Instances,%Volumes,%Managers);
 
 =head2 $manager = $ec2->staging_manager(@args)
@@ -443,7 +441,7 @@ sub _scan_instances {
 	my $keyname  = $instance->keyName                   or next;
 	my $keyfile  = $self->_check_keyfile($keyname)      or next;
 	my $username = $instance->tags->{'StagingUsername'} or next;
-	my $name     = $instance->tags->{StagingName} || ++$ServerName;
+	my $name     = $instance->tags->{StagingName} || $self->new_server_name;
 	my $server   = VM::EC2::Staging::Server->new(
 	    -name     => $name,
 	    -keyfile  => $keyfile,
@@ -495,7 +493,7 @@ sub get_server_in_zone {
 sub get_server {
     my $self = shift;
     my %args = @_;
-    $args{-name}              ||= ++$ServerName;
+    $args{-name}              ||= $self->new_server_name;
 
     # find servers of same name
     my %servers = map {$_->name => $_} $self->servers;
@@ -513,7 +511,7 @@ sub provision_server {
 
     # fix possible gotcha -- instance store is not allowed for micro instances.
     $args{-root_type} = 'ebs' if $args{-instance_type} eq 't1.micro';
-    $args{-name}    ||= ++$ServerName;
+    $args{-name}    ||= $self->new_server_name;
 
     my ($keyname,$keyfile) = $self->_security_key;
     my $security_group     = $self->_security_group;
@@ -642,7 +640,6 @@ sub stop_all_servers {
 sub terminate_all_servers {
     my $self = shift;
     my $ec2 = $self->ec2 or return;
-#    my @servers = keys %Instances; # allows this to run correctly during global destruct
     my @servers  = grep {$_->ec2 eq $ec2} $self->servers;
     @servers or return;
     
@@ -683,7 +680,7 @@ sub wait_for_instances {
 sub get_volume {
     my $self = shift;
     my %args = @_;
-    $args{-name}              ||= ++$VolumeName;
+    $args{-name}              ||= $self->new_volume_name;
 
     # find volume of same name
     my %vols = map {$_->name => $_} $self->volumes;
@@ -694,7 +691,7 @@ sub provision_volume {
     my $self = shift;
     my %args = @_;
 
-    $args{-name}              ||= ++$VolumeName;
+    $args{-name}              ||= $self->new_volume_name;
     $args{-size}              ||= 1 unless $args{-snapshot_id} || $args{-volume_id};
     $args{-volume_id}         ||= undef;
     $args{-snapshot_id}       ||= undef;
@@ -751,7 +748,7 @@ sub _search_for_image {
 
 sub security_group {
     my $self = shift;
-    return $self->{security_group} ||= $self->_new_security_group();
+    return $self->{security_group} ||= $self->_security_group();
 }
 
 sub keypair {
@@ -776,20 +773,6 @@ sub create_snapshot {
     return $snap;
 }
 
-sub _new_security_group {
-    my $self = shift;
-    my $ec2  = $self->ec2;
-    my $name = $ec2->token;
-    $self->info("Creating ssh security group $name.\n");
-    my $sg =  $ec2->create_security_group(-name     => $name,
-				       -description => "SSH security group created by ".__PACKAGE__
-	) or die $ec2->error_str;
-    $sg->authorize_incoming(-protocol   => 'tcp',
-			    -port       => 'ssh');
-    $sg->update or die $ec2->error_str;
-    return $sg;
-}
-
 sub _security_key {
     my $self = shift;
     my $ec2     = $self->ec2;
@@ -801,7 +784,7 @@ sub _security_key {
 	    return ($c,$keyfile) if -e $keyfile;
 	}
     }
-    my $name    = 'staging-key-'.$ec2->token;
+    my $name    = $self->_token('staging-key');
     $self->info("Creating keypair $name.\n");
     my $kp          = $ec2->create_key_pair($name) or die $ec2->error_str;
     my $keyfile     = $self->key_path($name);
@@ -818,7 +801,7 @@ sub _security_group {
     my $ec2  = $self->ec2;
     my @groups = $ec2->describe_security_groups(-filter=>{'tag:Role' => 'StagingGroup'});
     return $groups[0] if @groups;
-    my $name = $ec2->token;
+    my $name = $ec2->_token('ssh');
     $self->info("Creating staging security group $name.\n");
     my $sg =  $ec2->create_security_group(-name  => $name,
 					  -description => "SSH security group created by ".__PACKAGE__
@@ -1006,7 +989,8 @@ sub copy_snapshot {
     my $dest   = $dest_manager->provision_volume(-fstype => $fstype,
 						 -size   => $source->size,
 						 -label  => $label,
-						 -uuid   => $uuid
+						 -uuid   => $uuid,
+						 -reuse  => 0,
 	) or croak "Couldn't create new destination volume for $snapId";
 
     if ($fstype eq 'raw') {
@@ -1016,7 +1000,7 @@ sub copy_snapshot {
 	$source->copy($dest) or croak "rsync failed";
     }
     
-    $dest->unmount;
+    $dest->unmount; # don't want this mounted; otherwise it will be unmounted & remounted
     my $snapshot = $dest->create_snapshot($description);
     
     # we don't need these volumes now
@@ -1076,11 +1060,17 @@ sub DESTROY {
 }
 
 sub new_volume_name {
-    return ++$VolumeName;
+    return shift->_token('volume');
 }
 
 sub new_server_name {
-    return ++$ServerName;
+    return shift->_token('server');
+}
+
+sub _token {
+    my $self = shift;
+    my $base = shift or croak "usage: _token(\$basename)";
+    return sprintf("$base-%08x",1+int(rand(0xFFFFFFFF)));
 }
 
 1;

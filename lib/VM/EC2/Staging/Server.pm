@@ -218,7 +218,7 @@ sub provision_volume {
     $s->current_status eq 'attached'                 or croak "Couldn't attach $vol to $instance via $ebs_device";
 
     if ($needs_resize) {
-	$self->scmd("sudo file -s $mt_device") =~ /ext[234]/   or croak "Sorry, but can only resize ext volumes ";
+	$self->scmd("sudo blkid $mt_device") =~ /"ext\d"/   or croak "Sorry, but can only resize ext volumes ";
 	$self->info("Checking filesystem...\n");
 	$self->ssh("sudo /sbin/e2fsck -fy $mt_device")          or croak "Couldn't check $mt_device";
 	$self->info("Resizing previously-used volume to $size GB...\n");
