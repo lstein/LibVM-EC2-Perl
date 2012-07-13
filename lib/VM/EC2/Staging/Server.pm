@@ -428,8 +428,10 @@ sub resolve_path {
 # 
 sub rsync {
     my $self = shift;
-    my @p    = @_;
+    croak "usage: VM::EC2::Staging::Server->rsync(\$source_path1,\$source_path2\...,\$dest_path)"
+	unless @_ >= 2;
 
+    my @p    = @_;
     undef $LastHost;
     my @paths = map {$self->resolve_path($_)} @p;
 
