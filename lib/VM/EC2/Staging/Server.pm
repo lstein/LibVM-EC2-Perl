@@ -183,6 +183,8 @@ sub provision_volume {
     my $volid  = $args{-volume_id};
     my $snapid = $args{-snapshot_id};
     my $reuse  = $args{-reuse};
+    my $label  = $args{-label} || $args{-name};
+    my $uuid   = $args{-uuid};
 
     if ($volid || $snapid) {
 	$name  ||= $volid || $snapid;
@@ -223,21 +225,38 @@ sub provision_volume {
 	$self->ssh("sudo /sbin/resize2fs $mt_device ${size}G") or croak "Couldn't resize $mt_device";
     } elsif ($needs_mkfs && $fstype ne 'raw') {
 	local $_ = $fstype;
-	my $label = /^ext/     ? "-L '$name'"
-                   :/^xfs/     ? "-L '$name'"
-                   :/^reiser/  ? "-l '$name'"
-                   :/^jfs/     ? "-L '$name'"
-                   :/^vfat/    ? "-n '$name'"
-                   :/^msdos/   ? "-n '$name'"
-                   :/^ntfs/    ? "-L '$name'"
+	my $label = /^ext/     ? "-L '$label'"
+                   :/^xfs/     ? "-L '$label'"
+                   :/^reiser/  ? "-l '$label'"
+                   :/^jfs/     ? "-L '$label'"
+                   :/^vfat/    ? "-n '$label'"
+                   :/^msdos/   ? "-n '$label'"
+                   :/^ntfs/    ? "-L '$label'"
                    :'';
+	my $uu = $uuid ? ( /^ext/     ? "-U $uuid"
+			  :/^xfs/     ? ''
+			  :/^reiser/  ? "-u $uuid"
+			  :/^jfs/     ? ''
+			  :/^vfat/    ? ''
+			  :/^msdos/   ? ''
+			  :/^ntfs/    ? "-U $uuid"
+			  :'')
+	          : '';
+
 	my $apt_packages = $self->_mkfs_packages();
 	if (my $package = $apt_packages->{$fstype}) {
 	    $self->info("checking for /sbin/mkfs.$fstype\n");
 	    $self->ssh("if [ ! -e /sbin/mkfs.$fstype ]; then sudo apt-get update; sudo apt-get -y install $package; fi");
 	}
 	$self->info("Making $fstype filesystem on staging volume...\n");
-	$self->ssh("sudo /sbin/mkfs.$fstype $label $mt_device") or croak "Couldn't make filesystem on $mt_device";
+	$self->ssh("sudo /sbin/mkfs.$fstype $label $uu $mt_device") or croak "Couldn't make filesystem on $mt_device";
+
+	if ($uuid && !$uu) {
+	    $self->info("Setting the UUID for the volume\n");
+	    $self->ssh("sudo xfs_admin -U $uuid $mt_device") if $fstype =~ /^xfs/;
+	    $self->ssh("sudo jfs_tune -U $uuid $mt_device")  if $fstype =~ /^jfs/;
+	    # as far as I know you cannot set a uuid for FAT and VFAT volumes
+	}
     }
 
     my $volobj = VM::EC2::Staging::Volume->new({

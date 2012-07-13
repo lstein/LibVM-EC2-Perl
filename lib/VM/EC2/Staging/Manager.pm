@@ -258,32 +258,33 @@ sub VM::EC2::staging_manager {
 
 
 sub new {
-    my $class = shift;
+    my $self = shift;
     my %args  = @_;
     $args{-ec2}               ||= VM::EC2->new();
 
-    if (my $manager = $class->find_manager($args{-ec2}->endpoint)) {
+    if (my $manager = $self->find_manager($args{-ec2}->endpoint)) {
 	return $manager;
     }
 
-    $args{-on_exit}           ||= $class->default_exit_behavior;
-    $args{-reuse_key}         ||= $class->default_reuse_keys;
-    $args{-username}          ||= $class->default_user_name;
-    $args{-architecture}      ||= $class->default_architecture;
-    $args{-root_type}         ||= $class->default_root_type;
-    $args{-instance_type}     ||= $class->default_instance_type;
-    $args{-reuse_volumes}     ||= $class->default_reuse_volumes;
-    $args{-image_name}        ||= $class->default_image_name;
+    $args{-on_exit}           ||= $self->default_exit_behavior;
+    $args{-reuse_key}         ||= $self->default_reuse_keys;
+    $args{-username}          ||= $self->default_user_name;
+    $args{-architecture}      ||= $self->default_architecture;
+    $args{-root_type}         ||= $self->default_root_type;
+    $args{-instance_type}     ||= $self->default_instance_type;
+    $args{-reuse_volumes}     ||= $self->default_reuse_volumes;
+    $args{-image_name}        ||= $self->default_image_name;
     $args{-availability_zone} ||= undef;
     $args{-quiet}             ||= undef;
     $args{-scan}                = 1 unless exists $args{-scan};
     $args{-pid}                 = $$;
-    $args{-dotdir}            ||= $class->default_dot_directory_path;
+    $args{-dotdir}            ||= $self->default_dot_directory_path;
 
     # create accessors
+    my $class = ref $self || $self;
     foreach (keys %args) {
-	next unless /^-\w+$/;
 	(my $func_name = $_) =~ s/^-//;
+	next if $self->can($func_name);
 	eval <<END;
 sub ${class}::${func_name} {
     my \$self = shift;
@@ -295,13 +296,13 @@ END
     die $@ if $@;
     }
 
-    my $self = bless \%args,ref $class || $class;
-    weaken($Managers{$self->ec2->endpoint} = $self);
+    my $obj = bless \%args,$class;
+    weaken($Managers{$obj->ec2->endpoint} = $obj);
     if ($args{-scan}) {
-	$self->info("scanning for existing staging servers and volumes\n");
-	$self->scan_region;
+	$obj->info("scanning for existing staging servers and volumes\n");
+	$obj->scan_region;
     }
-    return $self;
+    return $obj;
 }
 
 
@@ -701,16 +702,17 @@ sub provision_volume {
     $args{-mount}             ||= '/mnt/DataTransfer/'.$args{-name};
     $args{-fstype}            ||= 'ext4';
     $args{-availability_zone} ||= $self->_select_used_zone;
+    $args{-label}             ||= $args{-name};
     
     if ($args{-snapshot_id}) {
-	$self->info("reprovisioning volume from snapshot $args{-snapshot_id}\n");
+	$self->info("Provisioning volume from snapshot $args{-snapshot_id}\n");
     } elsif ($args{-volume_id}) {
-	$self->info("reprovisioning volume from volume $args{-volume_id}\n");
+	$self->info("Provisioning volume from volume $args{-volume_id}\n");
 	my $v = $self->ec2->describe_volumes($args{-volume_id});
 	$args{-availability_zone} = $v->availabilityZone if $v;
 	$args{-size}              = $v->size             if $v;
     } else {
-	$self->info("provisioning a new $args{-size} GB $args{-fstype} volume\n");
+	$self->info("Provisioning a new $args{-size} GB $args{-fstype} volume\n");
     }
 
     my $server = $self->get_server_in_zone($args{-availability_zone});
@@ -908,8 +910,10 @@ sub copy_image {
     $image = $ec2->describe_images($image)
 	unless ref $image && $image->isa('VM::EC2::Image');
     
-    $image       or croak "Invalid image '$image'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
-    $image->imageType eq 'machine' or croak "$image is not an AMI: usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+    $image       
+	or croak "Invalid image '$image'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+    $image->imageType eq 'machine' 
+	or croak "$image is not an AMI: usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
     
     my $dest_manager;
     if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
@@ -925,9 +929,10 @@ sub copy_image {
 					 -access_key  => $ec2->access_key,
 					 -secret_key  => $ec2->secret) 
 	    or croak "Could not create new VM::EC2 in $dest_region";
-	$dest_manager = $self->new(-ec2     => $dest_ec2,
-				   -scan    => 1,
-				   -on_exit => 'destroy');
+	$dest_manager = $self->new(-ec2           => $dest_ec2,
+				   -scan          => 1,
+				   -on_exit       => 'destroy',
+				   -instance_type => $self->instance_type);
     }
 
 
@@ -956,21 +961,21 @@ sub _copy_ebs_image {
     my $ramdisk;
     if ($info->{ramdisk}) {
 	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
-	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;	
-    }
+	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;	    }
 
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
     my $root_device     = $info->{root_device};
 
     $self->info("Copying EBS volumes attached to this image (this may take a long time)\n");
-    my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @$block_devices;
+    my @bd              = @$block_devices;
+    my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @bd;
 
     # create the new block device mapping
     my @mappings;
     for my $source_ebs (@$block_devices) {
 	my $snapshot    = shift @dest_snapshots;
 	my $dest        = "$source_ebs";  # interpolates into correct format
-	$dest          =~ s/=[\w-]+/$snapshot/;  # replace source snap with dest snap
+	$dest          =~ s/=[\w-]+/=$snapshot/;  # replace source snap with dest snap
 	push @mappings,$dest;
     }
 
@@ -989,23 +994,29 @@ sub copy_snapshot {
     my ($snapId,$dest_manager) = @_;
     my $snap   = $self->ec2->describe_snapshots($snapId) 
 	or croak "Couldn't find snapshot for $snapId";
-    my $description = $snap->description;
+    my $description = "duplicate of $snap, created by ".__PACKAGE__." during image copying";
 
     my $source = $self->provision_volume(-snapshot_id=>$snapId) 
 	or croak "Couldn't mount volume for $snapId";
-    my $fstype = $source->fstype;
+    my $fstype  = $source->fstype;
+    my $blkinfo = $source->server->scmd('sudo','blkid',$source->mtdev);
+    my ($uuid)  = $blkinfo =~ /UUID="(\S+)"/;
+    my ($label) = $blkinfo =~ /LABEL="(\S+)"/;
+    
     my $dest   = $dest_manager->provision_volume(-fstype => $fstype,
-						 -size   => $source->size) 
-	or croak "Couldn't create new destination volume for $snapId";
+						 -size   => $source->size,
+						 -label  => $label,
+						 -uuid   => $uuid
+	) or croak "Couldn't create new destination volume for $snapId";
 
     if ($fstype eq 'raw') {
 	$source->dd($dest)    or croak "dd failed";
     } else {
-	# this should work, but doesn't:
-	# $source->copy($dest) or croak "rsync failed";
-	$source->copy("$source/"=>$dest) or croak "rsync failed";
+	# this now works?
+	$source->copy($dest) or croak "rsync failed";
     }
     
+    $dest->unmount;
     my $snapshot = $dest->create_snapshot($description);
     
     # we don't need these volumes now

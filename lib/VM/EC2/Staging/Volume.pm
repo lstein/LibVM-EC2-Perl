@@ -234,7 +234,7 @@ sub put {
 sub rsync {
     my $self = shift;
     $self->mounted or croak "Volume is not currently mounted";
-    unshift "$self",@_ if @_ <= 1;
+    unshift @_,"$self/" if @_ <= 1;
     $self->server->rsync(@_);
 }
 
