@@ -561,10 +561,17 @@ sub find_server_by_instance {
     return $Instances{$server};
 }
 
-sub find_volume_by_name {
+sub find_volume_by_volid {
     my $self   = shift;
-    my $volume = shift;
-    return $Volumes{$volume};
+    my $volid = shift;
+    return $Volumes{$volid};
+}
+
+sub find_volume_by_name {
+    my $self =  shift;
+    my $name = shift;
+    my %volumes = map {$_->name => $_} $self->volumes;
+    return $volumes{$name};
 }
 
 sub _select_server_by_zone {
@@ -700,6 +707,9 @@ sub provision_volume {
     $args{-fstype}            ||= 'ext4';
     $args{-availability_zone} ||= $self->_select_used_zone;
     $args{-label}             ||= $args{-name};
+
+    $self->find_volume_by_name($args{-name}) && 
+	croak "There is already a volume named $args{-name} in this region";
     
     if ($args{-snapshot_id}) {
 	$self->info("Provisioning volume from snapshot $args{-snapshot_id}\n");

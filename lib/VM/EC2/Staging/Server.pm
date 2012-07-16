@@ -174,6 +174,10 @@ sub ping {
     return 1;
 }
 
+sub add_volume {
+    shift->provision_volume(@_)
+}
+
 sub provision_volume {
     my $self = shift;
     my %args = @_;
@@ -185,6 +189,9 @@ sub provision_volume {
     my $reuse  = $args{-reuse};
     my $label  = $args{-label} || $args{-name};
     my $uuid   = $args{-uuid};
+
+    $self->manager->find_volume_by_name($args{-name}) && 
+	croak "There is already a volume named $args{-name} in this region";
 
     if ($volid || $snapid) {
 	$name  ||= $volid || $snapid;
@@ -418,7 +425,7 @@ sub resolve_path {
     my $vpath = shift;
 
     my ($servername,$pathname);
-    if ($vpath =~ m!^(vol-[0-9a-f]+):?(.*)! && (my $vol = VM::EC2::Staging::Manager->find_volume_by_name($1))) {
+    if ($vpath =~ m!^(vol-[0-9a-f]+):?(.*)! && (my $vol = VM::EC2::Staging::Manager->find_volume_by_volid($1))) {
 	my $path = $2;
 	$path       = "/$path" if $path && $path !~ m!^/!;
 	$vol->_spin_up;
@@ -753,7 +760,7 @@ sub _create_volume {
 sub volumes {
     my $self   = shift;
     my @volIds = map {$_->volumeId} $self->blockDeviceMapping;
-    my @volumes = map {$self->manager->find_volume_by_name($_)} @volIds;
+    my @volumes = map {$self->manager->find_volume_by_volid($_)} @volIds;
     return grep {defined $_} @volumes;
 }
 
