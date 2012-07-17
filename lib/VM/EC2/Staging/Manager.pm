@@ -93,26 +93,33 @@ process of provisioning and populating volumes, but it also provides a
 handy set of ssh commands that allow you to run remote commands
 programmatically.
 
-The manager also allows you to copy AMIs from one region to another,
-something that is otherwise hard to do right.
+The manager also allows you to copy EBS-backed AMIs and their attached
+volumes from one region to another, something that is otherwise
+difficult to do.
 
 The main classes are:
 
  VM::EC2::Staging::Manager -- A set of volume and server resources in
                               a single AWS region.
 
- VM::EC2::Staging::Server -- A named server running somewhere in the
+ VM::EC2::Staging::Server -- A staging server running somewhere in the
                              region. It is a VM::EC2::Instance
                              extended to provide remote command and
                              copy facilities.
 
- VM::EC2::Staging::Volume -- A named disk volume running somewhere in the
+ VM::EC2::Staging::Volume -- A staging disk volume running somewhere in the
                              region. It is a VM::EC2::Volume
                              extended to provide remote copy
                              facilities.
 
-See the perldoc for more information on Server and Volume
-    capabilities.
+Staging servers can provision volumes, format them, mount them, copy
+data between local and remote (virtual) machines, and execute secure
+shell commands. Staging volumes can mount themselves on servers, run a
+variety of filesystem-oriented commands, and invoke commands on the
+servers to copy data around locally and remotely.
+
+See L<VM::EC2::Staging::Server> and L<VM::EC2::Staging::Volume> for
+the full details.
 
 =head1 Constructors
 
@@ -396,7 +403,7 @@ new one of the same name.
 
 sub default_reuse_volumes { 1               }
 
-=head2 $name = $manager->default_dot_directory_path
+=head2 $pathe = $manager->default_dot_directory_path
 
 Return the default value of the -dotdir argument
 ("$ENV{HOME}/.vm_ec2_staging"). This value instructs the manager to
@@ -411,6 +418,12 @@ sub default_dot_directory_path {
     return $dir;
 }
 
+=head2 $path = $manager->dot_directory([$new_directory])
+
+Get or set the dot directory which holds private key files.
+
+=cut
+
 sub dot_directory {
     my $self = shift;
     my $dir  = $self->dotdir;
@@ -420,6 +433,14 @@ sub dot_directory {
     }
     return $dir;
 }
+
+=head2 $manager->scan_region
+
+Synchronize internal list of managed servers and volumes with the EC2
+region. Called automatically during new() and needed only if servers &
+volumes are changed from outside the module while it is running.
+
+=cut
 
 # scan for staging instances in current region and cache them
 # into memory
@@ -479,19 +500,52 @@ sub _scan_volumes {
     }
 }
 
+
+=head2 $server = $manager->get_server_in_zone(-zone=>$availability_zone,%other_args)
+
+=head2 $server = $manager->get_server_in_zone($availability_zone)
+
+Return an existing VM::EC2::Staging::Server running in the indicated
+symbolic name, or create a new server if one with this name does not
+already exist. The server's instance characteristics will be
+configured according to the options passed to the manager at create
+time (e.g. -availability_zone, -instance_type). These options can be
+overridden by %other_args. See provision_volume() for details.
+
+=cut
+
 sub get_server_in_zone {
     my $self = shift;
-    my $zone = shift;
+    unshift @_,'-zone' if @_ == 1;
+    my %args = @_;
+    my $zone = $args{-availability_zone} or croak "must provide -availability_zone argument";
     if (my $servers = $Zones{$zone}{Servers}) {
-	return (values %{$servers})[0];
+	my $server = (values %{$servers})[0];
+	$server->start unless $server->is_up;
+	return $server;
     }
     else {
-	return $self->provision_server(-availability_zone => $zone);
+	return $self->provision_server(%args);
     }
 }
 
+=head2 $server = $manager->get_server(-name=>$name,%other_args)
+
+=head2 $server = $manager->get_server($name)
+
+Return an existing VM::EC2::Staging::Server object having the
+indicated symbolic name, or create a new server if one with this name
+does not already exist. The server's instance characteristics will be
+configured according to the options passed to the manager at create
+time (e.g. -availability_zone, -instance_type). These options can be
+overridden by %other_args. See provision_volume() for details.
+
+=cut
+
 sub get_server {
     my $self = shift;
+    unshift @_,'-name' if @_ == 1;
+
     my %args = @_;
     $args{-name}              ||= $self->new_server_name;
 
@@ -501,6 +555,13 @@ sub get_server {
     $server->start unless $server->is_up;
     return $server;
 }
+
+=head2 $server = $manager->provision_server(%args)
+
+Provision a new VM::EC2::Staging::Server object according to the
+options. Default options are taken from the
+
+=cut
 
 sub provision_server {
     my $self    = shift;
