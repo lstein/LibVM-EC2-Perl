@@ -294,10 +294,10 @@ END
     die $@ if $@;
     }
 
-    my $obj = bless \%args,$class;
+    my $obj = bless \%args,ref $class || $class;
     weaken($Managers{$obj->ec2->endpoint} = $obj);
     if ($args{-scan}) {
-	$obj->info("scanning for existing staging servers and volumes\n");
+	$obj->info("Scanning for existing staging servers and volumes in ",$obj->ec2->endpoint,"\n");
 	$obj->scan_region;
     }
     return $obj;
@@ -722,6 +722,7 @@ sub provision_volume {
 	$self->info("Provisioning a new $args{-size} GB $args{-fstype} volume\n");
     }
 
+    $self->info("Obtaining a staging server in zone $args{-availability_zone}\n");
     my $server = $self->get_server_in_zone($args{-availability_zone});
     $server->start unless $server->ping;
     my $volume = $server->provision_volume(%args);
@@ -962,6 +963,12 @@ sub _copy_ebs_image {
     $self->info("Copying EBS volumes attached to this image (this may take a long time)\n");
     my @bd              = @$block_devices;
     my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @bd;
+    
+    $self->info("Waiting for all snapshots to complete. This may take a long time.\n");
+    my $state = $dest_manager->ec2->wait_for_snapshots(@dest_snapshots);
+    my @errored = grep {$state->{$_} eq 'error'} @dest_snapshots;
+    croak ("Snapshot(s) @errored could not be completed due to an error")
+	if @errored;
 
     # create the new block device mapping
     my @mappings;
@@ -972,14 +979,22 @@ sub _copy_ebs_image {
 	push @mappings,$dest;
     }
 
-    return $dest_manager->ec2->register_image(-name                 => $name,
-					      -root_device_name     => $root_device,
-					      -block_device_mapping => \@mappings,
-					      -description          => $description,
-					      -architecture         => $architecture,
-					      -kernel_id            => $kernel,
-					      $ramdisk ? (-ramdisk_id  => $ramdisk): ()
+    # ensure choose a unique name
+    if ($dest_manager->ec2->describe_images({name => $name})) {
+	print STDERR "An image named '$name' already exists in destination region. ";
+	$name = $self->_token($name);
+	print STDERR "Renamed to '$name'\n";
+    }
+    my $img =  $dest_manager->ec2->register_image(-name                 => $name,
+						  -root_device_name     => $root_device,
+						  -block_device_mapping => \@mappings,
+						  -description          => $description,
+						  -architecture         => $architecture,
+						  -kernel_id            => $kernel,
+						  $ramdisk ? (-ramdisk_id  => $ramdisk): ()
 	);
+    $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
+    return $img;
 }
 
 sub copy_snapshot {
@@ -987,7 +1002,7 @@ sub copy_snapshot {
     my ($snapId,$dest_manager) = @_;
     my $snap   = $self->ec2->describe_snapshots($snapId) 
 	or croak "Couldn't find snapshot for $snapId";
-    my $description = "duplicate of $snap, created by ".__PACKAGE__." during image copying";
+    my $description = "duplicate of $snap, created by ".__PACKAGE__." during snapshot copying";
 
     my $source = $self->provision_volume(-snapshot_id=>$snapId) 
 	or croak "Couldn't mount volume for $snapId";
