@@ -672,7 +672,7 @@ sub wait_for_instances {
     my @instances = @_;
     $self->ec2->wait_for_instances(@instances);
     my %pending = map {$_=>$_} grep {$_->current_status eq 'running'} @instances;
-    $self->info("waiting for ssh daemon on @instances.\n") if %pending;
+    $self->info("Waiting for ssh daemon on @instances.\n") if %pending;
     while (%pending) {
 	for my $s (values %pending) {
 	    unless ($s->ping) {
@@ -722,7 +722,7 @@ sub provision_volume {
 	$self->info("Provisioning a new $args{-size} GB $args{-fstype} volume\n");
     }
 
-    $self->info("Obtaining a staging server in zone $args{-availability_zone}\n");
+    $self->info("Obtaining a staging server in appropriate availability zone $args{-availability_zone}\n");
     my $server = $self->get_server_in_zone($args{-availability_zone});
     $server->start unless $server->ping;
     my $volume = $server->provision_volume(%args);
@@ -898,14 +898,13 @@ sub _select_used_zone {
 #############################################
 sub copy_image {
     my $self = shift;
-    my ($image,$destination) = @_;
+    my ($imageId,$destination) = @_;
     my $ec2 = $self->ec2;
 
-    $image = $ec2->describe_images($image)
-	unless ref $image && $image->isa('VM::EC2::Image');
-    
+    my $image = ref $imageId && $imageId->isa('VM::EC2::Image') ? $imageId 
+  	                                                        : $ec2->describe_images($imageId);
     $image       
-	or croak "Invalid image '$image'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+	or croak "Invalid image '$imageId'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
     $image->imageType eq 'machine' 
 	or croak "$image is not an AMI: usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
     
@@ -938,11 +937,17 @@ sub copy_image {
     }
 }
 
+sub _copy_instance_image {
+    my $self = shift;
+    croak "This module is currently unable to copy instance-backed AMIs between regions.\n";
+}
+
 sub _copy_ebs_image {
     my $self = shift;
     my ($image,$dest_manager) = @_;
 
     # hashref with keys 'name', 'description','architecture','kernel','ramdisk','block_devices','root_device'
+    # 'is_public','authorized_users'
     $self->info("Gathering information about image $image\n");
     my $info = $self->_gather_image_info($image);
 
@@ -994,6 +999,9 @@ sub _copy_ebs_image {
 						  $ramdisk ? (-ramdisk_id  => $ramdisk): ()
 	);
     $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
+    # copy launch permissions
+    $img->make_public(1)                                     if $info->{is_public};
+    $img->add_authorized_users(@{$info->{authorized_users}}) if @{$info->{authorized_users}};
     return $img;
 }
 
@@ -1007,7 +1015,7 @@ sub copy_snapshot {
     my $source = $self->provision_volume(-snapshot_id=>$snapId) 
 	or croak "Couldn't mount volume for $snapId";
     my $fstype  = $source->fstype;
-    my $blkinfo = $source->server->scmd('sudo','blkid',$source->mtdev);
+    my $blkinfo = $source->server->scmd('sudo','blkid','-p',$source->mtdev);
     my ($uuid)  = $blkinfo =~ /UUID="(\S+)"/;
     my ($label) = $blkinfo =~ /LABEL="(\S+)"/;
     
@@ -1027,6 +1035,10 @@ sub copy_snapshot {
     
     $dest->unmount; # don't want this mounted; otherwise it will be unmounted & remounted
     my $snapshot = $dest->create_snapshot($description);
+
+    # copy snapshot tags
+    my $tags = $snap->tags;
+    $snapshot->add_tags($tags);
     
     # we don't need these volumes now
     $source->delete;
@@ -1046,6 +1058,8 @@ sub _gather_image_info {
 	ramdisk      =>   $image->ramdiskId || undef,
 	root_device  =>   $image->rootDeviceName,
 	block_devices=>   [$image->blockDeviceMapping],
+	is_public    =>   $image->isPublic,
+	authorized_users => [$image->authorized_users],
     };
 }
 

@@ -225,7 +225,7 @@ sub provision_volume {
     $s->current_status eq 'attached'                 or croak "Couldn't attach $vol to $instance via $ebs_device";
 
     if ($needs_resize) {
-	$self->scmd("sudo blkid $mt_device") =~ /"ext\d"/   or croak "Sorry, but can only resize ext volumes ";
+	$self->scmd("sudo blkid -p $mt_device") =~ /"ext\d"/   or croak "Sorry, but can only resize ext volumes ";
 	$self->info("Checking filesystem...\n");
 	$self->ssh("sudo /sbin/e2fsck -fy $mt_device")          or croak "Couldn't check $mt_device";
 	$self->info("Resizing previously-used volume to $size GB...\n");
@@ -249,6 +249,7 @@ sub provision_volume {
 			  :/^ntfs/    ? "-U $uuid"
 			  :'')
 	          : '';
+	my $quiet = $self->manager->quiet && ! /msdos|vfat/ ? "-q" : '';
 
 	my $apt_packages = $self->_mkfs_packages();
 	if (my $package = $apt_packages->{$fstype}) {
@@ -256,7 +257,7 @@ sub provision_volume {
 	    $self->ssh("if [ ! -e /sbin/mkfs.$fstype ]; then sudo apt-get update; sudo apt-get -y install $package; fi");
 	}
 	$self->info("Making $fstype filesystem on staging volume...\n");
-	$self->ssh("sudo /sbin/mkfs.$fstype $label $uu $mt_device") or croak "Couldn't make filesystem on $mt_device";
+	$self->ssh("sudo /sbin/mkfs.$fstype $quiet $label $uu $mt_device") or croak "Couldn't make filesystem on $mt_device";
 
 	if ($uuid && !$uu) {
 	    $self->info("Setting the UUID for the volume\n");
@@ -355,12 +356,11 @@ sub _find_mount {
 sub mount_volume {
     my $self = shift;
     my $vol  = shift;
-    if ($vol->mtpt ne 'none') {
-	if ($vol->mtpt) {
-	    $self->_mount($vol->mtdev,$vol->mtpt);
-	} else {
-	    $self->_find_or_create_mount($vol);
-	}
+    return if $vol->mtpt eq 'none';
+    if ($vol->mtpt) {
+	$self->_mount($vol->mtdev,$vol->mtpt);
+    } else {
+	$self->_find_or_create_mount($vol);
     }
     $vol->mounted(1);
 }
@@ -478,6 +478,8 @@ sub rsync {
     my @source_paths      = map {$_->[1]} @source;
     my $dest_path         = $dest->[1];
 
+    my $rsync_args        = $self->_rsync_args;
+
     # localhost           => DataTransferServer
     if (!$source_host && UNIVERSAL::isa($dest_host,__PACKAGE__)) {
 	return $dest_host->_rsync_put(@source_paths,$dest_path);
@@ -489,7 +491,7 @@ sub rsync {
     }
 
     if ($source_host eq $dest_host) {
-	return $source_host->ssh('sudo','rsync','-avz',@source_paths,$dest_path);
+	return $source_host->ssh('sudo','rsync',$rsync_args,@source_paths,$dest_path);
     }
 
     # DataTransferServer1 => DataTransferServer2
@@ -501,7 +503,7 @@ sub rsync {
     my $ssh_args = $self->_ssh_escaped_args;
     my $keyfile  = $self->keyfile;
     $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-    return $source_host->ssh('sudo','rsync','-avz',
+    return $source_host->ssh('sudo','rsync',$rsync_args,
 			     '-e',"'ssh $ssh_args'",
 			     "--rsync-path='sudo rsync'",
 			     @source_paths,"$dest_ip:$dest_path");
@@ -517,15 +519,17 @@ sub dd {
     my ($vol1,$vol2) = @_;
     my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
     my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
+    my $hush     = $self->manager->quiet ? '2>/dev/null' : '';
+
     if ($server1 eq $server2) {
-	$server1->ssh("sudo dd if=$device1 of=$device2");
+	$server1->ssh("sudo dd if=$device1 of=$device2 $hush");
     }  else {
 	my $keyname  = $self->_authorize($server1,$server2);
 	my $dest_ip  = $server2->instance->dnsName;
 	my $ssh_args = $self->_ssh_escaped_args;
 	my $keyfile  = $self->keyfile;
 	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-	$server1->ssh("sudo dd if=$device1 | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2'");
+	$server1->ssh("sudo dd if=$device1 $hush | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
     }
 }
 
@@ -556,8 +560,9 @@ sub _rsync_put {
     $dest        =~ s/^.+://;  # get rid of hostname, if it is there
     my $host     = $self->instance->dnsName;
     my $ssh_args = $self->_ssh_escaped_args;
+    my $rsync_args = $self->_rsync_args;
     $self->info("Beginning rsync...\n");
-    system("rsync -avz -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest") == 0;
+    system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest") == 0;
 }
 
 sub _rsync_get {
@@ -571,10 +576,11 @@ sub _rsync_get {
 	(my $path = $_) =~ s/^.+://;  # get rid of host part, if it is there
 	$_ = "$host:$path";
     }
-    my $ssh_args = $self->_ssh_escaped_args;
+    my $ssh_args   = $self->_ssh_escaped_args;
+    my $rsync_args = $self->_rsync_args;
     
     $self->info("Beginning rsync...\n");
-    system("rsync -avz -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
+    system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
 }
 
 sub ssh {
@@ -675,6 +681,12 @@ sub _ssh_escaped_args {
     return join ' ',@args;
 }
 
+sub _rsync_args {
+    my $self = shift;
+    my $quiet = $self->manager->quiet;
+    return $quiet ? '-aqz' : '-avz';
+}
+
 sub create_snapshot {
     my $self = shift;
     my ($vol,$description) = @_;
@@ -686,8 +698,8 @@ sub create_snapshot {
     my $d = $self->volume_description($vol);
     $self->info("snapshotting $vol\n");
     my $snap = $volume->create_snapshot($description) or croak "Could not snapshot $vol: ",$vol->ec2->error_str;
-    $snap->add_tag(StagingName => $vol->name);
-    $snap->add_tag(Name => "Staging volume ".$vol->name);
+    $snap->add_tag(StagingName => $vol->name                  );
+    $snap->add_tag(Name        => "Staging volume ".$vol->name);
     $self->remount_volume($vol);
     return $snap;
 }
