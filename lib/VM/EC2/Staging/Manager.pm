@@ -501,7 +501,7 @@ sub _scan_volumes {
 }
 
 
-=head2 $server = $manager->get_server_in_zone(-zone=>$availability_zone,%other_args)
+=head2 $server = $manager->get_server_in_zone(-zone=>$availability_zone,%other_options)
 
 =head2 $server = $manager->get_server_in_zone($availability_zone)
 
@@ -529,7 +529,7 @@ sub get_server_in_zone {
     }
 }
 
-=head2 $server = $manager->get_server(-name=>$name,%other_args)
+=head2 $server = $manager->get_server(-name=>$name,%other_options)
 
 =head2 $server = $manager->get_server($name)
 
@@ -556,10 +556,42 @@ sub get_server {
     return $server;
 }
 
-=head2 $server = $manager->provision_server(%args)
+=head2 $server = $manager->provision_server(%options)
 
-Provision a new VM::EC2::Staging::Server object according to the
-options. Default options are taken from the
+Create a new VM::EC2::Staging::Server object according to the passed
+options, which override the default options provided by the Manager
+object.
+
+ -name          Name for this server, which can be used to retrieve
+                it later with a call to get_server().
+
+ -architecture  Architecture for the newly-created server
+                instances (e.g. "i386").
+
+ -instance_type Type of the newly-created server (e.g. "m1.small").
+
+ -root_type     Root type for the server ("ebs" or "instance-store").
+
+ -image_name    Name or ami ID of the AMI to use for creating the
+                instance for the server. If the image name begins with
+                "ami-", then it is treated as an AMI ID. Otherwise it
+                is treated as a name pattern and will be used to
+                search the AMI name field using the wildcard search
+                "*$name*".  Names work better than AMI ids here,
+                because the latter change from one region to
+                another. If multiple matching image candidates are
+                found, then an alpha sort on the name is used to find
+                the image with the highest alpha sort value, which
+                happens to work with Ubuntu images to find the latest
+                release.
+
+ -availability_zone Availability zone for the server, or undef to
+                choose an availability zone randomly.
+
+ -username      Username to use for ssh connections. Defaults to 
+                "ubuntu". Note that this user must be able to use
+                sudo on the instance without providing a password,
+                or functionality of this server will be limited.
 
 =cut
 
@@ -754,6 +786,7 @@ sub get_volume {
     my %vols = map {$_->name => $_} $self->volumes;
     return $vols{$args{-name}} || $self->provision_volume(%args);
 }
+
 
 sub provision_volume {
     my $self = shift;
