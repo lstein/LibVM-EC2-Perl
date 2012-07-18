@@ -1004,6 +1004,7 @@ sub copy_snapshot {
 	) or croak "Couldn't create new destination volume for $snapId";
 
     if ($fstype eq 'raw') {
+	$self->info("Using dd for block level disk copy (will take a while)\n");
 	$source->dd($dest)    or croak "dd failed";
     } else {
 	# this now works?

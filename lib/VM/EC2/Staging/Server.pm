@@ -376,6 +376,7 @@ sub unmount_volume {
     my $self = shift;
     my $vol  = shift;
     my $mtpt = $vol->mtpt;
+    return unless $mtpt;
     return if $mtpt eq 'none';
     return unless $vol->mounted;
     $self->info("unmounting $vol...\n");
