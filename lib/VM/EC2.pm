@@ -492,6 +492,32 @@ sub endpoint {
     $d;
  }
 
+=head2 $region = $ec2->region(<$new_region>)
+
+Get or set the EC2 region manipulated by this module. This has the side effect
+of changing the endpoint.
+
+=cut
+
+sub region { 
+    my $self = shift;
+
+    my $d    = $self->{endpoint};
+    $d       =~ s!^https?://!!;
+    $d       =~ s!/$!!;
+
+    my @regions = $self->describe_regions;
+    my ($current_region) = grep {$_->regionEndpoint eq $d} @regions;
+
+    if (@_) {
+	my $new_region = shift;
+	my ($region) = grep {/$new_region/} @regions;
+	$region or croak "unknown region $new_region";
+	$self->endpoint($region->regionEndpoint);
+    }
+    return $current_region;
+ }
+
 =head2 $ec2->raise_error($boolean)
 
 Change the handling of error conditions. Pass a true value to cause

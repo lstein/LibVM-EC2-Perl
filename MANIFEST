@@ -1,3 +1,4 @@
+bin/migrate-ebs-image.pl
 bin/sync_to_snapshot.pl
 Build.PL
 Changes

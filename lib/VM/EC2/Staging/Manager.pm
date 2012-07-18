@@ -93,26 +93,33 @@ process of provisioning and populating volumes, but it also provides a
 handy set of ssh commands that allow you to run remote commands
 programmatically.
 
-The manager also allows you to copy AMIs from one region to another,
-something that is otherwise hard to do right.
+The manager also allows you to copy EBS-backed AMIs and their attached
+volumes from one region to another, something that is otherwise
+difficult to do.
 
 The main classes are:
 
  VM::EC2::Staging::Manager -- A set of volume and server resources in
                               a single AWS region.
 
- VM::EC2::Staging::Server -- A named server running somewhere in the
+ VM::EC2::Staging::Server -- A staging server running somewhere in the
                              region. It is a VM::EC2::Instance
                              extended to provide remote command and
                              copy facilities.
 
- VM::EC2::Staging::Volume -- A named disk volume running somewhere in the
+ VM::EC2::Staging::Volume -- A staging disk volume running somewhere in the
                              region. It is a VM::EC2::Volume
                              extended to provide remote copy
                              facilities.
 
-See the perldoc for more information on Server and Volume
-    capabilities.
+Staging servers can provision volumes, format them, mount them, copy
+data between local and remote (virtual) machines, and execute secure
+shell commands. Staging volumes can mount themselves on servers, run a
+variety of filesystem-oriented commands, and invoke commands on the
+servers to copy data around locally and remotely.
+
+See L<VM::EC2::Staging::Server> and L<VM::EC2::Staging::Volume> for
+the full details.
 
 =head1 Constructors
 
@@ -294,10 +301,10 @@ END
     die $@ if $@;
     }
 
-    my $obj = bless \%args,$class;
+    my $obj = bless \%args,ref $class || $class;
     weaken($Managers{$obj->ec2->endpoint} = $obj);
     if ($args{-scan}) {
-	$obj->info("scanning for existing staging servers and volumes\n");
+	$obj->info("Scanning for existing staging servers and volumes in ",$obj->ec2->endpoint,"\n");
 	$obj->scan_region;
     }
     return $obj;
@@ -396,7 +403,7 @@ new one of the same name.
 
 sub default_reuse_volumes { 1               }
 
-=head2 $name = $manager->default_dot_directory_path
+=head2 $pathe = $manager->default_dot_directory_path
 
 Return the default value of the -dotdir argument
 ("$ENV{HOME}/.vm_ec2_staging"). This value instructs the manager to
@@ -411,6 +418,12 @@ sub default_dot_directory_path {
     return $dir;
 }
 
+=head2 $path = $manager->dot_directory([$new_directory])
+
+Get or set the dot directory which holds private key files.
+
+=cut
+
 sub dot_directory {
     my $self = shift;
     my $dir  = $self->dotdir;
@@ -420,6 +433,14 @@ sub dot_directory {
     }
     return $dir;
 }
+
+=head2 $manager->scan_region
+
+Synchronize internal list of managed servers and volumes with the EC2
+region. Called automatically during new() and needed only if servers &
+volumes are changed from outside the module while it is running.
+
+=cut
 
 # scan for staging instances in current region and cache them
 # into memory
@@ -479,19 +500,52 @@ sub _scan_volumes {
     }
 }
 
+
+=head2 $server = $manager->get_server_in_zone(-zone=>$availability_zone,%other_options)
+
+=head2 $server = $manager->get_server_in_zone($availability_zone)
+
+Return an existing VM::EC2::Staging::Server running in the indicated
+symbolic name, or create a new server if one with this name does not
+already exist. The server's instance characteristics will be
+configured according to the options passed to the manager at create
+time (e.g. -availability_zone, -instance_type). These options can be
+overridden by %other_args. See provision_volume() for details.
+
+=cut
+
 sub get_server_in_zone {
     my $self = shift;
-    my $zone = shift;
+    unshift @_,'-zone' if @_ == 1;
+    my %args = @_;
+    my $zone = $args{-availability_zone} or croak "must provide -availability_zone argument";
     if (my $servers = $Zones{$zone}{Servers}) {
-	return (values %{$servers})[0];
+	my $server = (values %{$servers})[0];
+	$server->start unless $server->is_up;
+	return $server;
     }
     else {
-	return $self->provision_server(-availability_zone => $zone);
+	return $self->provision_server(%args);
     }
 }
 
+=head2 $server = $manager->get_server(-name=>$name,%other_options)
+
+=head2 $server = $manager->get_server($name)
+
+Return an existing VM::EC2::Staging::Server object having the
+indicated symbolic name, or create a new server if one with this name
+does not already exist. The server's instance characteristics will be
+configured according to the options passed to the manager at create
+time (e.g. -availability_zone, -instance_type). These options can be
+overridden by %other_args. See provision_volume() for details.
+
+=cut
+
 sub get_server {
     my $self = shift;
+    unshift @_,'-name' if @_ == 1;
+
     my %args = @_;
     $args{-name}              ||= $self->new_server_name;
 
@@ -501,6 +555,45 @@ sub get_server {
     $server->start unless $server->is_up;
     return $server;
 }
+
+=head2 $server = $manager->provision_server(%options)
+
+Create a new VM::EC2::Staging::Server object according to the passed
+options, which override the default options provided by the Manager
+object.
+
+ -name          Name for this server, which can be used to retrieve
+                it later with a call to get_server().
+
+ -architecture  Architecture for the newly-created server
+                instances (e.g. "i386").
+
+ -instance_type Type of the newly-created server (e.g. "m1.small").
+
+ -root_type     Root type for the server ("ebs" or "instance-store").
+
+ -image_name    Name or ami ID of the AMI to use for creating the
+                instance for the server. If the image name begins with
+                "ami-", then it is treated as an AMI ID. Otherwise it
+                is treated as a name pattern and will be used to
+                search the AMI name field using the wildcard search
+                "*$name*".  Names work better than AMI ids here,
+                because the latter change from one region to
+                another. If multiple matching image candidates are
+                found, then an alpha sort on the name is used to find
+                the image with the highest alpha sort value, which
+                happens to work with Ubuntu images to find the latest
+                release.
+
+ -availability_zone Availability zone for the server, or undef to
+                choose an availability zone randomly.
+
+ -username      Username to use for ssh connections. Defaults to 
+                "ubuntu". Note that this user must be able to use
+                sudo on the instance without providing a password,
+                or functionality of this server will be limited.
+
+=cut
 
 sub provision_server {
     my $self    = shift;
@@ -672,7 +765,7 @@ sub wait_for_instances {
     my @instances = @_;
     $self->ec2->wait_for_instances(@instances);
     my %pending = map {$_=>$_} grep {$_->current_status eq 'running'} @instances;
-    $self->info("waiting for ssh daemon on @instances.\n") if %pending;
+    $self->info("Waiting for ssh daemon on @instances.\n") if %pending;
     while (%pending) {
 	for my $s (values %pending) {
 	    unless ($s->ping) {
@@ -693,6 +786,7 @@ sub get_volume {
     my %vols = map {$_->name => $_} $self->volumes;
     return $vols{$args{-name}} || $self->provision_volume(%args);
 }
+
 
 sub provision_volume {
     my $self = shift;
@@ -722,6 +816,7 @@ sub provision_volume {
 	$self->info("Provisioning a new $args{-size} GB $args{-fstype} volume\n");
     }
 
+    $self->info("Obtaining a staging server in appropriate availability zone $args{-availability_zone}\n");
     my $server = $self->get_server_in_zone($args{-availability_zone});
     $server->start unless $server->ping;
     my $volume = $server->provision_volume(%args);
@@ -897,14 +992,13 @@ sub _select_used_zone {
 #############################################
 sub copy_image {
     my $self = shift;
-    my ($image,$destination) = @_;
+    my ($imageId,$destination) = @_;
     my $ec2 = $self->ec2;
 
-    $image = $ec2->describe_images($image)
-	unless ref $image && $image->isa('VM::EC2::Image');
-    
+    my $image = ref $imageId && $imageId->isa('VM::EC2::Image') ? $imageId 
+  	                                                        : $ec2->describe_images($imageId);
     $image       
-	or croak "Invalid image '$image'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+	or croak "Invalid image '$imageId'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
     $image->imageType eq 'machine' 
 	or croak "$image is not an AMI: usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
     
@@ -937,11 +1031,17 @@ sub copy_image {
     }
 }
 
+sub _copy_instance_image {
+    my $self = shift;
+    croak "This module is currently unable to copy instance-backed AMIs between regions.\n";
+}
+
 sub _copy_ebs_image {
     my $self = shift;
     my ($image,$dest_manager) = @_;
 
     # hashref with keys 'name', 'description','architecture','kernel','ramdisk','block_devices','root_device'
+    # 'is_public','authorized_users'
     $self->info("Gathering information about image $image\n");
     my $info = $self->_gather_image_info($image);
 
@@ -962,6 +1062,12 @@ sub _copy_ebs_image {
     $self->info("Copying EBS volumes attached to this image (this may take a long time)\n");
     my @bd              = @$block_devices;
     my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @bd;
+    
+    $self->info("Waiting for all snapshots to complete. This may take a long time.\n");
+    my $state = $dest_manager->ec2->wait_for_snapshots(@dest_snapshots);
+    my @errored = grep {$state->{$_} eq 'error'} @dest_snapshots;
+    croak ("Snapshot(s) @errored could not be completed due to an error")
+	if @errored;
 
     # create the new block device mapping
     my @mappings;
@@ -972,14 +1078,25 @@ sub _copy_ebs_image {
 	push @mappings,$dest;
     }
 
-    return $dest_manager->ec2->register_image(-name                 => $name,
-					      -root_device_name     => $root_device,
-					      -block_device_mapping => \@mappings,
-					      -description          => $description,
-					      -architecture         => $architecture,
-					      -kernel_id            => $kernel,
-					      $ramdisk ? (-ramdisk_id  => $ramdisk): ()
+    # ensure choose a unique name
+    if ($dest_manager->ec2->describe_images({name => $name})) {
+	print STDERR "An image named '$name' already exists in destination region. ";
+	$name = $self->_token($name);
+	print STDERR "Renamed to '$name'\n";
+    }
+    my $img =  $dest_manager->ec2->register_image(-name                 => $name,
+						  -root_device_name     => $root_device,
+						  -block_device_mapping => \@mappings,
+						  -description          => $description,
+						  -architecture         => $architecture,
+						  -kernel_id            => $kernel,
+						  $ramdisk ? (-ramdisk_id  => $ramdisk): ()
 	);
+    $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
+    # copy launch permissions
+    $img->make_public(1)                                     if $info->{is_public};
+    $img->add_authorized_users(@{$info->{authorized_users}}) if @{$info->{authorized_users}};
+    return $img;
 }
 
 sub copy_snapshot {
@@ -987,12 +1104,12 @@ sub copy_snapshot {
     my ($snapId,$dest_manager) = @_;
     my $snap   = $self->ec2->describe_snapshots($snapId) 
 	or croak "Couldn't find snapshot for $snapId";
-    my $description = "duplicate of $snap, created by ".__PACKAGE__." during image copying";
+    my $description = "duplicate of $snap, created by ".__PACKAGE__." during snapshot copying";
 
     my $source = $self->provision_volume(-snapshot_id=>$snapId) 
 	or croak "Couldn't mount volume for $snapId";
     my $fstype  = $source->fstype;
-    my $blkinfo = $source->server->scmd('sudo','blkid',$source->mtdev);
+    my $blkinfo = $source->server->scmd('sudo','blkid','-p',$source->mtdev);
     my ($uuid)  = $blkinfo =~ /UUID="(\S+)"/;
     my ($label) = $blkinfo =~ /LABEL="(\S+)"/;
     
@@ -1013,6 +1130,10 @@ sub copy_snapshot {
     
     $dest->unmount; # don't want this mounted; otherwise it will be unmounted & remounted
     my $snapshot = $dest->create_snapshot($description);
+
+    # copy snapshot tags
+    my $tags = $snap->tags;
+    $snapshot->add_tags($tags);
     
     # we don't need these volumes now
     $source->delete;
@@ -1032,6 +1153,8 @@ sub _gather_image_info {
 	ramdisk      =>   $image->ramdiskId || undef,
 	root_device  =>   $image->rootDeviceName,
 	block_devices=>   [$image->blockDeviceMapping],
+	is_public    =>   $image->isPublic,
+	authorized_users => [$image->authorized_users],
     };
 }
 

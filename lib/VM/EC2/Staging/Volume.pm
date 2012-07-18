@@ -194,7 +194,7 @@ sub _spin_up {
 sub create_snapshot {
     my $self = shift;
     my $description = shift;
-    if ($self->mounted && (my $server = $self->server)) {
+    if (my $server = $self->server) {
 	my ($snap) = $server->create_snapshot($self => $description);
 	return $snap;
     } else {
