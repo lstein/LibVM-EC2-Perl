@@ -1,7 +1,7 @@
 package VM::EC2::Staging::Server;
 
 # high level interface for transferring data, and managing data snapshots
-# via a series of DataTransfer VMs.
+# via a series of Staging VMs.
 
 =head1 NAME
 
@@ -203,7 +203,7 @@ sub provision_volume {
 
     my $ec2      = $self->ec2;
     my $fstype   = $args{-fstype} || 'ext4';
-    my $mtpt     = $fstype eq 'raw' ? 'none' : ($args{-mount}  || $args{-mtpt} || '/mnt/DataTransfer/'.$name);
+    my $mtpt     = $fstype eq 'raw' ? 'none' : ($args{-mount}  || $args{-mtpt} || '/mnt/Staging/'.$name);
     my $username = $self->username;
     
     $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
@@ -239,6 +239,7 @@ sub provision_volume {
                    :/^vfat/    ? "-n '$label'"
                    :/^msdos/   ? "-n '$label'"
                    :/^ntfs/    ? "-L '$label'"
+		   :/^hfs/     ? "-v '$label'"
                    :'';
 	my $uu = $uuid ? ( /^ext/     ? "-U $uuid"
 			  :/^xfs/     ? ''
@@ -247,9 +248,10 @@ sub provision_volume {
 			  :/^vfat/    ? ''
 			  :/^msdos/   ? ''
 			  :/^ntfs/    ? "-U $uuid"
+			  :/^hfs/     ? ''
 			  :'')
 	          : '';
-	my $quiet = $self->manager->quiet && ! /msdos|vfat/ ? "-q" : '';
+	my $quiet = $self->manager->quiet && ! /msdos|vfat|hfs/ ? "-q" : '';
 
 	my $apt_packages = $self->_mkfs_packages();
 	if (my $package = $apt_packages->{$fstype}) {
@@ -297,6 +299,7 @@ sub _mkfs_packages {
 	reiserfs  => 'reiserfsprogs',
 	jfs       => 'jfsutils',
 	ntfs      => 'ntfsprogs',
+	hfs       => 'hfsprogs',
     }
 }
 
@@ -313,7 +316,7 @@ sub _find_or_create_mount {
 		die "$vol is attached to wrong server";
 	    ($mt_device,$mtpt) = $self->_find_mount($attachment->device);
 	    unless ($mtpt) {
-		$mtpt = $vol->tags->{StagingMtPt} || '/mnt/DataTransfer/'.$vol->name;
+		$mtpt = $vol->tags->{StagingMtPt} || '/mnt/Staging/'.$vol->name;
 		$self->_mount($mt_device,$mtpt);
 	    }
 
@@ -330,7 +333,7 @@ sub _find_or_create_mount {
 	my $s = $vol->attach($self->instanceId,$mt_device);
 	$self->ec2->wait_for_attachments($s);
 	$s->current_status eq 'attached' or croak "Can't attach $vol to $self";
-	$mtpt = $vol->tags->{StagingMtPt} || '/mnt/DataTransfer/'.$vol->name;
+	$mtpt = $vol->tags->{StagingMtPt} || '/mnt/Staging/'.$vol->name;
 	$self->_mount($mt_device,$mtpt);
     }
 

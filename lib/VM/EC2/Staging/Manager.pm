@@ -510,7 +510,7 @@ symbolic name, or create a new server if one with this name does not
 already exist. The server's instance characteristics will be
 configured according to the options passed to the manager at create
 time (e.g. -availability_zone, -instance_type). These options can be
-overridden by %other_args. See provision_volume() for details.
+overridden by %other_args. See provision_server() for details.
 
 =cut
 
@@ -577,7 +577,7 @@ object.
                 "ami-", then it is treated as an AMI ID. Otherwise it
                 is treated as a name pattern and will be used to
                 search the AMI name field using the wildcard search
-                "*$name*".  Names work better than AMI ids here,
+                "*$name*". Names work better than AMI ids here,
                 because the latter change from one region to
                 another. If multiple matching image candidates are
                 found, then an alpha sort on the name is used to find
@@ -648,17 +648,38 @@ sub _run_instance_args {
     return @args;
 }
 
+=head2 $server = $manager->find_server_by_instance($instance_id)
+
+Given an EC2 instanceId, return the corresponding
+VM::EC2::Staging::Server, if any.
+
+=cut
+
 sub find_server_by_instance {
     my $self  = shift;
     my $server = shift;
     return $Instances{$server};
 }
 
+=head2 $volume = $manager->find_volume_by_volid($volume_id)
+
+Given an EC2 volumeId, return the corresponding
+VM::EC2::Staging::Volume, if any.
+
+=cut
+
 sub find_volume_by_volid {
     my $self   = shift;
     my $volid = shift;
     return $Volumes{$volid};
 }
+
+=head2 $volume = $manager->find_volume_by_name($name)
+
+Given a staging name (assigned at volume creation time), return the
+corresponding VM::EC2::Staging::Volume, if any.
+
+=cut
 
 sub find_volume_by_name {
     my $self =  shift;
@@ -674,6 +695,13 @@ sub _select_server_by_zone {
     return $servers[0];
 }
 
+=head2 $server = $manager->register_server($server)
+
+Register a VM::EC2::Staging::Server object. Usually called
+internally.
+
+=cut
+
 sub register_server {
     my $self   = shift;
     my $server = shift;
@@ -681,6 +709,13 @@ sub register_server {
     $Zones{$zone}{Servers}{$server} = $server;
     $Instances{$server->instance}   = $server;
 }
+
+=head2 $manager->unregister_server($server)
+
+Forget about the existence of VM::EC2::Staging::Server. Usually called
+internally.
+
+=cut
 
 sub unregister_server {
     my $self   = shift;
@@ -690,10 +725,24 @@ sub unregister_server {
     delete $Instances{$server->instance};
 }
 
+=head2 @servers $manager->servers
+
+Return all registered VM::EC2::Staging::Servers in the zone managed by
+the manager.
+
+=cut
+
 sub servers {
     my $self = shift;
     return grep {$_->ec2->endpoint eq $self->ec2->endpoint} values %Instances;
 }
+
+=head2 $manager->register_volume($volume)
+
+Register a VM::EC2::Staging::Volume object. Usually called
+internally.
+
+=cut
 
 sub register_volume {
     my $self = shift;
@@ -702,6 +751,13 @@ sub register_volume {
     $Volumes{$vol->volumeId} = $vol;
 }
 
+=head2 $manager->unregister_volume($volume)
+
+Forget about a VM::EC2::Staging::Volume object. Usually called
+internally.
+
+=cut
+
 sub unregister_volume {
     my $self = shift;
     my $vol  = shift;
@@ -709,6 +765,13 @@ sub unregister_volume {
     delete $Zones{$zone}{$vol};
     delete $Volumes{$vol->volumeId};
 }
+
+=head2 $manager->start_all_servers
+
+Start all VM::EC2::Staging::Servers that are currently in the "stop"
+state.
+
+=cut
 
 sub start_all_servers {
     my $self = shift;
@@ -725,6 +788,13 @@ sub start_all_servers {
 	if $@ =~ /timeout/;
 }
 
+=head2 $manager->stop_all_servers
+
+Stop all VM::EC2::Staging::Servers that are currently in the "running"
+state.
+
+=cut
+
 sub stop_all_servers {
     my $self = shift;
     # my @servers = keys %Instances;  # allows this to run correctly during global destruct
@@ -734,14 +804,18 @@ sub stop_all_servers {
     $self->info("Stopping servers @servers.\n");
     $self->ec2->stop_instances(@servers);
     $self->ec2->wait_for_instances(@servers);
-    $self->unregister_server($_) foreach @servers;
 }
+
+=head2 $manager->terminate_all_servers
+
+Terminate all VM::EC2::Staging::Servers and unregister them.
+
+=cut
 
 sub terminate_all_servers {
     my $self = shift;
     my $ec2 = $self->ec2 or return;
-    my @servers  = grep {$_->ec2 eq $ec2} $self->servers;
-    @servers or return;
+    my @servers  = $self->servers or return;
     
     $self->info("Terminating servers @servers.\n");
     $ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
@@ -777,8 +851,24 @@ sub wait_for_instances {
     }
 }
 
+
+=head2 $volume = $manager->get_volume(-name=>$name,%other_options)
+
+=head2 $volume = $manager->get_volume($name)
+
+Return an existing VM::EC2::Staging::Volume object with the indicated
+symbolic name, or else create a new volume if one with this name does
+not already exist. The volume's characteristics will be configured
+according to the options in %other_args. See provision_volume() for
+details. If called with no arguments, this method returns Volume
+object with default characteristics and a randomly-assigned name.
+
+=cut
+
 sub get_volume {
     my $self = shift;
+
+    unshift @_,'-name' if @_ == 1;
     my %args = @_;
     $args{-name}              ||= $self->new_volume_name;
 
@@ -787,6 +877,87 @@ sub get_volume {
     return $vols{$args{-name}} || $self->provision_volume(%args);
 }
 
+
+=head2 $volume = $manager->provision_volume(%options)
+
+Create and register a new VM::EC2::Staging::Volume and mount it on a
+staging server in the appropriate availability zone. A new staging
+server will be created for this purpose if one does not already
+exist. 
+
+If you provide a symbolic name for the volume and the manager has
+previously snapshotted a volume by the same name, then the snapshot
+will be used to create the volume (this behavior can be suppressed by
+passing -reuse=>0). This allows for the following pattern for
+efficiently updating a snapshotted volume:
+
+ my $vol = $manager->provision_volume(-name=>'MyPictures',
+                                      -size=>10);
+ $vol->put('/usr/local/my_pictures/');   # will do an rsync from local directory
+ $vol->snapshot;  # write out to a snapshot
+ $vol->delete;
+
+You may also explicitly specify a volumeId or snapshotId. The former
+allows you to place an existing volume under management of
+VM::EC2::Staging::Manager and returns a corresponding staging volume
+object. The latter creates the staging volume from the indicated
+snapshot, irregardless of whether the snapshot was created by the
+staging manager at an earlier time.
+
+Newly-created staging volumes are automatically formatted as ext4
+filesystems and mounted on the staging server under
+/mnt/Staging/$name, where $name is the staging volume's symbolic
+name. The filesystem type and the mountpoint can be modified with the
+-fstype and -mount arguments, respectively. In addition, you may
+specify an -fstype of "raw", in which case the volume will be attached
+to a staging server (creating the server first if necessary) but not
+formatted or mounted. This is useful when creating multi-volume RAID
+or LVM setups.
+
+Options:
+
+ -name       Name of the staging volume. A fatal error issues if a staging
+             volume by this name already exists (use get_volume() to
+             avoid this).  If no name is provided, then a random
+             unique one is chosen for you.
+
+ -availability_zone 
+             Availability zone in which to create this
+             volume. If none is specified, then a zone is chosen that
+             reuses an existing staging server, if any.
+
+ -size       Size of the desired volume, in GB.
+
+ -fstype     Filesystem type for the volume, ext4 by default. Supported
+             types are ext2, ext3, ext4, xfs, reiserfs, jfs, hfs,
+             ntfs, vfat, msdos, and raw.
+
+ -mount      Mount point for this volume on the staging server (e.g. /opt/bin). 
+             Use with care, as there are no checks to prevent you from mounting
+             two staging volumes on top of each other or mounting over essential
+             operating system paths.
+
+ -label      Volume label. Only applies to filesystems that support labels
+             (all except hfs, vfat, msdos and raw).
+
+ -volume_id  Create the staging volume from an existing EBS volume with
+             the specified ID. Most other options are ignored in this
+             case.
+
+ -snapshot_id 
+             Create the staging volume from an existing EBS
+             snapshot. If a size is specified that is larger than the
+             snapshot, then the volume and its filesystem will be
+             automatically extended (this only works for ext volumes
+             at the moment). Shrinking of volumes is not currently
+             supported.
+
+ -reuse      If true, then the most recent snapshot created from a staging
+             volume of the same name is used to create the
+             volume. This is the default. Pass 0 to disable this
+             behavior.
+
+=cut
 
 sub provision_volume {
     my $self = shift;
@@ -797,7 +968,7 @@ sub provision_volume {
     $args{-volume_id}         ||= undef;
     $args{-snapshot_id}       ||= undef;
     $args{-reuse}               = $self->reuse_volumes unless defined $args{-reuse};
-    $args{-mount}             ||= '/mnt/DataTransfer/'.$args{-name};
+    $args{-mount}             ||= '/mnt/Staging/'.$args{-name}; # BUG: "/mnt/Staging" is hardcoded in multiple places
     $args{-fstype}            ||= 'ext4';
     $args{-availability_zone} ||= $self->_select_used_zone;
     $args{-label}             ||= $args{-name};

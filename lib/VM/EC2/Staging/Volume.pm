@@ -191,6 +191,8 @@ sub _spin_up {
 #    return $self->server.':'.$self->mtpt;
 #}
 
+sub snapshot {shift->create_snapshot(@_)}
+
 sub create_snapshot {
     my $self = shift;
     my $description = shift;
