@@ -995,6 +995,12 @@ sub provision_volume {
     return $volume;
 }
 
+=head2 @volumes = $manager->volumes
+
+Return all VM::EC2::Staging::Volumes managed in this zone.
+
+=cut
+
 sub volumes {
     my $self = shift;
     return grep {$_->ec2->endpoint eq $self->ec2->endpoint} values %Volumes;
@@ -1022,31 +1028,28 @@ sub _search_for_image {
     return $most_recent;
 }
 
+=head2 $group = $manager->security_group
+
+Returns or creates a security group with the permissions needed used
+to manage staging servers. Usually called internally.
+
+=cut
+
 sub security_group {
     my $self = shift;
     return $self->{security_group} ||= $self->_security_group();
 }
 
+=head2 $keypair = $manager->keypair
+
+Returns or creates the ssh keypair used internally by the manager to
+to access staging servers. Usually called internally.
+
+=cut
+
 sub keypair {
     my $self = shift;
     return $self->{keypair} ||= $self->_new_keypair();
-}
-
-sub create_snapshot {
-    my $self = shift;
-    my ($vol,$description) = @_;
-    my @snaps;
-    my $device = $vol->device;
-    my $mtpt   = $vol->mtpt;
-    my $volume = $vol->ebs;
-    $self->unmount_volume($vol);
-    my $d = $self->volume_description($vol);
-    $self->info("snapshotting $vol\n");
-    my $snap = $volume->create_snapshot($description) or croak "Could not snapshot $vol: ",$vol->ec2->error_str;
-    $snap->add_tag(StagingName => $vol->name);
-    $snap->add_tag(Name => "Staging volume ".$vol->name);
-    $self->remount_volume($vol);
-    return $snap;
 }
 
 sub _security_key {
