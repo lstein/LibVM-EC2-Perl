@@ -353,7 +353,7 @@ sub _rel2abs {
 sub _select_zone {
     my $self = shift;
     my $ec2  = shift;
-    if (my @servers = VM::EC2::Staging::Server->active_servers($ec2)) {
+    if (my @servers = VM::EC2::Staging::Server->_servers($ec2->endpoint)) {
 	return $servers[0]->instance->placement;
     } else {
 	my @zones = $ec2->describe_availability_zones;

@@ -80,7 +80,7 @@ use overload
     fallback => 1;
 
 use constant GB => 1_073_741_824;
-my $LastHost;
+my ($LastHost,$LastMt);
 
 our $AUTOLOAD;
 
@@ -434,20 +434,20 @@ sub resolve_path {
 	$path       = "/$path" if $path && $path !~ m!^/!;
 	$vol->_spin_up;
 	$servername = $LastHost = $vol->server;
-	my $mtpt    = $vol->mtpt;
+	my $mtpt    = $LastMt   = $vol->mtpt;
 	$pathname   = $mtpt;
 	$pathname  .= $path if $path;
     } elsif ($vpath =~ /^([^:]+):(.+)$/) {
 	$servername = $LastHost = $1;
-	$pathname   = $2;
+	$pathname   = $LastMt ? "$LastMt/$2" : $2;
     } elsif ($vpath =~ /^:(.+)$/) {
 	$servername = $LastHost;
-	$pathname   = $2;
+	$pathname   = $LastMt ? "$LastMt/$2" : $2;
     } else {
 	return [undef,$vpath];   # localhost
     }
 
-    my $server = VM::EC2::Staging::Manager->find_server_by_instance($servername)|| $servername;
+    my $server = VM::EC2::Staging::Manager->find_server_by_instance($servername) || $servername;
     unless (ref $server && $server->isa('VM::EC2::Staging::Server')) {
 	return [$server,$pathname];
     }
@@ -466,6 +466,7 @@ sub rsync {
 
     my @p    = @_;
     undef $LastHost;
+    undef $LastMt;
     my @paths = map {$self->resolve_path($_)} @p;
 
     my $dest   = pop @paths;
@@ -484,13 +485,23 @@ sub rsync {
 
     my $rsync_args        = $self->_rsync_args;
 
+    my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,__PACKAGE__);
+    my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,__PACKAGE__);
+
+    # localhost => localhost
+    if (!$source_host && !$dest_host) {
+	return system("rsync @source $dest") == 0;
+    }
+
     # localhost           => DataTransferServer
-    if (!$source_host && UNIVERSAL::isa($dest_host,__PACKAGE__)) {
+    if ($dest_is_server && !$src_is_server) {
+	@source_paths = map {"$source_host:$_"} @source_paths if $source_host;
 	return $dest_host->_rsync_put(@source_paths,$dest_path);
     }
 
     # DataTransferServer  => localhost
-    if (UNIVERSAL::isa($source_host,__PACKAGE__) && !$dest_host) {
+    if ($src_is_server && !$dest_is_server) {
+	$dest_path = "$dest_host:$dest_path" if $dest_host;
 	return $source_host->_rsync_get(@source_paths,$dest_path);
     }
 
@@ -688,7 +699,7 @@ sub _ssh_escaped_args {
 sub _rsync_args {
     my $self = shift;
     my $quiet = $self->manager->quiet;
-    return $quiet ? '-aqz' : '-avz';
+    return $quiet ? '-aqz' : '-az';
 }
 
 sub create_snapshot {

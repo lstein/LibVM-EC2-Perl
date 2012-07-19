@@ -320,103 +320,84 @@ sub find_manager {
     return $Managers{$endpoint};
 }
 
-=head2 $name = $manager->default_exit_behavior
+=head1 Instance Methods for Accessing Configuration Options
 
-Return the default exit behavior ("stop") when the manager terminates.
-Intended to be overridden in subclasses.
+This section documents accessor methods that allow you to examine or
+change configuration options that were set at create time. Called with
+an argument, the accessor changes the option and returns the option's
+previous value. Called without an argument, the accessor returns the
+option's current value.
 
-=cut
+=head2 $on_exit = $manager->on_exit([$new_behavior])
 
-sub default_exit_behavior { 'stop'        }
+Get or set the "on_exit" option, which specifies what to do with
+existing staging servers when the staging manager is destroyed. Valid
+values are "terminate", "stop" and "run".
 
-=head2 $name = $manager->default_image_name
+=head2 $reuse_key = $manager->reuse_key([$boolean])
 
-Return the default image name ('ubuntu-maverick-10.10') for use in
-creating new instances. Intended to be overridden in subclasses.
+Get or set the "reuse_key" option, which if true uses the same
+internally-generated ssh keypair for all running instances. If false,
+then a new keypair will be created for each staging server. The
+keypair will be destroyed automatically when the staging server
+terminates (but only if the staging manager initiates the termination
+itself).
 
-=cut
+=head2 $username = $manager->username([$new_username])
 
-sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
+Get or set the username used to log into staging servers.
 
-=head2 $name = $manager->default_user_name
+=head2 $architecture = $manager->architecture([$new_architecture])
 
-Return the default user name ('ubuntu') for use in creating new
-instances. Intended to be overridden in subclasses.
+Get or set the architecture (i386, x86_64) to use for launching
+new staging servers.
 
-=cut
+=head2 $root_type = $manager->root_type([$new_type])
 
-sub default_user_name     { 'ubuntu'      }
+Get or set the instance root type for new staging servers
+("instance-store", "ebs").
 
-=head2 $name = $manager->default_architecture
+=head2 $instance_type = $manager->instance_type([$new_type])
 
-Return the default instance architecture ('i386') for use in creating
-new instances. Intended to be overridden in subclasses.
+Get or set the instance type to use for new staging servers
+(e.g. "t1.micro"). I recommend that you use "m1.small" (the default)
+or larger instance types because of the extremely slow I/O of the
+micro instance. In addition, micro instances running Ubuntu have a
+known bug that prevents them from unmounting and remounting EBS
+volumes repeatedly on the same block device. This can lead to hangs
+when the staging manager tries to create volumes.
 
-=cut
+=head2 $reuse_volumes = $manager->reuse_volumes([$new_boolean])
 
-sub default_architecture  { 'i386'        }
+This gets or sets the "reuse_volumes" option, which if true causes the
+provision_volumes() call to create staging volumes from existing EBS
+volumes and snapshots that share the same staging manager symbolic
+name. See the discussion under VM::EC2->staging_manager(), and
+VM::EC2::Staging::Manager->provision_volume().
 
-=head2 $name = $manager->default_root_type
+=head2 $name = $manager->image_name([$new_name])
 
-Return the default instance root type ('instance-store') for use in
-creating new instances. Intended to be overridden in subclasses. Note
-that this value is ignored if the exit behavior is "stop", in which case an
-ebs-backed instance will be used. Also, the m1.micro instance type
-does not come in an instance-store form, so ebs will be used in this
-case as well.
+This gets or sets the "image_name" option, which is the AMI ID or AMI
+name to use when creating new staging servers. Names beginning with
+"ami-" are treated as AMI IDs, and everything else is treated as a
+pattern match on the AMI name.
 
-=cut
+=head2 $zone = $manager->availability_zone([$new_zone])
 
-sub default_root_type     { 'instance-store'}
+Get or set the default availability zone to use when creating new
+servers and volumes. An undef value allows the staging manager to
+choose the zone in a way that minimizes resources.
 
-=head2 $name = $manager->default_instance_type
+=head2 $boolean = $manager->quiet([$boolean])
 
-Return the default instance type ('m1.small') for use in
-creating new instances. Intended to be overridden in subclasses. We default
-to m1.small rather than a micro instance because the I/O in m1.small
-is far faster than in t1.micro.
+Get or set the "quiet" flag, which if true suppresses all non-fatal
+warning and informational messages.
 
-=cut
+=head2 $boolean = $manager->scan([$boolean])
 
-sub default_instance_type { 'm1.small'      }
-
-=head2 $name = $manager->default_reuse_keys
-
-Return the default value of the -reuse_keys argument ('true'). This
-value allows the manager to create an ssh keypair once, and use the
-same one for all servers it creates over time. If false, then a new
-keypair is created for each server and then discarded when the server
-terminates.
-
-=cut
-
-sub default_reuse_keys    { 1               }
-
-=head2 $name = $manager->default_reuse_volumes
-
-Return the default value of the -reuse_volumes argument ('true'). This
-value instructs the manager to use the symbolic name of the volume to
-return an existing volume whenever a request is made to provision a
-new one of the same name.
-
-=cut
-
-sub default_reuse_volumes { 1               }
-
-=head2 $pathe = $manager->default_dot_directory_path
-
-Return the default value of the -dotdir argument
-("$ENV{HOME}/.vm_ec2_staging"). This value instructs the manager to
-use the symbolic name of the volume to return an existing volume
-whenever a request is made to provision a new one of the same name.
-
-=cut
-
-sub default_dot_directory_path {
-    my $class = shift;
-    my $dir = File::Spec->catfile($ENV{HOME},'.vm_ec2_staging');
-    return $dir;
-}
+Get or set the "scan" flag, which if true will cause the zone to be
+scanned quickly for existing managed servers and volumes when the
+manager is first created.
 
 =head2 $path = $manager->dot_directory([$new_directory])
 
@@ -434,127 +415,12 @@ sub dot_directory {
     return $dir;
 }
 
-=head2 $manager->scan_region
+=head1 Instance Methods for Managing Staging Servers
 
-Synchronize internal list of managed servers and volumes with the EC2
-region. Called automatically during new() and needed only if servers &
-volumes are changed from outside the module while it is running.
-
-=cut
-
-# scan for staging instances in current region and cache them
-# into memory
-# status should be...
-# -on_exit => {'terminate','stop','run'}
-sub scan_region {
-    my $self = shift;
-    my $ec2  = shift || $self->ec2;
-    $self->_scan_instances($ec2);
-    $self->_scan_volumes($ec2);
-}
-
-sub _scan_instances {
-    my $self = shift;
-    my $ec2  = shift;
-    my @instances = $ec2->describe_instances({'tag:Role'            => 'StagingInstance',
-					      'instance-state-name' => ['running','stopped']});
-    for my $instance (@instances) {
-	my $keyname  = $instance->keyName                   or next;
-	my $keyfile  = $self->_check_keyfile($keyname)      or next;
-	my $username = $instance->tags->{'StagingUsername'} or next;
-	my $name     = $instance->tags->{StagingName} || $self->new_server_name;
-	my $server   = VM::EC2::Staging::Server->new(
-	    -name     => $name,
-	    -keyfile  => $keyfile,
-	    -username => $username,
-	    -instance => $instance,
-	    -endpoint => $self->ec2->endpoint,
-	    );
-	$self->register_server($server);
-    }
-}
-
-sub _scan_volumes {
-    my $self = shift;
-    my $ec2  = shift;
-
-    # now the volumes
-    my @volumes = $ec2->describe_volumes(-filter=>{'tag:Role'          => 'StagingVolume',
-						   'status'            => ['available','in-use']});
-    for my $volume (@volumes) {
-	my $status = $volume->status;
-	my $zone   = $volume->availabilityZone;
-
-	my %args;
-	$args{-endpoint} = $self->ec2->endpoint;
-	$args{-volume}   = $volume;
-	$args{-name}     = $volume->tags->{StagingName};
-
-	if (my $attachment = $volume->attachment) {
-	    $args{-server} = $self->find_server_by_instance($attachment->instance);
-	    $args{-mtpt}   = undef; # leave blank - volume will fill in when server is up
-	}
-
-	my $vol = VM::EC2::Staging::Volume->new(%args);
-	$self->register_volume($vol);
-    }
-}
-
-
-=head2 $server = $manager->get_server_in_zone(-zone=>$availability_zone,%other_options)
-
-=head2 $server = $manager->get_server_in_zone($availability_zone)
-
-Return an existing VM::EC2::Staging::Server running in the indicated
-symbolic name, or create a new server if one with this name does not
-already exist. The server's instance characteristics will be
-configured according to the options passed to the manager at create
-time (e.g. -availability_zone, -instance_type). These options can be
-overridden by %other_args. See provision_server() for details.
-
-=cut
-
-sub get_server_in_zone {
-    my $self = shift;
-    unshift @_,'-zone' if @_ == 1;
-    my %args = @_;
-    my $zone = $args{-availability_zone} or croak "must provide -availability_zone argument";
-    if (my $servers = $Zones{$zone}{Servers}) {
-	my $server = (values %{$servers})[0];
-	$server->start unless $server->is_up;
-	return $server;
-    }
-    else {
-	return $self->provision_server(%args);
-    }
-}
-
-=head2 $server = $manager->get_server(-name=>$name,%other_options)
-
-=head2 $server = $manager->get_server($name)
-
-Return an existing VM::EC2::Staging::Server object having the
-indicated symbolic name, or create a new server if one with this name
-does not already exist. The server's instance characteristics will be
-configured according to the options passed to the manager at create
-time (e.g. -availability_zone, -instance_type). These options can be
-overridden by %other_args. See provision_volume() for details.
-
-=cut
-
-sub get_server {
-    my $self = shift;
-    unshift @_,'-name' if @_ == 1;
-
-    my %args = @_;
-    $args{-name}              ||= $self->new_server_name;
-
-    # find servers of same name
-    my %servers = map {$_->name => $_} $self->servers;
-    my $server = $servers{$args{-name}} || $self->provision_server(%args);
-    $server->start unless $server->is_up;
-    return $server;
-}
+These methods allow you to create and interrogate staging
+servers. They each return one or more VM::EC2::Staging::Server
+objects. See L<VM::EC2::Staging::Server> for more information about
+what you can do with these servers once they are running.
 
 =head2 $server = $manager->provision_server(%options)
 
@@ -648,6 +514,61 @@ sub _run_instance_args {
     return @args;
 }
 
+=head2 $server = $manager->get_server(-name=>$name,%other_options)
+
+=head2 $server = $manager->get_server($name)
+
+Return an existing VM::EC2::Staging::Server object having the
+indicated symbolic name, or create a new server if one with this name
+does not already exist. The server's instance characteristics will be
+configured according to the options passed to the manager at create
+time (e.g. -availability_zone, -instance_type). These options can be
+overridden by %other_args. See provision_volume() for details.
+
+=cut
+
+sub get_server {
+    my $self = shift;
+    unshift @_,'-name' if @_ == 1;
+
+    my %args = @_;
+    $args{-name}              ||= $self->new_server_name;
+
+    # find servers of same name
+    my %servers = map {$_->name => $_} $self->servers;
+    my $server = $servers{$args{-name}} || $self->provision_server(%args);
+    $server->start unless $server->is_up;
+    return $server;
+}
+
+=head2 $server = $manager->get_server_in_zone(-zone=>$availability_zone,%other_options)
+
+=head2 $server = $manager->get_server_in_zone($availability_zone)
+
+Return an existing VM::EC2::Staging::Server running in the indicated
+symbolic name, or create a new server if one with this name does not
+already exist. The server's instance characteristics will be
+configured according to the options passed to the manager at create
+time (e.g. -availability_zone, -instance_type). These options can be
+overridden by %other_args. See provision_server() for details.
+
+=cut
+
+sub get_server_in_zone {
+    my $self = shift;
+    unshift @_,'-zone' if @_ == 1;
+    my %args = @_;
+    my $zone = $args{-availability_zone} or croak "must provide -availability_zone argument";
+    if (my $servers = $Zones{$zone}{Servers}) {
+	my $server = (values %{$servers})[0];
+	$server->start unless $server->is_up;
+	return $server;
+    }
+    else {
+	return $self->provision_server(%args);
+    }
+}
+
 =head2 $server = $manager->find_server_by_instance($instance_id)
 
 Given an EC2 instanceId, return the corresponding
@@ -661,70 +582,6 @@ sub find_server_by_instance {
     return $Instances{$server};
 }
 
-=head2 $volume = $manager->find_volume_by_volid($volume_id)
-
-Given an EC2 volumeId, return the corresponding
-VM::EC2::Staging::Volume, if any.
-
-=cut
-
-sub find_volume_by_volid {
-    my $self   = shift;
-    my $volid = shift;
-    return $Volumes{$volid};
-}
-
-=head2 $volume = $manager->find_volume_by_name($name)
-
-Given a staging name (assigned at volume creation time), return the
-corresponding VM::EC2::Staging::Volume, if any.
-
-=cut
-
-sub find_volume_by_name {
-    my $self =  shift;
-    my $name = shift;
-    my %volumes = map {$_->name => $_} $self->volumes;
-    return $volumes{$name};
-}
-
-sub _select_server_by_zone {
-    my $self = shift;
-    my $zone = shift;
-    my @servers = values %{$Zones{$zone}{Servers}};
-    return $servers[0];
-}
-
-=head2 $server = $manager->register_server($server)
-
-Register a VM::EC2::Staging::Server object. Usually called
-internally.
-
-=cut
-
-sub register_server {
-    my $self   = shift;
-    my $server = shift;
-    my $zone   = $server->placement;
-    $Zones{$zone}{Servers}{$server} = $server;
-    $Instances{$server->instance}   = $server;
-}
-
-=head2 $manager->unregister_server($server)
-
-Forget about the existence of VM::EC2::Staging::Server. Usually called
-internally.
-
-=cut
-
-sub unregister_server {
-    my $self   = shift;
-    my $server = shift;
-    my $zone   = eval{$server->placement} or return; # avoids problems at global destruction
-    delete $Zones{$zone}{Servers}{$server};
-    delete $Instances{$server->instance};
-}
-
 =head2 @servers $manager->servers
 
 Return all registered VM::EC2::Staging::Servers in the zone managed by
@@ -733,37 +590,9 @@ the manager.
 =cut
 
 sub servers {
-    my $self = shift;
-    return grep {$_->ec2->endpoint eq $self->ec2->endpoint} values %Instances;
-}
-
-=head2 $manager->register_volume($volume)
-
-Register a VM::EC2::Staging::Volume object. Usually called
-internally.
-
-=cut
-
-sub register_volume {
-    my $self = shift;
-    my $vol  = shift;
-    $Zones{$vol->availabilityZone}{Volumes}{$vol} = $vol;
-    $Volumes{$vol->volumeId} = $vol;
-}
-
-=head2 $manager->unregister_volume($volume)
-
-Forget about a VM::EC2::Staging::Volume object. Usually called
-internally.
-
-=cut
-
-sub unregister_volume {
-    my $self = shift;
-    my $vol  = shift;
-    my $zone = $vol->availabilityZone;
-    delete $Zones{$zone}{$vol};
-    delete $Volumes{$vol->volumeId};
+    my $self      = shift;
+    my $endpoint  = $self->ec2->endpoint;
+    return $self->_servers($endpoint);
 }
 
 =head2 $manager->start_all_servers
@@ -851,32 +680,12 @@ sub wait_for_instances {
     }
 }
 
+=head1 Instance Methods for Managing Staging Volumes
 
-=head2 $volume = $manager->get_volume(-name=>$name,%other_options)
-
-=head2 $volume = $manager->get_volume($name)
-
-Return an existing VM::EC2::Staging::Volume object with the indicated
-symbolic name, or else create a new volume if one with this name does
-not already exist. The volume's characteristics will be configured
-according to the options in %other_args. See provision_volume() for
-details. If called with no arguments, this method returns Volume
-object with default characteristics and a randomly-assigned name.
-
-=cut
-
-sub get_volume {
-    my $self = shift;
-
-    unshift @_,'-name' if @_ == 1;
-    my %args = @_;
-    $args{-name}              ||= $self->new_volume_name;
-
-    # find volume of same name
-    my %vols = map {$_->name => $_} $self->volumes;
-    return $vols{$args{-name}} || $self->provision_volume(%args);
-}
-
+These methods allow you to create and interrogate staging
+volumes. They each return one or more VM::EC2::Staging::Volume
+objects. See L<VM::EC2::Staging::Volume> for more information about
+what you can do with these staging volume objects.
 
 =head2 $volume = $manager->provision_volume(%options)
 
@@ -995,6 +804,163 @@ sub provision_volume {
     return $volume;
 }
 
+=head2 $volume = $manager->get_volume(-name=>$name,%other_options)
+
+=head2 $volume = $manager->get_volume($name)
+
+Return an existing VM::EC2::Staging::Volume object with the indicated
+symbolic name, or else create a new volume if one with this name does
+not already exist. The volume's characteristics will be configured
+according to the options in %other_args. See provision_volume() for
+details. If called with no arguments, this method returns Volume
+object with default characteristics and a randomly-assigned name.
+
+=cut
+
+sub get_volume {
+    my $self = shift;
+
+    unshift @_,'-name' if @_ == 1;
+    my %args = @_;
+    $args{-name}              ||= $self->new_volume_name;
+
+    # find volume of same name
+    my %vols = map {$_->name => $_} $self->volumes;
+    return $vols{$args{-name}} || $self->provision_volume(%args);
+}
+
+=head2 $result = $manager->rsync($src1,$src2,$src3...,$dest)
+
+This method provides remote synchronization (rsync) file-level copying
+between one or more source locations and a destination location via an
+ssh tunnel. Copying among arbitrary combinations of local and remote
+filesystems is supported, with the caveat that the remote filesystems
+must be contained on volumes and servers managed by this module (see
+below for a workaround).
+
+You may provide two or more directory paths. The last path will be
+treated as the copy destination, and the source paths will be treated
+as copy sources. All copying is performed using the -az options, which
+activates recursive directory copying in which ownership, modification
+times and permissions are preserved, and compresses the data to reduce
+network usage. 
+
+Source paths can be formatted in one of several ways:
+
+ /absolute/path 
+      Copy the contents of the directory /absolute/path located on the
+      local machine to the destination. This will create a
+      subdirectory named "path" on the destination disk. Add a slash
+      to the end of the path (i.e. "/absolute/path/") in order to
+      avoid creating this subdirectory on the destination disk.
+
+ ./relative/path
+      Relative paths work the way you expect, and depend on the current
+      working directory. The terminating slash rule applies.
+
+ $staging_volume
+      Pass a VM::EC2::Staging::Volume to copy the contents of the
+      volume to the destination disk starting at the root of the
+      volume. Note that you do *not* need to have any knowledge of the
+      mount point for this volume in order to copy its contents.
+
+ $staging_volume:/absolute/path
+      Copy a subdirectory of a staging volume to the destination disk.
+      The root of the volume is its top level, regardless of where it
+      is mounted on the staging server.  Because of string
+      interpolation magic, you can enclose staging volume object names
+      in quotes in order to construct the path, as in
+      "$picture_volume:/family/vacations/". As in local paths, a
+      terminating slash indicates that the contents of the last
+      directory in the path are to be copied without creating the
+      enclosing directory on the desetination. Note that you do *not*
+      need to have any knowledge of the mount point for this volume in
+      order to copy its contents.
+
+ $staging_volume:absolute/path
+ $staging_volume/absolute/path
+     These are alternatives to the previous syntax, and all have the
+     same effect as $staging_volume:relative/path. There is no
+
+ $staging_server:/absolute/path
+     Pass a staging server object and absolute path to copy the contents
+     of this path to the destination disk. Because of string interpolation
+     you can include server objects in quotes: "$my_server:/opt"
+
+ $staging_server:relative/path
+     This form will copy data from paths relative to the remote user's home
+     directory on the staging server. Typically not very useful, but supported.
+
+The same syntax is supported for destination paths, except that it
+makes no difference whether a path has a trailing slash or not.
+
+When specifying multiple source directories, all source directories must
+reside on the same local or remote machine. This is legal:
+
+ $manager->rsync("$picture_volume:/family/vacations",
+                 "$picture_volume:/family/picnics"
+                 => "$backup_volume:/recent_backups");
+
+This is not:
+
+ $manager->rsync("$picture_volume:/family/vacations",
+                 "$audio_volume:/beethoven"
+                 => "$backup_volume:/recent_backups");
+
+When specifying multiple sources, you may give the volume or server
+once for the first source and then start additional source paths with
+a ":" to indicate the same volume or server is to be used:
+
+ $manager->rsync("$picture_volume:/family/vacations",
+                 ":/family/picnics"
+                 => "$backup_volume:/recent_backups");
+
+When copying to/from the local machine, the rsync process will run as
+the user that the script was launched by. However, on remote servers
+managed by the staging manager, the rsync process will run as
+superuser.
+
+The rsync() method will also accept regular remote DNS names and IP
+addresses, optionally preceded by a username:
+
+ $manager->rsync("$picture_volume:/family/vacations" => 'fred@gw.harvard.edu:/tmp')
+
+For this to work properly, 
+
+=cut
+
+sub rsync {
+    my $self = shift;
+    VM::EC2::Staging::Server->rsync(@_);
+}
+
+=head2 $volume = $manager->find_volume_by_volid($volume_id)
+
+Given an EC2 volumeId, return the corresponding
+VM::EC2::Staging::Volume, if any.
+
+=cut
+
+sub find_volume_by_volid {
+    my $self   = shift;
+    my $volid = shift;
+    return $Volumes{$volid};
+}
+
+=head2 $volume = $manager->find_volume_by_name($name)
+
+Given a staging name (assigned at volume creation time), return the
+corresponding VM::EC2::Staging::Volume, if any.
+
+=cut
+
+sub find_volume_by_name {
+    my $self =  shift;
+    my $name = shift;
+    my %volumes = map {$_->name => $_} $self->volumes;
+    return $volumes{$name};
+}
+
 =head2 @volumes = $manager->volumes
 
 Return all VM::EC2::Staging::Volumes managed in this zone.
@@ -1004,161 +970,6 @@ Return all VM::EC2::Staging::Volumes managed in this zone.
 sub volumes {
     my $self = shift;
     return grep {$_->ec2->endpoint eq $self->ec2->endpoint} values %Volumes;
-}
-
-sub _search_for_image {
-    my $self = shift;
-    my %args = @_;
-    my $name = $args{-image_name};
-
-    $self->info("Searching for a staging image...");
-
-    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' :
-    $args{-root_type};
-
-    my @candidates = $name =~ /^ami-[0-9a-f]+/ ? $self->ec2->describe_images($name)
-	                                       : $self->ec2->describe_images({'name'             => "*$args{-image_name}*",
-									      'root-device-type' => $root_type,
-									      'architecture'     => $args{-architecture}});
-    return unless @candidates;
-    # this assumes that the name has some sort of timestamp in it, which is true
-    # of ubuntu images, but probably not others
-    my ($most_recent) = sort {$b->name cmp $a->name} @candidates;
-    $self->info("found $most_recent: ",$most_recent->name,"\n");
-    return $most_recent;
-}
-
-=head2 $group = $manager->security_group
-
-Returns or creates a security group with the permissions needed used
-to manage staging servers. Usually called internally.
-
-=cut
-
-sub security_group {
-    my $self = shift;
-    return $self->{security_group} ||= $self->_security_group();
-}
-
-=head2 $keypair = $manager->keypair
-
-Returns or creates the ssh keypair used internally by the manager to
-to access staging servers. Usually called internally.
-
-=cut
-
-sub keypair {
-    my $self = shift;
-    return $self->{keypair} ||= $self->_new_keypair();
-}
-
-sub _security_key {
-    my $self = shift;
-    my $ec2     = $self->ec2;
-    if ($self->reuse_key) {
-	my @candidates = $ec2->describe_key_pairs(-filter=>{'key-name' => 'staging-key-*'});
-	for my $c (@candidates) {
-	    my $name    = $c->keyName;
-	    my $keyfile = $self->key_path($name);
-	    return ($c,$keyfile) if -e $keyfile;
-	}
-    }
-    my $name    = $self->_token('staging-key');
-    $self->info("Creating keypair $name.\n");
-    my $kp          = $ec2->create_key_pair($name) or die $ec2->error_str;
-    my $keyfile     = $self->key_path($name);
-    my $private_key = $kp->privateKey;
-    open my $k,'>',$keyfile or die "Couldn't create $keyfile: $!";
-    chmod 0600,$keyfile     or die "Couldn't chmod  $keyfile: $!";
-    print $k $private_key;
-    close $k;
-    return ($kp,$keyfile);
-}
-
-sub _security_group {
-    my $self = shift;
-    my $ec2  = $self->ec2;
-    my @groups = $ec2->describe_security_groups(-filter=>{'tag:Role' => 'StagingGroup'});
-    return $groups[0] if @groups;
-    my $name = $self->_token('ssh');
-    $self->info("Creating staging security group $name.\n");
-    my $sg =  $ec2->create_security_group(-name  => $name,
-					  -description => "SSH security group created by ".__PACKAGE__
-	) or die $ec2->error_str;
-    $sg->authorize_incoming(-protocol   => 'tcp',
-			    -port       => 'ssh');
-    $sg->update or die $ec2->error_str;
-    $sg->add_tag(Role  => 'StagingGroup');
-    return $sg;
-
-}
-
-sub rsync {
-    my $self = shift;
-    VM::EC2::Staging::Server->rsync(@_);
-}
-
-sub volume_description {
-    my $self = shift;
-    my $vol  = shift;
-    my $name = ref $vol ? $vol->name : $vol;
-    return "Staging volume for $name created by ".__PACKAGE__;
-}
-
-sub info {
-    my $self = shift;
-    return if $self->quiet;
-    print STDERR @_;
-}
-
-# can be called as a class method
-sub _find_server_in_zone {
-    my $self = shift;
-    my $zone = shift;
-    my @servers = sort {$a->ping cmp $b->ping} values %{$Zones{$zone}{Servers}};
-    return unless @servers;
-    return $servers[-1];
-}
-
-sub active_servers {
-    my $self = shift;
-    my $ec2  = shift; # optional
-    my @servers = values %Instances;
-    return @servers unless $ec2;
-    return grep {$_->ec2 eq $ec2} @servers;
-}
-
-sub key_path {
-    my $self    = shift;
-    my $keyname = shift;
-    return File::Spec->catfile($self->dot_directory,"${keyname}.pem")
-}
-
-sub _check_keyfile {
-    my $self = shift;
-    my $keyname = shift;
-    my $dotpath = $self->dot_directory;
-    opendir my $d,$dotpath or die "Can't opendir $dotpath: $!";
-    while (my $file = readdir($d)) {
-	if ($file =~ /^$keyname.pem/) {
-	    return $1,$self->key_path($keyname,$1);
-	}
-    }
-    closedir $d;
-    return;
-}
-
-sub _select_used_zone {
-    my $self = shift;
-    if (my @servers = $self->servers) {
-	my @up     = grep {$_->ping} @servers;
-	my $server = $up[0] || $servers[0];
-	return $server->placement;
-    } elsif (my $zone = $self->availability_zone) {
-	return $zone;
-    } else {
-	return;
-    }
 }
 
 #############################################
@@ -1316,6 +1127,402 @@ sub copy_snapshot {
     return $snapshot;
 }
 
+=head1 Internal Methods
+
+This section documents internal methods that are not normally called
+by end-user scripts but may be useful in subclasses. In addition,
+there are a number of undocumented internal methods that begin with
+the "_" character for which you will need to access the source code.
+
+=head2 $name = $manager->default_exit_behavior
+
+Return the default exit behavior ("stop") when the manager terminates.
+Intended to be overridden in subclasses.
+
+=cut
+
+sub default_exit_behavior { 'stop'        }
+
+=head2 $name = $manager->default_image_name
+
+Return the default image name ('ubuntu-maverick-10.10') for use in
+creating new instances. Intended to be overridden in subclasses.
+
+=cut
+
+sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
+
+=head2 $name = $manager->default_user_name
+
+Return the default user name ('ubuntu') for use in creating new
+instances. Intended to be overridden in subclasses.
+
+=cut
+
+sub default_user_name     { 'ubuntu'      }
+
+=head2 $name = $manager->default_architecture
+
+Return the default instance architecture ('i386') for use in creating
+new instances. Intended to be overridden in subclasses.
+
+=cut
+
+sub default_architecture  { 'i386'        }
+
+=head2 $name = $manager->default_root_type
+
+Return the default instance root type ('instance-store') for use in
+creating new instances. Intended to be overridden in subclasses. Note
+that this value is ignored if the exit behavior is "stop", in which case an
+ebs-backed instance will be used. Also, the m1.micro instance type
+does not come in an instance-store form, so ebs will be used in this
+case as well.
+
+=cut
+
+sub default_root_type     { 'instance-store'}
+
+=head2 $name = $manager->default_instance_type
+
+Return the default instance type ('m1.small') for use in
+creating new instances. Intended to be overridden in subclasses. We default
+to m1.small rather than a micro instance because the I/O in m1.small
+is far faster than in t1.micro.
+
+=cut
+
+sub default_instance_type { 'm1.small'      }
+
+=head2 $name = $manager->default_reuse_keys
+
+Return the default value of the -reuse_keys argument ('true'). This
+value allows the manager to create an ssh keypair once, and use the
+same one for all servers it creates over time. If false, then a new
+keypair is created for each server and then discarded when the server
+terminates.
+
+=cut
+
+sub default_reuse_keys    { 1               }
+
+=head2 $name = $manager->default_reuse_volumes
+
+Return the default value of the -reuse_volumes argument ('true'). This
+value instructs the manager to use the symbolic name of the volume to
+return an existing volume whenever a request is made to provision a
+new one of the same name.
+
+=cut
+
+sub default_reuse_volumes { 1               }
+
+=head2 $path = $manager->default_dot_directory_path
+
+Return the default value of the -dotdir argument
+("$ENV{HOME}/.vm_ec2_staging"). This value instructs the manager to
+use the symbolic name of the volume to return an existing volume
+whenever a request is made to provision a new one of the same name.
+
+=cut
+
+sub default_dot_directory_path {
+    my $class = shift;
+    my $dir = File::Spec->catfile($ENV{HOME},'.vm_ec2_staging');
+    return $dir;
+}
+
+=head2 $server = $manager->register_server($server)
+
+Register a VM::EC2::Staging::Server object. Usually called
+internally.
+
+=cut
+
+sub register_server {
+    my $self   = shift;
+    my $server = shift;
+    my $zone   = $server->placement;
+    $Zones{$zone}{Servers}{$server} = $server;
+    $Instances{$server->instance}   = $server;
+}
+
+=head2 $manager->unregister_server($server)
+
+Forget about the existence of VM::EC2::Staging::Server. Usually called
+internally.
+
+=cut
+
+sub unregister_server {
+    my $self   = shift;
+    my $server = shift;
+    my $zone   = eval{$server->placement} or return; # avoids problems at global destruction
+    delete $Zones{$zone}{Servers}{$server};
+    delete $Instances{$server->instance};
+}
+
+=head2 $manager->register_volume($volume)
+
+Register a VM::EC2::Staging::Volume object. Usually called
+internally.
+
+=cut
+
+sub register_volume {
+    my $self = shift;
+    my $vol  = shift;
+    $Zones{$vol->availabilityZone}{Volumes}{$vol} = $vol;
+    $Volumes{$vol->volumeId} = $vol;
+}
+
+=head2 $manager->unregister_volume($volume)
+
+Forget about a VM::EC2::Staging::Volume object. Usually called
+internally.
+
+=cut
+
+sub unregister_volume {
+    my $self = shift;
+    my $vol  = shift;
+    my $zone = $vol->availabilityZone;
+    delete $Zones{$zone}{$vol};
+    delete $Volumes{$vol->volumeId};
+}
+
+=head2 $pid = $manager->pid([$new_pid])
+
+Get or set the process ID of the script that is running the
+manager. This is used internally to detect the case in which the
+script has forked, in which case we do not want to invoke the manager
+class's destructor in the child process (because it may stop or
+terminate servers still in use by the parent process).
+
+=head2 $path = $manager->dotdir([$new_dotdir])
+
+Low-level version of dot_directory(), differing only in the fact that
+dot_directory will automatically create the path, including subdirectories.
+
+=cut
+
+=head2 $manager->scan_region
+
+Synchronize internal list of managed servers and volumes with the EC2
+region. Called automatically during new() and needed only if servers &
+volumes are changed from outside the module while it is running.
+
+=cut
+
+# scan for staging instances in current region and cache them
+# into memory
+# status should be...
+# -on_exit => {'terminate','stop','run'}
+sub scan_region {
+    my $self = shift;
+    my $ec2  = shift || $self->ec2;
+    $self->_scan_instances($ec2);
+    $self->_scan_volumes($ec2);
+}
+
+sub _scan_instances {
+    my $self = shift;
+    my $ec2  = shift;
+    my @instances = $ec2->describe_instances({'tag:Role'            => 'StagingInstance',
+					      'instance-state-name' => ['running','stopped']});
+    for my $instance (@instances) {
+	my $keyname  = $instance->keyName                   or next;
+	my $keyfile  = $self->_check_keyfile($keyname)      or next;
+	my $username = $instance->tags->{'StagingUsername'} or next;
+	my $name     = $instance->tags->{StagingName} || $self->new_server_name;
+	my $server   = VM::EC2::Staging::Server->new(
+	    -name     => $name,
+	    -keyfile  => $keyfile,
+	    -username => $username,
+	    -instance => $instance,
+	    -endpoint => $self->ec2->endpoint,
+	    );
+	$self->register_server($server);
+    }
+}
+
+sub _scan_volumes {
+    my $self = shift;
+    my $ec2  = shift;
+
+    # now the volumes
+    my @volumes = $ec2->describe_volumes(-filter=>{'tag:Role'          => 'StagingVolume',
+						   'status'            => ['available','in-use']});
+    for my $volume (@volumes) {
+	my $status = $volume->status;
+	my $zone   = $volume->availabilityZone;
+
+	my %args;
+	$args{-endpoint} = $self->ec2->endpoint;
+	$args{-volume}   = $volume;
+	$args{-name}     = $volume->tags->{StagingName};
+
+	if (my $attachment = $volume->attachment) {
+	    $args{-server} = $self->find_server_by_instance($attachment->instance);
+	    $args{-mtpt}   = undef; # leave blank - volume will fill in when server is up
+	}
+
+	my $vol = VM::EC2::Staging::Volume->new(%args);
+	$self->register_volume($vol);
+    }
+}
+
+=head2 $group = $manager->security_group
+
+Returns or creates a security group with the permissions needed used
+to manage staging servers. Usually called internally.
+
+=cut
+
+sub security_group {
+    my $self = shift;
+    return $self->{security_group} ||= $self->_security_group();
+}
+
+=head2 $keypair = $manager->keypair
+
+Returns or creates the ssh keypair used internally by the manager to
+to access staging servers. Usually called internally.
+
+=cut
+
+sub keypair {
+    my $self = shift;
+    return $self->{keypair} ||= $self->_new_keypair();
+}
+
+sub _security_key {
+    my $self = shift;
+    my $ec2     = $self->ec2;
+    if ($self->reuse_key) {
+	my @candidates = $ec2->describe_key_pairs(-filter=>{'key-name' => 'staging-key-*'});
+	for my $c (@candidates) {
+	    my $name    = $c->keyName;
+	    my $keyfile = $self->_key_path($name);
+	    return ($c,$keyfile) if -e $keyfile;
+	}
+    }
+    my $name    = $self->_token('staging-key');
+    $self->info("Creating keypair $name.\n");
+    my $kp          = $ec2->create_key_pair($name) or die $ec2->error_str;
+    my $keyfile     = $self->_key_path($name);
+    my $private_key = $kp->privateKey;
+    open my $k,'>',$keyfile or die "Couldn't create $keyfile: $!";
+    chmod 0600,$keyfile     or die "Couldn't chmod  $keyfile: $!";
+    print $k $private_key;
+    close $k;
+    return ($kp,$keyfile);
+}
+
+sub _security_group {
+    my $self = shift;
+    my $ec2  = $self->ec2;
+    my @groups = $ec2->describe_security_groups(-filter=>{'tag:Role' => 'StagingGroup'});
+    return $groups[0] if @groups;
+    my $name = $self->_token('ssh');
+    $self->info("Creating staging security group $name.\n");
+    my $sg =  $ec2->create_security_group(-name  => $name,
+					  -description => "SSH security group created by ".__PACKAGE__
+	) or die $ec2->error_str;
+    $sg->authorize_incoming(-protocol   => 'tcp',
+			    -port       => 'ssh');
+    $sg->update or die $ec2->error_str;
+    $sg->add_tag(Role  => 'StagingGroup');
+    return $sg;
+
+}
+
+=head2 $name = $manager->new_volume_name
+
+Returns a new random name for volumes provisioned without a -name
+argument. Currently names are in of the format "volume-12345678",
+where the numeric part are 8 random hex digits. Although no attempt is
+made to prevent naming collisions, the large number of possible names
+makes this unlikely.
+
+=cut
+
+sub new_volume_name {
+    return shift->_token('volume');
+}
+
+=head2 $name = $manager->new_server_name
+
+Returns a new random name for server provisioned without a -name
+argument. Currently names are in of the format "server-12345678",
+where the numeric part are 8 random hex digits.  Although no attempt
+is made to prevent naming collisions, the large number of possible
+names makes this unlikely.
+
+=cut
+
+sub new_server_name {
+    return shift->_token('server');
+}
+
+sub _token {
+    my $self = shift;
+    my $base = shift or croak "usage: _token(\$basename)";
+    return sprintf("$base-%08x",1+int(rand(0xFFFFFFFF)));
+}
+
+=head2 $description = $manager->volume_description($volume)
+
+This method is called to assign a description to newly-created
+volumes. The current format is "Staging volume for Foo created by
+VM::EC2::Staging::Manager", where Foo is the volume's symbolic name.
+
+=cut
+
+sub volume_description {
+    my $self = shift;
+    my $vol  = shift;
+    my $name = ref $vol ? $vol->name : $vol;
+    return "Staging volume for $name created by ".__PACKAGE__;
+}
+
+=head2 $manager->info("Informational message\n")
+
+Prints an informational message to standard error, unless the "quiet"
+option is set.
+
+=cut
+
+
+sub info {
+    my $self = shift;
+    return if $self->quiet;
+    print STDERR @_;
+}
+
+
+sub _search_for_image {
+    my $self = shift;
+    my %args = @_;
+    my $name = $args{-image_name};
+
+    $self->info("Searching for a staging image...");
+
+    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' :
+    $args{-root_type};
+
+    my @candidates = $name =~ /^ami-[0-9a-f]+/ ? $self->ec2->describe_images($name)
+	                                       : $self->ec2->describe_images({'name'             => "*$args{-image_name}*",
+									      'root-device-type' => $root_type,
+									      'architecture'     => $args{-architecture}});
+    return unless @candidates;
+    # this assumes that the name has some sort of timestamp in it, which is true
+    # of ubuntu images, but probably not others
+    my ($most_recent) = sort {$b->name cmp $a->name} @candidates;
+    $self->info("found $most_recent: ",$most_recent->name,"\n");
+    return $most_recent;
+}
+
 sub _gather_image_info {
     my $self  = shift;
     my $image = shift;
@@ -1357,6 +1564,64 @@ sub _match_kernel {
     return $candidates[0];
 }
 
+sub _check_keyfile {
+    my $self = shift;
+    my $keyname = shift;
+    my $dotpath = $self->dot_directory;
+    opendir my $d,$dotpath or die "Can't opendir $dotpath: $!";
+    while (my $file = readdir($d)) {
+	if ($file =~ /^$keyname.pem/) {
+	    return $1,$self->_key_path($keyname,$1);
+	}
+    }
+    closedir $d;
+    return;
+}
+
+sub _select_server_by_zone {
+    my $self = shift;
+    my $zone = shift;
+    my @servers = values %{$Zones{$zone}{Servers}};
+    return $servers[0];
+}
+
+sub _select_used_zone {
+    my $self = shift;
+    if (my @servers = $self->servers) {
+	my @up     = grep {$_->ping} @servers;
+	my $server = $up[0] || $servers[0];
+	return $server->placement;
+    } elsif (my $zone = $self->availability_zone) {
+	return $zone;
+    } else {
+	return;
+    }
+}
+
+sub _key_path {
+    my $self    = shift;
+    my $keyname = shift;
+    return File::Spec->catfile($self->dot_directory,"${keyname}.pem")
+}
+
+# can be called as a class method
+sub _find_server_in_zone {
+    my $self = shift;
+    my $zone = shift;
+    my @servers = sort {$a->ping cmp $b->ping} values %{$Zones{$zone}{Servers}};
+    return unless @servers;
+    return $servers[-1];
+}
+
+sub _servers {
+    my $self      = shift;
+    my $endpoint  = shift; # optional
+    my @servers   = values %Instances;
+    return @servers unless $endpoint;
+    return grep {$_->ec2->endpoint eq $endpoint} @servers;
+}
+
+
 sub DESTROY {
     my $self = shift;
     if ($$ == $self->pid) {
@@ -1367,19 +1632,7 @@ sub DESTROY {
     delete $Managers{$self->ec2->endpoint};
 }
 
-sub new_volume_name {
-    return shift->_token('volume');
-}
 
-sub new_server_name {
-    return shift->_token('server');
-}
-
-sub _token {
-    my $self = shift;
-    my $base = shift or croak "usage: _token(\$basename)";
-    return sprintf("$base-%08x",1+int(rand(0xFFFFFFFF)));
-}
 
 1;
 
