@@ -288,6 +288,7 @@ sub detach {
     $self->volume->detach;
     $self->mtpt(undef);
     $self->mtdev(undef);
+    $self->server(undef);
 }
 
 # remove volume entirely

@@ -556,7 +556,7 @@ overridden by %other_args. See provision_server() for details.
 
 sub get_server_in_zone {
     my $self = shift;
-    unshift @_,'-zone' if @_ == 1;
+    unshift @_,'-availability_zone' if @_ == 1;
     my %args = @_;
     my $zone = $args{-availability_zone} or croak "must provide -availability_zone argument";
     if (my $servers = $Zones{$zone}{Servers}) {
