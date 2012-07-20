@@ -429,7 +429,8 @@ sub resolve_path {
     my $vpath = shift;
 
     my ($servername,$pathname);
-    if ($vpath =~ m!^(vol-[0-9a-f]+):?(.*)! && (my $vol = VM::EC2::Staging::Manager->find_volume_by_volid($1))) {
+    if ($vpath =~ /^(vol-[0-9a-f]+):?(.*)/ &&
+	      (my $vol = VM::EC2::Staging::Manager->find_volume_by_volid($1))) {
 	my $path = $2;
 	$path       = "/$path" if $path && $path !~ m!^/!;
 	$vol->_spin_up;
@@ -437,24 +438,19 @@ sub resolve_path {
 	my $mtpt    = $LastMt   = $vol->mtpt;
 	$pathname   = $mtpt;
 	$pathname  .= $path if $path;
-    } elsif ($vpath =~ /^([^:]+):(.+)$/) {
-	$servername = $LastHost = $1;
-	$pathname   = $LastMt ? "$LastMt/$2" : $2;
+    } elsif ($vpath =~ /^(i-[0-9a-f]{8}):(.+)$/ && 
+	     (my $server = VM::EC2::Staging::Manager->find_server_by_instance($1))) {
+	$servername = $LastHost = $server;
+	$pathname   = $2;
     } elsif ($vpath =~ /^:(.+)$/) {
-	$servername = $LastHost;
-	$pathname   = $LastMt ? "$LastMt/$2" : $2;
+	$servername = $LastHost if $LastHost;
+	$pathname   = $LastHost && $LastMt ? "$LastMt/$2" : $2;
     } else {
 	return [undef,$vpath];   # localhost
     }
 
-    my $server = VM::EC2::Staging::Manager->find_server_by_instance($servername) || $servername;
-    unless (ref $server && $server->isa('VM::EC2::Staging::Server')) {
-	return [$server,$pathname];
-    }
-
-    $server->start unless $server->is_up;
-
-    return [$server,$pathname];
+    $servername->start    if $servername && !$servername->is_up;
+    return [$servername,$pathname];
 }
 
 # most general form
@@ -488,20 +484,28 @@ sub rsync {
     my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,__PACKAGE__);
     my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,__PACKAGE__);
 
+    # this is true when one of the paths contains a ":", indicating an rsync
+    # path that contains a hostname, but not a managed server
+    my $remote_path      = "@source_paths $dest_path" =~ /:/;
+
+    # remote rsync on either src or dest server
+    if ($remote_path && ($src_is_server || $dest_is_server)) {
+	my $server = $source_host || $dest_host;
+	return $server->ssh("sudo rsync -e 'ssh -v' $rsync_args @source_paths $dest_path");
+    }
+
     # localhost => localhost
-    if (!$source_host && !$dest_host) {
+    if (!($source_host || $dest_host)) {
 	return system("rsync @source $dest") == 0;
     }
 
     # localhost           => DataTransferServer
     if ($dest_is_server && !$src_is_server) {
-	@source_paths = map {"$source_host:$_"} @source_paths if $source_host;
 	return $dest_host->_rsync_put(@source_paths,$dest_path);
     }
 
     # DataTransferServer  => localhost
     if ($src_is_server && !$dest_is_server) {
-	$dest_path = "$dest_host:$dest_path" if $dest_host;
 	return $source_host->_rsync_get(@source_paths,$dest_path);
     }
 
@@ -667,6 +671,7 @@ sub _scmd_pipe {
 
 sub shell {
     my $self = shift;
+    $self->start unless $self->is_up;
     fork() && return;
     setsid(); # so that we are independent of parent signals
     my $host     = $self->instance->dnsName;
@@ -698,8 +703,8 @@ sub _ssh_escaped_args {
 
 sub _rsync_args {
     my $self = shift;
-    my $quiet = $self->manager->quiet;
-    return $quiet ? '-aqz' : '-az';
+    my $quiet = eval{$self->manager->quiet};
+    return $quiet ? '-aqz' : '-avz';
 }
 
 sub create_snapshot {
