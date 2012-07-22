@@ -491,7 +491,7 @@ sub rsync {
     # remote rsync on either src or dest server
     if ($remote_path && ($src_is_server || $dest_is_server)) {
 	my $server = $source_host || $dest_host;
-	return $server->ssh("sudo -E rsync -e 'ssh' $rsync_args @source_paths $dest_path");
+	return $server->ssh(['-t','-A'],"sudo -E rsync -e 'ssh -o \"CheckHostIP no\" -o \"StrictHostKeyChecking no\"' $rsync_args @source_paths $dest_path");
     }
 
     # localhost => localhost
@@ -604,14 +604,25 @@ sub _rsync_get {
 
 sub ssh {
     my $self = shift;
+
+    my @extra_args;
+    if (ref($_[0]) && ref($_[0]) eq 'ARRAY') {
+	my $extra      = shift;
+	@extra_args = @$extra;
+    }
     my @cmd   = @_;
     my $Instance = $self->instance or die "Remote instance not set up correctly";
     my $host     = $Instance->dnsName;
-    system('/usr/bin/ssh',$self->_ssh_args,$host,@cmd)==0;
+    system('/usr/bin/ssh',$self->_ssh_args,@extra_args,$host,@cmd)==0;
 }
 
 sub scmd {
     my $self = shift;
+    my @extra_args;
+    if (ref($_[0]) && ref($_[0]) eq 'ARRAY') {
+	my $extra      = shift;
+	@extra_args = @$extra;
+    }
     my @cmd   = @_;
     my $Instance = $self->instance or die "Remote instance not set up correctly";
     my $host     = $Instance->dnsName;
@@ -633,7 +644,7 @@ sub scmd {
     }
 
     # in child
-    exec '/usr/bin/ssh',$self->_ssh_args,$host,@cmd;
+    exec '/usr/bin/ssh',$self->_ssh_args,@extra_args,$host,@cmd;
 }
 
 # return a filehandle that you can write to:
@@ -659,12 +670,17 @@ sub scmd_read {
 sub _scmd_pipe {
     my $self = shift;
     my ($op,@cmd) = @_;
+    my @extra_args;
+    if (ref($cmd[0]) && ref($cmd[0]) eq 'ARRAY') {
+	my $extra      = shift @cmd;
+	@extra_args = @$extra;
+    }
     my $operation = $op eq 'write' ? '|-' : '-|';
     my $host = $self->dnsName;
     my $pid = open(my $fh,$operation); # this does a fork
     defined $pid or croak "piped open failed: $!" ;
     return $fh if $pid;         # writing to the filehandle writes to an ssh session
-    exec '/usr/bin/ssh',$self->_ssh_args,$host,@cmd;
+    exec '/usr/bin/ssh',$self->_ssh_args,@extra_args,$host,@cmd;
     exit 0;
 }
 
@@ -689,7 +705,6 @@ sub _ssh_args {
 	'-o','LogLevel QUIET',
 	'-i',$self->keyfile,
 	'-l',$self->username,
-	'-t','-A',
 	);
 }
 
