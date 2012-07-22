@@ -431,7 +431,7 @@ sub resolve_path {
     my ($servername,$pathname);
     if ($vpath =~ /^(vol-[0-9a-f]+):?(.*)/ &&
 	      (my $vol = VM::EC2::Staging::Manager->find_volume_by_volid($1))) {
-	my $path = $2;
+	my $path    = $2 || '/';
 	$path       = "/$path" if $path && $path !~ m!^/!;
 	$vol->_spin_up;
 	$servername = $LastHost = $vol->server;
