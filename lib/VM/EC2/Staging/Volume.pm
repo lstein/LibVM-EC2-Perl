@@ -106,16 +106,15 @@ sub provision_volume {
 # look up our filesystem type
 sub get_fstype {
     my $self = shift;
-    return 'raw' if $self->mtpt eq 'none';
+    return $self->fstype if $self->fstype;
+    return 'raw'         if $self->mtpt eq 'none';
 
     $self->_spin_up;
     my $dev    = $self->mtdev;
-    my @mounts = $self->server->scmd('cat /etc/mtab');
-    for my $m (@mounts) {
-	my ($mtdev,undef,$type) = split /\s+/,$m;
-	return $type if $mtdev eq $dev;
-    }
-    return 'none';
+    my $blkid  = $self->server->scmd("sudo blkid $dev");
+    my ($type) = $blkid =~ /TYPE="([^"]+)"/;
+    $self->fstype($type);
+    return $type || 'raw';
 }
 
 # $stagingvolume->new({-server => $server,  -volume => $volume,

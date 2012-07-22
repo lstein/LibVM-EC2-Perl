@@ -491,7 +491,7 @@ sub rsync {
     # remote rsync on either src or dest server
     if ($remote_path && ($src_is_server || $dest_is_server)) {
 	my $server = $source_host || $dest_host;
-	return $server->ssh("sudo rsync -e 'ssh -v' $rsync_args @source_paths $dest_path");
+	return $server->ssh("sudo -E rsync -e 'ssh' $rsync_args @source_paths $dest_path");
     }
 
     # localhost => localhost
@@ -689,6 +689,7 @@ sub _ssh_args {
 	'-o','LogLevel QUIET',
 	'-i',$self->keyfile,
 	'-l',$self->username,
+	'-t','-A',
 	);
 }
 
@@ -696,9 +697,10 @@ sub _ssh_escaped_args {
     my $self = shift;
     my @args = $self->_ssh_args;
     for (my $i=1;$i<@args;$i+=2) {
-	$args[$i] = qq("$args[$i]");
+	$args[$i] = qq("$args[$i]") if $args[$i];
     }
-    return join ' ',@args;
+    my $args = join ' ',@args;
+    return $args;
 }
 
 sub _rsync_args {

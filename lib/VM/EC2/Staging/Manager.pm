@@ -826,7 +826,8 @@ sub get_volume {
 
     # find volume of same name
     my %vols = map {$_->name => $_} $self->volumes;
-    return $vols{$args{-name}} || $self->provision_volume(%args);
+    my $vol = $vols{$args{-name}} || $self->provision_volume(%args);
+    return $vol;
 }
 
 =head2 $result = $manager->rsync($src1,$src2,$src3...,$dest)
