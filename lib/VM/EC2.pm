@@ -166,8 +166,15 @@ In addition, there are several utility classes:
  VM::EC2::Error                     -- Error messages
  VM::EC2::Dispatch                  -- Maps AWS XML responses onto perl object classes
  VM::EC2::ReservationSet            -- Hidden class used for describe_instances() request;
-                                               The reservation Ids are copied into the Instance
-                                               object.
+                                        The reservation Ids are copied into the Instance
+                                         object.
+
+There is also a high-level API called "VM::EC2::Staging::Manager" for
+managing groups of staging servers and volumes which greatly
+simplifies the task of creating and updating instances that mount
+multiple volumes. The API also provides a one-line command for
+migrating EBS-backed AMIs from one zone to another. See
+L<VM::EC2::Staging::Manager>.
 
 The interface provided by these modules is based on that described at
 http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/. The
@@ -3714,6 +3721,7 @@ L<VM::EC2::ReservedInstance>
 L<VM::EC2::ReservedInstance::Offering>
 L<VM::EC2::SecurityGroup>
 L<VM::EC2::Snapshot>
+L<VM::EC2::Staging::Manager>
 L<VM::EC2::Tag>
 L<VM::EC2::Volume>
 

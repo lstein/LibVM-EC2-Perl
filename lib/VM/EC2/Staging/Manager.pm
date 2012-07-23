@@ -8,13 +8,17 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
 
  use VM::EC2::Staging::Manager;
 
- my $ec2     = VM::EC2->new;
+ my $ec2     = VM::EC2->new(-region=>'us-east-1');
  my $staging = $ec2->staging_manager(-on_exit     => 'stop', # default, stop servers when process exists
                                      -quiet       => 0,      # default, verbose progress messages
                                      -scan        => 1,      # default, scan region for existing staging servers and volumes
                                      -image_name  => 'ubuntu-maverick-10.10', # default server image
                                      -user_name   => 'ubuntu',                # default server login name
                                      );
+
+ # Assuming an EBS image named ami-12345 is located in the US, copy it into 
+ # the South American region, returning the AMI ID in South America
+ my $new_image = $staging->copy_image('ami-12345','sa-east-1');
 
  # provision a new server, using defaults. Name will be assigned automatically
  my $server = $staging->provision_server(-availability_zone => 'us-east-1a');
@@ -80,10 +84,6 @@ VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
  $staging->stop_all_servers();
  $staging->start_all_servers();
  $staging->terminate_all_servers();
-
- # Assuming an EBS image named ami-12345 is located in the US, copy it into 
- # the South American region, returning the AMI ID in South America
- my $new_image = $staging->copy_image('ami-12345','sa-east-1');
 
 =head1 DESCRIPTION
 
@@ -152,6 +152,9 @@ EC2 object in the desired region, and then call its staging_manager()
 method:
 
  $manager = VM::EC2->new(-region=>'us-west-2')->staging_manager()
+
+The staging_manager() method is only known to VM::EC2 objects if you
+first "use" VM::EC2::Staging::Manager.
 
 =over 4
 
@@ -1708,6 +1711,7 @@ sub DESTROY {
 L<VM::EC2>
 L<VM::EC2::Staging::Server>
 L<VM::EC2::Staging::Volume>
+L<migrate-ebs-image.pl>
 
 =head1 AUTHOR
 
