@@ -2,7 +2,7 @@ package VM::EC2::Staging::Manager;
 
 =head1 NAME
 
-VM::EC2::Staging::Manager - Automated VM for moving data in and out of cloud.
+VM::EC2::Staging::Manager - Automate VMs and volumes for moving data in and out of cloud.
 
 =head1 SYNOPSIS
 

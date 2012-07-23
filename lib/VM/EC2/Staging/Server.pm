@@ -5,43 +5,93 @@ package VM::EC2::Staging::Server;
 
 =head1 NAME
 
-VM::EC2::Staging::Server - Automated VM for moving data in and out of cloud.
+VM::EC2::Staging::Server - High level interface to EC2-based servers
 
 =head1 SYNOPSIS
 
- #SYNOPSIS IS OF DATE
 
  use VM::EC2::Staging::Manager;
 
+ # get a new staging manager
  my $ec2     = VM::EC2->new;
- my $staging = VM::EC2::Staging::Manager->new(-ec2     => $ec2,
-                                              -on_exit => 'stop', # default, choose root volume type based on behavior
-                                              -quiet   => 0,      # default
-                                              -scan    => 1,      # default
-                                         );
- $staging->scan();  # populate with preexisting servers & volumes
+ my $staging = $ec2->staging_manager();                                         );
  
- # reuse or provision new server as needed
- my $server = $staging->provision_server(-architecture      => 'i386',
-                                         -availability_zone => 'us-east-1a');
 
- my $volume = $staging->provision_volume(-name    => 'Pictures',
-                                         -fstype  => 'ext4',
-                                         -size    => 2) or die $staging->error_str;
+ # Fetch a server named 'my_server'. Create it if it does not already exist.
+ my $server1 = $staging->get_server(-name              => 'my_server',
+                                   -availability_zone  => 'us-east-1a',
+                                   -architecture       => 'i386',
+                                   -instance_type      => 't1.micro');
 
- # localhost to remote transfer using symbolic names of volumes
- $server->put('/usr/local/pictures/'   => 'Pictures');
+ # As above, but force a new server to be provisioned.
+ my $server2 = $staging->provision_server(-name              => 'my_server',
+                                          -availability_zone => 'us-east-1a',
+                                          -architecture      => 'i386',
+                                          -instance_type     => 't1.micro');
 
- # remote to local transfer
- $server->get('Pictures' => '/tmp/pictures');
+ # open up a terminal emulator in a separate window
+ $server1->shell;
+ 
+ # Run a command over ssh on the server. Standard in and out will be connected to
+ # STDIN/OUT
+ $server1->ssh('whoami');
 
- # remote to remote transfer - useful for interzone transfers
- $server->rsync('Pictures' => "$server2:/home/ubuntu/pictures");
+ # run a command over ssh on the server, returning standard output as an array of lines or a
+ # scalar string, similar to backticks (``)
+ my @password_lines = $server1->scmd('cat /etc/passwd');
 
- $server->create_snapshot($vol1 => 'snapshot of pictures');
- $server->terminate;  # automatically terminates when goes out of scope
+ # run a command on the server and read from it using a filehandle
+ my $fh  = $server1->scmd_read('ls -R /usr/lib');
+ while (<$fh>) { # do something }
+
+ # run a command on the server and write to it using a filehandle
+ my $fh  = $server1->scmd_write('sudo -s "cat >>/etc/fstab"');
+ print $fh "/dev/sdf3 /mnt/demo ext3 0 2\n";
+ close $fh;
+
+ # provision and mount a 5 gig ext3 volume mounted on /opt, returning
+ # VM::EC2::Staging::Volume object
+ my $opt = $server1->provision_volume(-mtpt   => '/opt',
+                                      -fstype => 'ext3',
+                                      -size   => 5);
+
+ # copy some data from the local filesystem onto the opt volume
+ $server1->rsync("$ENV{HOME}/local_staging_volume/" => $opt);
+
+ # provision a volume attached to another server, and let the
+ # system choose the filesystem and mount point for us
+ my $backups = $server2->provision_volume(-name => 'Backup',
+                                         -size => 10);
+
+ # copy some data from opt to the new volume using rsync
+ $server1->rsync($opt => "$backups/opt");
+ 
+ # Do a block-level copy between disks - warning, the filesystem must be unmounted
+ # before you attempt this.
+ $backups->unmount;
+ $server1->dd($opt => $backups);
 
 =head1 DESCRIPTION
+
+VM::EC2::Staging::Server objects are an extension of VM::EC2::Instance
+to allow for higher-level access, including easy management of ssh
+keys, remote copying of data from one server to another, and executing
+of remote commands on the server from within Perl. See
+L<VM::EC2::Staging::Manager> for an overview of staging servers and
+volumes.
+
+Note that proper functioning of this module is heavily dependent on
+running on a host system that has access to ssh, rsync and terminal
+emulator command-line tools. It will most likely fail when run on a
+Windows host.
+
+=head1 Staging Server Creation Methods
+
+=head1 Remote Shell Methods
+
+=head1 Volume Management Methods
+
+=head1 Data Copying Methods
 
 =head1 SEE ALSO
 
@@ -692,8 +742,8 @@ sub shell {
     setsid(); # so that we are independent of parent signals
     my $host     = $self->instance->dnsName;
     my $ssh_args = $self->_ssh_escaped_args;
-    exec 'xterm',
-    '-e',"/usr/bin/ssh $ssh_args $host";
+    my $emulator = $ENV{COLORTERM} || $ENV{TERM} || 'xterm';
+    exec $emulator,'-e',"/usr/bin/ssh $ssh_args $host";
 }
 
 sub _ssh_args {
