@@ -320,99 +320,220 @@ sub find_manager {
     return $Managers{$endpoint};
 }
 
-=head1 Instance Methods for Accessing Configuration Options
+=head1 Interzone Copying of AMIs and Snapshots
 
-This section documents accessor methods that allow you to examine or
-change configuration options that were set at create time. Called with
-an argument, the accessor changes the option and returns the option's
-previous value. Called without an argument, the accessor returns the
-option's current value.
+This library provides convenience methods for copying whole AMIs as
+well as individual snapshots from one zone to another. It does this by
+gathering information about the AMI/snapshot in the source zone,
+creating staging servers in the source and target zones, and then
+copying the volume data from the source to the target. If an
+AMI/snapshot does not use a recognized filesystem (e.g. it is part of
+an LVM or RAID disk set), then block level copying of the entire
+device is used. Otherwise, rsync() is used to minimize data transfer
+fees.
 
-=head2 $on_exit = $manager->on_exit([$new_behavior])
+Note that interzone copying of instance-backed AMIs is B<not>
+supported. Only EBS-backed images can be copied in this way.
 
-Get or set the "on_exit" option, which specifies what to do with
-existing staging servers when the staging manager is destroyed. Valid
-values are "terminate", "stop" and "run".
+See also the command-line script migrate-ebs-image.pl that comes with
+this package.
 
-=head2 $reuse_key = $manager->reuse_key([$boolean])
+=head2 $new_image_id = $manager->copy_image($source_image,$destination_zone)
 
-Get or set the "reuse_key" option, which if true uses the same
-internally-generated ssh keypair for all running instances. If false,
-then a new keypair will be created for each staging server. The
-keypair will be destroyed automatically when the staging server
-terminates (but only if the staging manager initiates the termination
-itself).
+This method copies the AMI indicated by $source_image from the zone
+that $manager belongs to, into the indicated $destination_zone, and
+returns the AMI ID of the new image in the destination zone.
 
-=head2 $username = $manager->username([$new_username])
+$source_image may be an AMI ID, or a VM::EC2::Image object.
 
-Get or set the username used to log into staging servers.
+$destination_zone may be a simple region name, such as "us-west-2", or
+a VM::EC2::Region object (as returned by VM::EC2->describe_regions),
+or a VM::EC2::Staging::Manager object that is associated with the
+desired region. The latter form gives you control over the nature of
+the staging instances created in the destination zone. For example, if
+you wish to use 'm1.large' high-I/O instances in both the source and
+destination reasons, you would proceed like this:
 
-=head2 $architecture = $manager->architecture([$new_architecture])
-
-Get or set the architecture (i386, x86_64) to use for launching
-new staging servers.
-
-=head2 $root_type = $manager->root_type([$new_type])
-
-Get or set the instance root type for new staging servers
-("instance-store", "ebs").
-
-=head2 $instance_type = $manager->instance_type([$new_type])
-
-Get or set the instance type to use for new staging servers
-(e.g. "t1.micro"). I recommend that you use "m1.small" (the default)
-or larger instance types because of the extremely slow I/O of the
-micro instance. In addition, micro instances running Ubuntu have a
-known bug that prevents them from unmounting and remounting EBS
-volumes repeatedly on the same block device. This can lead to hangs
-when the staging manager tries to create volumes.
-
-=head2 $reuse_volumes = $manager->reuse_volumes([$new_boolean])
-
-This gets or sets the "reuse_volumes" option, which if true causes the
-provision_volumes() call to create staging volumes from existing EBS
-volumes and snapshots that share the same staging manager symbolic
-name. See the discussion under VM::EC2->staging_manager(), and
-VM::EC2::Staging::Manager->provision_volume().
-
-=head2 $name = $manager->image_name([$new_name])
-
-This gets or sets the "image_name" option, which is the AMI ID or AMI
-name to use when creating new staging servers. Names beginning with
-"ami-" are treated as AMI IDs, and everything else is treated as a
-pattern match on the AMI name.
-
-=head2 $zone = $manager->availability_zone([$new_zone])
-
-Get or set the default availability zone to use when creating new
-servers and volumes. An undef value allows the staging manager to
-choose the zone in a way that minimizes resources.
-
-=head2 $boolean = $manager->quiet([$boolean])
-
-Get or set the "quiet" flag, which if true suppresses all non-fatal
-warning and informational messages.
-
-=head2 $boolean = $manager->scan([$boolean])
-
-Get or set the "scan" flag, which if true will cause the zone to be
-scanned quickly for existing managed servers and volumes when the
-manager is first created.
-
-=head2 $path = $manager->dot_directory([$new_directory])
-
-Get or set the dot directory which holds private key files.
+ my $source      = VM::EC2->new(-region=>'us-east-1'
+                               )->staging_manager(-instance_type=>'m1.large',
+                                                  -on_exit      =>'terminate');
+ my $destination = VM::EC2->new(-region=>'us-west-2'
+                               )->staging_manager(-instance_type=>'m1.large',
+                                                  -on_exit      =>'terminate');
+ my $new_image   = $source->copy_image('ami-123456' => $destination);
 
 =cut
 
-sub dot_directory {
+#############################################
+# copying AMIs from one zone to another
+#############################################
+sub copy_image {
     my $self = shift;
-    my $dir  = $self->dotdir;
-    unless (-e $dir && -d $dir) {
-	mkdir $dir       or croak "mkdir $dir: $!";
-	chmod 0700,$dir  or croak "chmod 0700 $dir: $!";
+    my ($imageId,$destination) = @_;
+    my $ec2 = $self->ec2;
+
+    my $image = ref $imageId && $imageId->isa('VM::EC2::Image') ? $imageId 
+  	                                                        : $ec2->describe_images($imageId);
+    $image       
+	or croak "Invalid image '$imageId'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+    $image->imageType eq 'machine' 
+	or croak "$image is not an AMI: usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+    
+    my $dest_manager;
+    if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
+	$dest_manager = $destination;
+    } else {
+	my $dest_region = ref $destination && $destination->isa('VM::EC2::Region') 
+	    ? $destination
+	    : $ec2->describe_regions($destination);
+	$dest_region 
+	    or croak "Invalid EC2 Region '$dest_region'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";	
+	my $dest_endpoint = $dest_region->regionEndpoint;
+	my $dest_ec2      = VM::EC2->new(-endpoint    => $dest_endpoint,
+					 -access_key  => $ec2->access_key,
+					 -secret_key  => $ec2->secret) 
+	    or croak "Could not create new VM::EC2 in $dest_region";
+	$dest_manager = $self->new(-ec2           => $dest_ec2,
+				   -scan          => 1,
+				   -on_exit       => 'destroy',
+				   -instance_type => $self->instance_type);
     }
-    return $dir;
+
+
+    my $root_type = $image->rootDeviceType;
+    if ($root_type eq 'ebs') {
+	return $self->_copy_ebs_image($image,$dest_manager);
+    } else {
+	return $self->_copy_instance_image($image,$dest_manager);
+    }
+}
+
+=head2 $new_snapshot_id = $manager->copy_image($source_snapshot,$destination_zone)
+
+This method copies the EBS snapshot indicated by $source_snapshot from
+the zone that $manager belongs to, into the indicated
+$destination_zone, and returns the ID of the new snapshot in the
+destination zone.
+
+$source_snapshot may be an string ID, or a VM::EC2::Snapshot object.
+
+$destination_zone may be a simple region name, such as "us-west-2", or
+a VM::EC2::Region object (as returned by VM::EC2->describe_regions),
+or a VM::EC2::Staging::Manager object that is associated with the
+desired region. The latter form gives you control over the nature of
+the staging instances created in the destination zone.
+
+=cut
+
+sub copy_snapshot {
+    my $self = shift;
+    my ($snapId,$dest_manager) = @_;
+    my $snap   = $self->ec2->describe_snapshots($snapId) 
+	or croak "Couldn't find snapshot for $snapId";
+    my $description = "duplicate of $snap, created by ".__PACKAGE__." during snapshot copying";
+
+    my $source = $self->provision_volume(-snapshot_id=>$snapId) 
+	or croak "Couldn't mount volume for $snapId";
+    my $fstype  = $source->fstype;
+    my $blkinfo = $source->server->scmd('sudo','blkid','-p',$source->mtdev);
+    my ($uuid)  = $blkinfo =~ /UUID="(\S+)"/;
+    my ($label) = $blkinfo =~ /LABEL="(\S+)"/;
+    
+    my $dest   = $dest_manager->provision_volume(-fstype => $fstype,
+						 -size   => $source->size,
+						 -label  => $label,
+						 -uuid   => $uuid,
+						 -reuse  => 0,
+	) or croak "Couldn't create new destination volume for $snapId";
+
+    if ($fstype eq 'raw') {
+	$self->info("Using dd for block level disk copy (will take a while)\n");
+	$source->dd($dest)    or croak "dd failed";
+    } else {
+	# this now works?
+	$source->copy($dest) or croak "rsync failed";
+    }
+    
+    $dest->unmount; # don't want this mounted; otherwise it will be unmounted & remounted
+    my $snapshot = $dest->create_snapshot($description);
+
+    # copy snapshot tags
+    my $tags = $snap->tags;
+    $snapshot->add_tags($tags);
+    
+    # we don't need these volumes now
+    $source->delete;
+    $dest->delete;
+
+    return $snapshot;
+}
+
+sub _copy_instance_image {
+    my $self = shift;
+    croak "This module is currently unable to copy instance-backed AMIs between regions.\n";
+}
+
+sub _copy_ebs_image {
+    my $self = shift;
+    my ($image,$dest_manager) = @_;
+
+    # hashref with keys 'name', 'description','architecture','kernel','ramdisk','block_devices','root_device'
+    # 'is_public','authorized_users'
+    $self->info("Gathering information about image $image\n");
+    my $info = $self->_gather_image_info($image);
+
+    my $name         = $info->{name};
+    my $description  = $info->{description};
+    my $architecture = $info->{architecture};
+    my $kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
+	or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
+    
+    my $ramdisk;
+    if ($info->{ramdisk}) {
+	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
+	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;	    }
+
+    my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
+    my $root_device     = $info->{root_device};
+
+    $self->info("Copying EBS volumes attached to this image (this may take a long time)\n");
+    my @bd              = @$block_devices;
+    my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @bd;
+    
+    $self->info("Waiting for all snapshots to complete. This may take a long time.\n");
+    my $state = $dest_manager->ec2->wait_for_snapshots(@dest_snapshots);
+    my @errored = grep {$state->{$_} eq 'error'} @dest_snapshots;
+    croak ("Snapshot(s) @errored could not be completed due to an error")
+	if @errored;
+
+    # create the new block device mapping
+    my @mappings;
+    for my $source_ebs (@$block_devices) {
+	my $snapshot    = shift @dest_snapshots;
+	my $dest        = "$source_ebs";  # interpolates into correct format
+	$dest          =~ s/=[\w-]+/=$snapshot/;  # replace source snap with dest snap
+	push @mappings,$dest;
+    }
+
+    # ensure choose a unique name
+    if ($dest_manager->ec2->describe_images({name => $name})) {
+	print STDERR "An image named '$name' already exists in destination region. ";
+	$name = $self->_token($name);
+	print STDERR "Renamed to '$name'\n";
+    }
+    my $img =  $dest_manager->ec2->register_image(-name                 => $name,
+						  -root_device_name     => $root_device,
+						  -block_device_mapping => \@mappings,
+						  -description          => $description,
+						  -architecture         => $architecture,
+						  -kernel_id            => $kernel,
+						  $ramdisk ? (-ramdisk_id  => $ramdisk): ()
+	);
+    $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
+    # copy launch permissions
+    $img->make_public(1)                                     if $info->{is_public};
+    $img->add_authorized_users(@{$info->{authorized_users}}) if @{$info->{authorized_users}};
+    return $img;
 }
 
 =head1 Instance Methods for Managing Staging Servers
@@ -926,7 +1047,11 @@ addresses, optionally preceded by a username:
 
  $manager->rsync("$picture_volume:/family/vacations" => 'fred@gw.harvard.edu:/tmp')
 
-For this to work properly, 
+When called in this way, the method does what it can to avoid
+prompting for a password or passphrase on the non-managed host
+(gw.harvard.edu in the above example). This includes turning off
+strict host checking and forwarding the user agent information from
+the local machine.
 
 =cut
 
@@ -973,159 +1098,99 @@ sub volumes {
     return grep {$_->ec2->endpoint eq $self->ec2->endpoint} values %Volumes;
 }
 
-#############################################
-# copying AMIs from one zone to another
-#############################################
-sub copy_image {
+=head1 Instance Methods for Accessing Configuration Options
+
+This section documents accessor methods that allow you to examine or
+change configuration options that were set at create time. Called with
+an argument, the accessor changes the option and returns the option's
+previous value. Called without an argument, the accessor returns the
+option's current value.
+
+=head2 $on_exit = $manager->on_exit([$new_behavior])
+
+Get or set the "on_exit" option, which specifies what to do with
+existing staging servers when the staging manager is destroyed. Valid
+values are "terminate", "stop" and "run".
+
+=head2 $reuse_key = $manager->reuse_key([$boolean])
+
+Get or set the "reuse_key" option, which if true uses the same
+internally-generated ssh keypair for all running instances. If false,
+then a new keypair will be created for each staging server. The
+keypair will be destroyed automatically when the staging server
+terminates (but only if the staging manager initiates the termination
+itself).
+
+=head2 $username = $manager->username([$new_username])
+
+Get or set the username used to log into staging servers.
+
+=head2 $architecture = $manager->architecture([$new_architecture])
+
+Get or set the architecture (i386, x86_64) to use for launching
+new staging servers.
+
+=head2 $root_type = $manager->root_type([$new_type])
+
+Get or set the instance root type for new staging servers
+("instance-store", "ebs").
+
+=head2 $instance_type = $manager->instance_type([$new_type])
+
+Get or set the instance type to use for new staging servers
+(e.g. "t1.micro"). I recommend that you use "m1.small" (the default)
+or larger instance types because of the extremely slow I/O of the
+micro instance. In addition, micro instances running Ubuntu have a
+known bug that prevents them from unmounting and remounting EBS
+volumes repeatedly on the same block device. This can lead to hangs
+when the staging manager tries to create volumes.
+
+=head2 $reuse_volumes = $manager->reuse_volumes([$new_boolean])
+
+This gets or sets the "reuse_volumes" option, which if true causes the
+provision_volumes() call to create staging volumes from existing EBS
+volumes and snapshots that share the same staging manager symbolic
+name. See the discussion under VM::EC2->staging_manager(), and
+VM::EC2::Staging::Manager->provision_volume().
+
+=head2 $name = $manager->image_name([$new_name])
+
+This gets or sets the "image_name" option, which is the AMI ID or AMI
+name to use when creating new staging servers. Names beginning with
+"ami-" are treated as AMI IDs, and everything else is treated as a
+pattern match on the AMI name.
+
+=head2 $zone = $manager->availability_zone([$new_zone])
+
+Get or set the default availability zone to use when creating new
+servers and volumes. An undef value allows the staging manager to
+choose the zone in a way that minimizes resources.
+
+=head2 $boolean = $manager->quiet([$boolean])
+
+Get or set the "quiet" flag, which if true suppresses all non-fatal
+warning and informational messages.
+
+=head2 $boolean = $manager->scan([$boolean])
+
+Get or set the "scan" flag, which if true will cause the zone to be
+scanned quickly for existing managed servers and volumes when the
+manager is first created.
+
+=head2 $path = $manager->dot_directory([$new_directory])
+
+Get or set the dot directory which holds private key files.
+
+=cut
+
+sub dot_directory {
     my $self = shift;
-    my ($imageId,$destination) = @_;
-    my $ec2 = $self->ec2;
-
-    my $image = ref $imageId && $imageId->isa('VM::EC2::Image') ? $imageId 
-  	                                                        : $ec2->describe_images($imageId);
-    $image       
-	or croak "Invalid image '$imageId'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
-    $image->imageType eq 'machine' 
-	or croak "$image is not an AMI: usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
-    
-    my $dest_manager;
-    if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
-	$dest_manager = $destination;
-    } else {
-	my $dest_region = ref $destination && $destination->isa('VM::EC2::Region') 
-	    ? $destination
-	    : $ec2->describe_regions($destination);
-	$dest_region 
-	    or croak "Invalid EC2 Region '$dest_region'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";	
-	my $dest_endpoint = $dest_region->regionEndpoint;
-	my $dest_ec2      = VM::EC2->new(-endpoint    => $dest_endpoint,
-					 -access_key  => $ec2->access_key,
-					 -secret_key  => $ec2->secret) 
-	    or croak "Could not create new VM::EC2 in $dest_region";
-	$dest_manager = $self->new(-ec2           => $dest_ec2,
-				   -scan          => 1,
-				   -on_exit       => 'destroy',
-				   -instance_type => $self->instance_type);
+    my $dir  = $self->dotdir;
+    unless (-e $dir && -d $dir) {
+	mkdir $dir       or croak "mkdir $dir: $!";
+	chmod 0700,$dir  or croak "chmod 0700 $dir: $!";
     }
-
-
-    my $root_type = $image->rootDeviceType;
-    if ($root_type eq 'ebs') {
-	return $self->_copy_ebs_image($image,$dest_manager);
-    } else {
-	return $self->_copy_instance_image($image,$dest_manager);
-    }
-}
-
-sub _copy_instance_image {
-    my $self = shift;
-    croak "This module is currently unable to copy instance-backed AMIs between regions.\n";
-}
-
-sub _copy_ebs_image {
-    my $self = shift;
-    my ($image,$dest_manager) = @_;
-
-    # hashref with keys 'name', 'description','architecture','kernel','ramdisk','block_devices','root_device'
-    # 'is_public','authorized_users'
-    $self->info("Gathering information about image $image\n");
-    my $info = $self->_gather_image_info($image);
-
-    my $name         = $info->{name};
-    my $description  = $info->{description};
-    my $architecture = $info->{architecture};
-    my $kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
-	or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
-    
-    my $ramdisk;
-    if ($info->{ramdisk}) {
-	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
-	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;	    }
-
-    my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
-    my $root_device     = $info->{root_device};
-
-    $self->info("Copying EBS volumes attached to this image (this may take a long time)\n");
-    my @bd              = @$block_devices;
-    my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @bd;
-    
-    $self->info("Waiting for all snapshots to complete. This may take a long time.\n");
-    my $state = $dest_manager->ec2->wait_for_snapshots(@dest_snapshots);
-    my @errored = grep {$state->{$_} eq 'error'} @dest_snapshots;
-    croak ("Snapshot(s) @errored could not be completed due to an error")
-	if @errored;
-
-    # create the new block device mapping
-    my @mappings;
-    for my $source_ebs (@$block_devices) {
-	my $snapshot    = shift @dest_snapshots;
-	my $dest        = "$source_ebs";  # interpolates into correct format
-	$dest          =~ s/=[\w-]+/=$snapshot/;  # replace source snap with dest snap
-	push @mappings,$dest;
-    }
-
-    # ensure choose a unique name
-    if ($dest_manager->ec2->describe_images({name => $name})) {
-	print STDERR "An image named '$name' already exists in destination region. ";
-	$name = $self->_token($name);
-	print STDERR "Renamed to '$name'\n";
-    }
-    my $img =  $dest_manager->ec2->register_image(-name                 => $name,
-						  -root_device_name     => $root_device,
-						  -block_device_mapping => \@mappings,
-						  -description          => $description,
-						  -architecture         => $architecture,
-						  -kernel_id            => $kernel,
-						  $ramdisk ? (-ramdisk_id  => $ramdisk): ()
-	);
-    $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
-    # copy launch permissions
-    $img->make_public(1)                                     if $info->{is_public};
-    $img->add_authorized_users(@{$info->{authorized_users}}) if @{$info->{authorized_users}};
-    return $img;
-}
-
-sub copy_snapshot {
-    my $self = shift;
-    my ($snapId,$dest_manager) = @_;
-    my $snap   = $self->ec2->describe_snapshots($snapId) 
-	or croak "Couldn't find snapshot for $snapId";
-    my $description = "duplicate of $snap, created by ".__PACKAGE__." during snapshot copying";
-
-    my $source = $self->provision_volume(-snapshot_id=>$snapId) 
-	or croak "Couldn't mount volume for $snapId";
-    my $fstype  = $source->fstype;
-    my $blkinfo = $source->server->scmd('sudo','blkid','-p',$source->mtdev);
-    my ($uuid)  = $blkinfo =~ /UUID="(\S+)"/;
-    my ($label) = $blkinfo =~ /LABEL="(\S+)"/;
-    
-    my $dest   = $dest_manager->provision_volume(-fstype => $fstype,
-						 -size   => $source->size,
-						 -label  => $label,
-						 -uuid   => $uuid,
-						 -reuse  => 0,
-	) or croak "Couldn't create new destination volume for $snapId";
-
-    if ($fstype eq 'raw') {
-	$self->info("Using dd for block level disk copy (will take a while)\n");
-	$source->dd($dest)    or croak "dd failed";
-    } else {
-	# this now works?
-	$source->copy($dest) or croak "rsync failed";
-    }
-    
-    $dest->unmount; # don't want this mounted; otherwise it will be unmounted & remounted
-    my $snapshot = $dest->create_snapshot($description);
-
-    # copy snapshot tags
-    my $tags = $snap->tags;
-    $snapshot->add_tags($tags);
-    
-    # we don't need these volumes now
-    $source->delete;
-    $dest->delete;
-
-    return $snapshot;
+    return $dir;
 }
 
 =head1 Internal Methods
