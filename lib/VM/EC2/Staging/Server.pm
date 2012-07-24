@@ -85,33 +85,6 @@ running on a host system that has access to ssh, rsync and terminal
 emulator command-line tools. It will most likely fail when run on a
 Windows host.
 
-=head1 Staging Server Creation Methods
-
-=head1 Remote Shell Methods
-
-=head1 Volume Management Methods
-
-=head1 Data Copying Methods
-
-=head1 SEE ALSO
-
-L<VM::EC2>
-L<VM::EC2::Instance>
-L<VM::EC2::Volume>
-L<VM::EC2::Snapshot>
-
-=head1 AUTHOR
-
-Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
-
-Copyright (c) 2011 Ontario Institute for Cancer Research
-
-This package and its accompanying libraries is free software; you can
-redistribute it and/or modify it under the terms of the GPL (either
-version 1, or at your option, any later version) or the Artistic
-License 2.0.  Refer to LICENSE for the full license text. In addition,
-please see DISCLAIMER.txt for disclaimers of warranty.
-
 =cut
 
 use strict;
@@ -153,16 +126,40 @@ sub can {
     return $ebs->can($method);
 }
 
+=head1 Staging Server Creation
+
+Staging servers are usually created via a staging manager's
+get_server() or provision_server() methods. See L<VM::EC2::Staging::Manager>.
+
+There is also a new() class method that is intended to be used
+internally in most cases. It is called like this:
+
+=head2 $server = VM::EC2::Staging::Server->new(%args)
+
+With the arguments:
+
+ -keyfile    path to the ssh public/private keyfile for this instance
+ -username   username for remote login on this instance
+ -instance   VM::EC2::Instance to attach this server to
+ -manager    VM::EC2::Staging::Manager in same zone as the instance
+
+Note that you will have to launch a staging manager, start an
+instance, and appropriate provision the SSH credentials for that
+instance before invoking new() directly.
+
+=cut
+
 sub new {
     my $class = shift;
     my %args  = @_;
-    $args{-keyfile}        or croak 'need keyfile path';
-    $args{-username}       or croak 'need username';
-    $args{-instance}       or croak 'need a VM::EC2::Instance';
-    $args{-endpoint}       or croak 'need an endpoint argument';
+    $args{-keyfile}        or croak 'need -keyfile path';
+    $args{-username}       or croak 'need -username';
+    $args{-instance}       or croak 'need a -instance VM::EC2::Instance argument';
+    $args{-manager}        or croak 'need a -manager argument';
 
+    my $endpoint = $args{-manager}->ec2->endpoint;
     my $self = bless {
-	endpoint => $args{-endpoint},
+	endpoint => $endpoint,
 	instance => $args{-instance},
 	username => $args{-username},
 	keyfile  => $args{-keyfile},
@@ -171,24 +168,128 @@ sub new {
     return $self;
 }
 
-sub ec2      { shift->manager->ec2    }
-sub endpoint { shift->{endpoint}  }
-sub instance { shift->{instance} }
-sub keyfile  { shift->{keyfile}  }
-sub username { shift->{username} }
+=head1 Information about the Server
+
+VM::EC2::Staging::Server objects have all the methods of
+VM::EC2::Instance, such as dnsName(), but add several new methods. The
+new methods involving getting basic information about the server are
+listed in this section.
+
+=head2 $name = $server->name
+
+This method returns the server's symbolic name, if any.
+
+Servers can optionally be assigned a symbolic name at the time they
+are created by the manager's get_server() or provision_server()
+methods. The name persists as long as the underlying instance exists
+(including in stopped state for EBS-backed instances). Calling
+$manager->get_server() with this name returns the server object.
+
+=cut
+
 sub name     { shift->{name}     }
+
+=head2 $ec2 = $server->ec2
+
+Return the VM::EC2 object associated with the server.
+
+=cut
+
+sub ec2      { shift->manager->ec2    }
+
+=head2 $ec2 = $server->endpoint
+
+Return the endpoint URL associated with this server.
+
+=cut
+
+sub endpoint { shift->{endpoint}  }
+
+=head2 $instance = $server->instance
+
+Return the VM::EC2::Instance associated with this server.
+
+=cut
+
+sub instance { shift->{instance} }
+
+=head2 $file = $server->keyfile
+
+Return the full path to the SSH PEM keyfile used to log into this
+server.
+
+=cut
+
+sub keyfile  { shift->{keyfile}  }
+
+=head2 $user = $server->username
+
+Return the name of the user (e.g. 'ubuntu') used to ssh into this
+server.
+
+=cut
+
+sub username { shift->{username} }
+
+=head2 $manager = $server->manager
+
+Returns the VM::EC2::Staging::Manager that manages this server.
+
+=cut
+
 sub manager {
     my $self = shift;
     my $ep   = $self->endpoint;
     return VM::EC2::Staging::Manager->find_manager($ep);
 }
 
-sub is_up {
+=head1 Lifecycle Methods
+
+The methods in this section manage the lifecycle of a server.
+
+=head2 $flag = $server->ping
+
+The ping() method returns true if the server is running and is
+reachable via ssh. It is different from checking that the underlying
+instance is "running" via a call to current_status, because it also
+checks the usability of the ssh daemon, the provided ssh key and
+username, firewall rules, and the network connectivity.
+
+The result of ping is cached so that subsequent invocations return
+quickly.
+
+=cut
+
+sub ping {
     my $self = shift;
-    my $d    = $self->{_is_up};
-    $self->{_is_up} = shift if @_;
-    $d;
+    return unless $self->instance->status eq 'running';
+    return 1 if $self->is_up;
+    return unless $self->ssh('pwd >/dev/null 2>&1');
+    $self->is_up(1);
+    return 1;
 }
+
+=head2 $result = $server->start
+
+Attempt to start a stopped server. The method will wait until a ping()
+is successful, or until a timeout of 120 seconds. The result code will
+be true if the server was successfully started and is reachable.
+
+If you wish to start a set of servers without waiting for each one
+individually, then you may call the underling instance's start()
+method:
+
+ $server->instance->start;
+
+You may then wish to call the staging manager's wait_for_instances()
+method to wait on all of the servers to start:
+
+ $manager->wait_for_servers(@servers);
+
+Also check out $manager->start_all_servers().
+
+=cut
+
 
 sub start {
     my $self = shift;
@@ -206,27 +307,92 @@ sub start {
 	return;
     }
     $self->is_up(1);
+    1;
 }
+
+=head2 $result = $server->stop
+
+Attempt to stop a running server. The method will wait until the
+server has entered the "stopped" state before returning. It will
+return a true result if the underlying instance stopped successfully.
+
+If you wish to stop a set of servers without waiting for each one
+individually, then you may call the underling instance's start()
+method:
+
+ $server->instance->stop;
+
+You may then wish to call the staging manager's wait_for_instances()
+method to wait on all of the servers to start:
+
+ $status = $manager->wait_for_servers(@servers);
+
+Also check out $manager->stop_all_servers().
+
+=cut
 
 sub stop {
     my $self = shift;
     return unless $self->instance->status eq 'running';
     $self->instance->stop;
-    $self->manager->wait_for_instances($self);
+    $self->is_up(0);
+    my $status = $self->manager->wait_for_instances($self);
+    return $status->{$self->instance} eq 'stopped';
 }
 
-sub ping {
+=head2 $result = $server->terminate
+
+Terminate a server and unregister it from the manager. This method
+will stop and wait until the server is terminated.
+
+If you wish to stop a set of servers without waiting for each one
+individually, then you may call the underling instance's start()
+method:
+
+ $server->instance->terminate;
+
+=cut
+
+sub terminate {
     my $self = shift;
-    return unless $self->instance->status eq 'running';
-    return 1 if $self->is_up;
-    return unless $self->ssh('pwd >/dev/null 2>&1');
-    $self->is_up(1);
-    return 1;
+    $self->manager->_terminate_servers($self);
+    $self->is_up(0);
+    1;
 }
 
-sub add_volume {
-    shift->provision_volume(@_)
-}
+=head1 Volume Management Methods
+
+The methods in this section allow you to create and manage volumes
+attached to the server. These supplement the EC2 facilities for
+creating and attaching EBS volumes with the ability to format the
+volumes with a variety of filesystems, and mount them at a desired
+location.
+
+=head2 $volume = $server->provision_volume(%args)
+
+Provision and mount a new volume. If successful, the volume is
+returned as a VM::EC2::Staging::Volume object.
+
+Arguments:
+
+ -name         Symbolic name for the desired volume.
+ -fstype       Filesystem type for desired volume
+ -size         Size for the desired volume in GB
+ -mtpt         Mountpoint for this volume
+ -mount        Alias for -mtpt
+ -volume_id    ID of existing volume to attach & mount
+ -snapshot_id  ID of existing snapshot to use to create this volume
+ -reuse        Reuse an existing managed volume of same name.
+ -label        Disk label to assign during formatting
+ -uuid         UUID to assign during formatting
+
+*Explain default behavior
+*Explain -fstype types
+*Explain -volume_id and _snapshot_id
+*Explain -reuse
+*Explain UUID
+
+=cut
 
 sub provision_volume {
     my $self = shift;
@@ -340,6 +506,10 @@ sub provision_volume {
 
     $self->manager->register_volume($volobj);
     return $volobj;
+}
+
+sub add_volume {
+    shift->provision_volume(@_)
 }
 
 sub _mkfs_packages {
@@ -503,6 +673,10 @@ sub resolve_path {
     return [$servername,$pathname];
 }
 
+=head1 Data Copying Methods
+
+=cut
+
 # most general form
 # 
 sub rsync {
@@ -652,6 +826,10 @@ sub _rsync_get {
     system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
 }
 
+=head1 Remote Shell Methods
+
+=cut
+
 sub ssh {
     my $self = shift;
 
@@ -663,7 +841,7 @@ sub ssh {
     my @cmd   = @_;
     my $Instance = $self->instance or die "Remote instance not set up correctly";
     my $host     = $Instance->dnsName;
-    system('/usr/bin/ssh',$self->_ssh_args,@extra_args,$host,@cmd)==0;
+    system('ssh',$self->_ssh_args,@extra_args,$host,@cmd)==0;
 }
 
 sub scmd {
@@ -694,7 +872,7 @@ sub scmd {
     }
 
     # in child
-    exec '/usr/bin/ssh',$self->_ssh_args,@extra_args,$host,@cmd;
+    exec 'ssh',$self->_ssh_args,@extra_args,$host,@cmd;
 }
 
 # return a filehandle that you can write to:
@@ -730,7 +908,7 @@ sub _scmd_pipe {
     my $pid = open(my $fh,$operation); # this does a fork
     defined $pid or croak "piped open failed: $!" ;
     return $fh if $pid;         # writing to the filehandle writes to an ssh session
-    exec '/usr/bin/ssh',$self->_ssh_args,@extra_args,$host,@cmd;
+    exec 'ssh',$self->_ssh_args,@extra_args,$host,@cmd;
     exit 0;
 }
 
@@ -743,7 +921,7 @@ sub shell {
     my $host     = $self->instance->dnsName;
     my $ssh_args = $self->_ssh_escaped_args;
     my $emulator = $ENV{COLORTERM} || $ENV{TERM} || 'xterm';
-    exec $emulator,'-e',"/usr/bin/ssh $ssh_args $host";
+    exec $emulator,'-e',"ssh $ssh_args $host";
 }
 
 sub _ssh_args {
@@ -917,6 +1095,41 @@ sub accepts_key {
     $self->{_accepts_key}{$keyname} = shift if @_;
     return $self->{_accepts_key}{$keyname};
 }
+
+=head1 Internal methods
+
+The methods in this section are intended primarily for internal use.
+
+=cut
+
+sub is_up {
+    my $self = shift;
+    my $d    = $self->{_is_up};
+    $self->{_is_up} = shift if @_;
+    $d;
+}
+
+
+=head1 SEE ALSO
+
+L<VM::EC2>
+L<VM::EC2::Instance>
+L<VM::EC2::Volume>
+L<VM::EC2::Snapshot>
+
+=head1 AUTHOR
+
+Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
+
+Copyright (c) 2011 Ontario Institute for Cancer Research
+
+This package and its accompanying libraries is free software; you can
+redistribute it and/or modify it under the terms of the GPL (either
+version 1, or at your option, any later version) or the Artistic
+License 2.0.  Refer to LICENSE for the full license text. In addition,
+please see DISCLAIMER.txt for disclaimers of warranty.
+
+=cut
 
 1;
 

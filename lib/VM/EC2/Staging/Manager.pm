@@ -615,12 +615,12 @@ sub provision_server {
 	-keyfile  => $keyfile,
 	-username => $self->username,
 	-instance => $instance,
-	-endpoint => $self->ec2->endpoint,
+	-manager  => $self,
 	);
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
 	alarm(SERVER_STARTUP_TIMEOUT);
-	$self->wait_for_instances($server);
+	$self->wait_for_servers($server);
     };
     alarm(0);
     croak "server did not start after ",SERVER_STARTUP_TIMEOUT," seconds"
@@ -750,7 +750,6 @@ state.
 
 sub stop_all_servers {
     my $self = shift;
-    # my @servers = keys %Instances;  # allows this to run correctly during global destruct
     my $ec2 = $self->ec2;
     my @servers  = grep {$_->ec2 eq $ec2} $self->servers;
     @servers or return;
@@ -769,6 +768,13 @@ sub terminate_all_servers {
     my $self = shift;
     my $ec2 = $self->ec2 or return;
     my @servers  = $self->servers or return;
+    $self->_terminate_servers(@servers);
+}
+
+sub _terminate_servers {
+    my $self = shift;
+    my @servers = @_;
+    my $ec2 = $self->ec2 or return;
     
     $self->info("Terminating servers @servers.\n");
     $ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
@@ -779,18 +785,18 @@ sub terminate_all_servers {
     $self->unregister_server($_) foreach @servers;
 }
 
-sub _start_instances {
-    my $self = shift;
-    my @need_starting = @_;
-    $self->info("starting instances: @need_starting.\n");
-    $self->ec2->start_instances(@need_starting);
-    $self->wait_for_instances(@need_starting);
-}
+=head2 $manager->wait_for_servers(@servers)
 
-sub wait_for_instances {
+Wait until all the servers on the list @servers are up and able to
+accept ssh commands. You may wish to wrap this in an eval{} and
+timeout in order to avoid waiting indefinitely.
+
+=cut
+
+sub wait_for_servers {
     my $self = shift;
     my @instances = @_;
-    $self->ec2->wait_for_instances(@instances);
+    my $status = $self->ec2->wait_for_instances(@instances);
     my %pending = map {$_=>$_} grep {$_->current_status eq 'running'} @instances;
     $self->info("Waiting for ssh daemon on @instances.\n") if %pending;
     while (%pending) {
@@ -802,6 +808,15 @@ sub wait_for_instances {
 	    delete $pending{$s};
 	}
     }
+    return $status;
+}
+
+sub _start_instances {
+    my $self = shift;
+    my @need_starting = @_;
+    $self->info("starting instances: @need_starting.\n");
+    $self->ec2->start_instances(@need_starting);
+    $self->wait_for_servers(@need_starting);
 }
 
 =head1 Instance Methods for Managing Staging Volumes
@@ -1201,7 +1216,27 @@ sub dot_directory {
 This section documents internal methods that are not normally called
 by end-user scripts but may be useful in subclasses. In addition,
 there are a number of undocumented internal methods that begin with
-the "_" character for which you will need to access the source code.
+the "_" character. Explore the source code to learn about these.
+
+=head2 $ok   = $manager->environment_ok
+
+This performs a check on the environment in which the module is
+running. For this module to work properly, the ssh, rsync and dd
+programs must be found in the PATH. If all three programs are found,
+then this method returns true.
+
+This method can be called as an instance method or class method.
+
+=cut
+
+sub environment_ok {
+    my $self = shift;
+    foreach (qw(dd ssh rsync)) {
+	chomp (my $path = `which $_`);
+	return unless $path;
+    }
+    return 1;
+}
 
 =head2 $name = $manager->default_exit_behavior
 
