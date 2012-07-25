@@ -144,6 +144,8 @@ use constant                     GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
 
 my (%Zones,%Instances,%Volumes,%Managers);
+my $Quiet;
+my ($LastHost,$LastMt);
 
 =head2 $manager = $ec2->staging_manager(@args)
 
@@ -304,6 +306,7 @@ END
     die $@ if $@;
     }
 
+    $Quiet  = $args{-quiet};  # package global, for a few edge cases
     my $obj = bless \%args,ref $class || $class;
     weaken($Managers{$obj->ec2->endpoint} = $obj);
     if ($args{-scan}) {
@@ -1091,9 +1094,183 @@ the local machine.
 
 =cut
 
+# most general form
+# 
 sub rsync {
     my $self = shift;
-    VM::EC2::Staging::Server->rsync(@_);
+    croak "usage: VM::EC2::Staging::Manager->rsync(\$source_path1,\$source_path2\...,\$dest_path)"
+	unless @_ >= 2;
+
+    my @p    = @_;
+    undef $LastHost;
+    undef $LastMt;
+    my @paths = map {$self->_resolve_path($_)} @p;
+
+    my $dest   = pop @paths;
+    my @source = @paths;
+
+    my %hosts;
+    foreach (@source) {
+	$hosts{$_->[0]} = $_->[0];
+    }
+    croak "More than one source host specified" if keys %hosts > 1;
+    my ($source_host) = values %hosts;
+    my $dest_host     = $dest->[0];
+
+    my @source_paths      = map {$_->[1]} @source;
+    my $dest_path         = $dest->[1];
+
+    my $rsync_args        = $self->_rsync_args;
+
+    my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,__PACKAGE__);
+    my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,__PACKAGE__);
+
+    # this is true when one of the paths contains a ":", indicating an rsync
+    # path that contains a hostname, but not a managed server
+    my $remote_path      = "@source_paths $dest_path" =~ /:/;
+
+    # remote rsync on either src or dest server
+    if ($remote_path && ($src_is_server || $dest_is_server)) {
+	my $server = $source_host || $dest_host;
+	return $server->ssh(['-t','-A'],"sudo -E rsync -e 'ssh -o \"CheckHostIP no\" -o \"StrictHostKeyChecking no\"' $rsync_args @source_paths $dest_path");
+    }
+
+    # localhost => localhost
+    if (!($source_host || $dest_host)) {
+	return system("rsync @source $dest") == 0;
+    }
+
+    # localhost           => DataTransferServer
+    if ($dest_is_server && !$src_is_server) {
+	return $dest_host->_rsync_put(@source_paths,$dest_path);
+    }
+
+    # DataTransferServer  => localhost
+    if ($src_is_server && !$dest_is_server) {
+	return $source_host->_rsync_get(@source_paths,$dest_path);
+    }
+
+    if ($source_host eq $dest_host) {
+	return $source_host->ssh('sudo','rsync',$rsync_args,@source_paths,$dest_path);
+    }
+
+    # DataTransferServer1 => DataTransferServer2
+    # this one is slightly more difficult because datatransferserver1 has to
+    # ssh authenticate against datatransferserver2.
+    my $keyname = $self->_authorize($source_host => $dest_host);
+
+    my $dest_ip  = $dest_host->instance->dnsName;
+    my $ssh_args = $source_host->_ssh_escaped_args;
+    my $keyfile  = $source_host->keyfile;
+    $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
+    return $source_host->ssh('sudo','rsync',$rsync_args,
+			     '-e',"'ssh $ssh_args'",
+			     "--rsync-path='sudo rsync'",
+			     @source_paths,"$dest_ip:$dest_path");
+}
+
+=head2 $manager->dd($source_vol=>$dest_vol)
+
+This method performs block-level copying of the contents of
+$source_vol to $dest_vol by using dd over an SSH tunnel, where both
+source and destination volumes are VM::EC2::Staging::Volume
+objects. The volumes must be attached to a server but not
+mounted. Everything in the volume, including its partition table, is
+copied, allowing you to make an exact image of a disk.
+
+The volumes do B<not> actually need to reside on this server, but can
+be attached to any staging server in the zone.
+
+=cut
+
+# for this to work, we have to create the concept of a "raw" staging volume
+# that is attached, but not mounted
+sub dd {
+    my $self = shift;
+
+    @_==2 or croak "usage: VM::EC2::Staging::Manager->dd(\$source_vol=>\$dest_vol)";
+
+    my ($vol1,$vol2) = @_;
+    my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
+    my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
+    my $hush     = $self->hush ? '2>/dev/null' : '';
+
+    if ($server1 eq $server2) {
+	$server1->ssh("sudo dd if=$device1 of=$device2 $hush");
+    }  else {
+	my $keyname  = $self->_authorize($server1,$server2);
+	my $dest_ip  = $server2->instance->dnsName;
+	my $ssh_args = $server1->_ssh_escaped_args;
+	my $keyfile  = $server1->keyfile;
+	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
+	$server1->ssh("sudo dd if=$device1 $hush | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
+    }
+}
+
+# take real or symbolic name and turn it into a two element
+# list consisting of server object and mount point
+# possible forms:
+#            /local/path
+#            vol-12345/relative/path
+#            vol-12345:/relative/path
+#            vol-12345:relative/path
+#            $server:/absolute/path
+#            $server:relative/path
+# 
+# treat path as symbolic if it does not start with a slash
+# or dot characters
+sub _resolve_path {
+    my $self  = shift;
+    my $vpath = shift;
+
+    my ($servername,$pathname);
+    if ($vpath =~ /^(vol-[0-9a-f]+):?(.*)/ &&
+	      (my $vol = VM::EC2::Staging::Manager->find_volume_by_volid($1))) {
+	my $path    = $2 || '/';
+	$path       = "/$path" if $path && $path !~ m!^/!;
+	$vol->_spin_up;
+	$servername = $LastHost = $vol->server;
+	my $mtpt    = $LastMt   = $vol->mtpt;
+	$pathname   = $mtpt;
+	$pathname  .= $path if $path;
+    } elsif ($vpath =~ /^(i-[0-9a-f]{8}):(.+)$/ && 
+	     (my $server = VM::EC2::Staging::Manager->find_server_by_instance($1))) {
+	$servername = $LastHost = $server;
+	$pathname   = $2;
+    } elsif ($vpath =~ /^:(.+)$/) {
+	$servername = $LastHost if $LastHost;
+	$pathname   = $LastHost && $LastMt ? "$LastMt/$2" : $2;
+    } else {
+	return [undef,$vpath];   # localhost
+    }
+
+    $servername->start    if $servername && !$servername->is_up;
+    return [$servername,$pathname];
+}
+
+sub _rsync_args {
+    my $self  = shift;
+    my $quiet = $self->hush;
+    return $quiet ? '-aqz' : '-avz';
+}
+
+sub _authorize {
+    my $self = shift;
+    my ($source_host,$dest_host) = @_;
+    my $keyname = "/tmp/${source_host}_to_${dest_host}";
+    unless ($source_host->has_key($keyname)) {
+	$source_host->info("creating ssh key for server to server data transfer\n");
+	$source_host->ssh("ssh-keygen -t dsa -q -f $keyname</dev/null 2>/dev/null");
+	$source_host->has_key($keyname=>1);
+    }
+    unless ($dest_host->accepts_key($keyname)) {
+	my $key_stuff = $source_host->scmd("cat ${keyname}.pub");
+	chomp($key_stuff);
+	$dest_host->ssh("mkdir -p .ssh; chmod 0700 .ssh; (echo '$key_stuff' && cat .ssh/authorized_keys) | sort | uniq > .ssh/authorized_keys.tmp; mv .ssh/authorized_keys.tmp .ssh/authorized_keys; chmod 0600 .ssh/authorized_keys");
+	$dest_host->accepts_key($keyname=>1);
+    }
+
+    return $keyname;
 }
 
 =head2 $volume = $manager->find_volume_by_volid($volume_id)
@@ -1615,11 +1792,28 @@ option is set.
 
 =cut
 
-
 sub info {
     my $self = shift;
-    return if $self->quiet;
+    return if $self->hush;
     print STDERR @_;
+}
+
+=head2 $quiet = $manager->hush([$new_value])
+
+The hush() method get/sets a flag that if true disables informational
+messages. It is similar to quiet() except that it also sets a package
+variable, enabling the method to be used in a class context.
+
+=cut
+
+sub hush {
+    my $self = shift;
+    my $d    = ref $self ? $self->quiet : $Quiet;
+    if (@_) {
+	$Quiet = shift;
+	$self->quiet($Quiet) if ref $self;
+    }
+    return $d;
 }
 
 
