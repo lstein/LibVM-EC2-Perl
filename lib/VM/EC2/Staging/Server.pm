@@ -9,13 +9,11 @@ VM::EC2::Staging::Server - High level interface to EC2-based servers
 
 =head1 SYNOPSIS
 
-
  use VM::EC2::Staging::Manager;
 
  # get a new staging manager
  my $ec2     = VM::EC2->new;
  my $staging = $ec2->staging_manager();                                         );
- 
 
  # Fetch a server named 'my_server'. Create it if it does not already exist.
  my $server1 = $staging->get_server(-name              => 'my_server',
@@ -360,6 +358,212 @@ sub terminate {
     1;
 }
 
+=head1 Remote Shell Methods
+
+The methods in this section allow you to run remote commands on the
+staging server and interrogate the results. Since the staging manager
+handles the creation of SSH keys internally, you do not need to worry
+about finding the right public/private keypair.
+
+=head2 $result = $server->ssh(@command)
+
+The ssh() method invokes a command on the remote server. You may
+provide the command line as a single string, or broken up by argument:
+
+  $server->ssh('ls -lR /var/log');
+  $server->ssh('ls','-lR','/var/log');
+
+The output of the command will appear on STDOUT and STDERR of the perl
+process. Input, if needed, will be read from STDIN. If no command is
+provided, then an interactive ssh session will be started on the
+remote server and the script will wait until you have logged out.
+
+If the remote command was successful, the method result will be true.
+
+=cut
+
+sub ssh {
+    my $self = shift;
+    $self->start unless $self->is_up;
+
+    my @extra_args;
+    if (ref($_[0]) && ref($_[0]) eq 'ARRAY') {
+	my $extra      = shift;
+	@extra_args = @$extra;
+    }
+    my @cmd   = @_;
+    my $Instance = $self->instance or die "Remote instance not set up correctly";
+    my $host     = $Instance->dnsName;
+    system('ssh',$self->_ssh_args,@extra_args,$host,@cmd)==0;
+}
+
+=head2 $output = $server->scmd(@command)
+
+This is similar to ssh(), except that the standard output of the
+remote command will be captured and returned as the function result,
+similar to the way backticks work in perl:
+
+ my $output = $server->scmd('date');
+ print "The localtime for the server is $output";
+
+=cut
+
+sub scmd {
+    my $self = shift;
+    my @extra_args;
+    if (ref($_[0]) && ref($_[0]) eq 'ARRAY') {
+	my $extra      = shift;
+	@extra_args = @$extra;
+    }
+    my @cmd   = @_;
+
+    $self->start unless $self->is_up;
+    my $Instance = $self->instance or die "Remote instance not set up correctly";
+    my $host     = $Instance->dnsName;
+
+    my $pid = open my $kid,"-|"; #this does a fork
+    die "Couldn't fork: $!" unless defined $pid;
+    if ($pid) {
+	my @results;
+	while (<$kid>) {
+	    push @results,$_;
+	}
+	close $kid;
+	if (wantarray) {
+	    chomp(@results);
+	    return @results;
+	} else {
+	    return join '',@results;
+	}
+    }
+
+    # in child
+    exec 'ssh',$self->_ssh_args,@extra_args,$host,@cmd;
+}
+
+=head2 $fh = $server->scmd_write(@command)
+
+This method executes @command on the remote server, and returns a
+filehandle that is attached to the standard input of the command. Here
+is a slightly dangerous example that appends a line to /etc/passwd:
+
+ my $fh = $server->scmd_write('sudo -s "cat >>/etc/passwd"');
+ print $fh "whoopsie:x:119:130::/nonexistent:/bin/false\n";
+ close $fh;
+
+=cut
+
+# return a filehandle that you can write to:
+# e.g.
+# my $fh = $server->scmd_write('cat >/tmp/foobar');
+# print $fh, "testing\n";
+# close $fh;
+sub scmd_write {
+    my $self = shift;
+    return $self->_scmd_pipe('write',@_);
+}
+
+=head2 $fh = $server->scmd_read(@command)
+
+This method executes @command on the remote server, and returns a
+filehandle that is attached to the standard output of the command. Here
+is an example of reading syslog:
+
+ my $fh = $server->scmd_read('sudo cat /var/log/syslog');
+ while (<$fh>) {
+    next unless /kernel/;
+    print $_;
+ }
+ close $fh;
+
+=cut
+
+# same thing, but you read from it:
+# my $fh = $server->scmd_read('cat /tmp/foobar');
+# while (<$fh>) {
+#    print $_;
+#}
+sub scmd_read {
+    my $self = shift;
+    return $self->_scmd_pipe('read',@_);
+}
+
+=head2 $server->shell()
+
+This method works in an X Windowing environment by launching a new
+terminal window and running an interactive ssh session on the server
+host. The terminal window is executed in a fork()ed session, so that
+the rest of the script continues running.  If X Windows is not
+running, then the method behaves the same as calling ssh() with no
+arguments.
+
+The terminal emulator to run is determined by examining first the
+COLORTERM environment variable and then the TERM variable. If neither
+is set, then it falls back to "xterm".
+
+=cut
+
+sub shell {
+    my $self = shift;
+    $self->start unless $self->is_up;
+
+    return $self->ssh() unless $ENV{DISPLAY};
+    
+    fork() && return;
+    setsid(); # so that we are independent of parent signals
+    my $host     = $self->instance->dnsName;
+    my $ssh_args = $self->_ssh_escaped_args;
+    my $emulator = $ENV{COLORTERM} || $ENV{TERM} || 'xterm';
+    exec $emulator,'-e',"ssh $ssh_args $host";
+}
+
+sub _ssh_args {
+    my $self = shift;
+    return (
+	'-o','CheckHostIP no',
+	'-o','StrictHostKeyChecking no',
+	'-o','UserKnownHostsFile /dev/null',
+	'-o','LogLevel QUIET',
+	'-i',$self->keyfile,
+	'-l',$self->username,
+	);
+}
+
+sub _ssh_escaped_args {
+    my $self = shift;
+    my @args = $self->_ssh_args;
+    for (my $i=1;$i<@args;$i+=2) {
+	$args[$i] = qq("$args[$i]") if $args[$i];
+    }
+    my $args = join ' ',@args;
+    return $args;
+}
+
+sub _rsync_args {
+    my $self = shift;
+    my $quiet = eval{$self->manager->quiet};
+    return $quiet ? '-aqz' : '-avz';
+}
+
+sub _scmd_pipe {
+    my $self = shift;
+    my ($op,@cmd) = @_;
+    my @extra_args;
+    if (ref($cmd[0]) && ref($cmd[0]) eq 'ARRAY') {
+	my $extra      = shift @cmd;
+	@extra_args = @$extra;
+    }
+    my $operation = $op eq 'write' ? '|-' : '-|';
+
+    $self->start unless $self->is_up;
+    my $host = $self->dnsName;
+    my $pid = open(my $fh,$operation); # this does a fork
+    defined $pid or croak "piped open failed: $!" ;
+    return $fh if $pid;         # writing to the filehandle writes to an ssh session
+    exec 'ssh',$self->_ssh_args,@extra_args,$host,@cmd;
+    exit 0;
+}
+
 =head1 Volume Management Methods
 
 The methods in this section allow you to create and manage volumes
@@ -400,7 +604,9 @@ the volume, ext4 by default. The following filesystems are currently
 supported: ext2, ext3, ext4, xfs, reiserfs, jfs, ntfs, nfs, vfat,
 msdos. In addition, you can specify a filesystem of "raw", which means
 to provision and attach the volume to the server, but not to format
-it. This can be used to set up LVM and RAID devices.
+it. This can be used to set up LVM and RAID devices. Note that if the
+server does not currently have the package needed to manage the
+desired filesystem, it will use "apt-get" to install it.
 
 The B<-mtpt> and B<-mount> arguments (they are equivalent) specify the
 mount point for the volume on the server filesystem. The default is
@@ -561,92 +767,41 @@ sub provision_volume {
     return $volobj;
 }
 
+=head2 $volume = $server->add_volume(%args)
+
+This is the same as provision_volume().
+
+=cut
+
 sub add_volume {
     shift->provision_volume(@_)
 }
 
-sub _mkfs_packages {
-    my $self = shift;
-    return {
-	xfs       => 'xfsprogs',
-	reiserfs  => 'reiserfsprogs',
-	jfs       => 'jfsutils',
-	ntfs      => 'ntfsprogs',
-	hfs       => 'hfsprogs',
-    }
+=head2 @volumes = $server->volumes()
+
+Return a list of all the staging volumes attached to this
+server. Unmanaged volumes, such as the root volume, are not included
+in the list.
+
+=cut
+
+sub volumes {
+    my $self   = shift;
+    my @volIds = map {$_->volumeId} $self->blockDeviceMapping;
+    my @volumes = map {$self->manager->find_volume_by_volid($_)} @volIds;
+    return grep {defined $_} @volumes;
 }
 
-sub _find_or_create_mount {
-    my $self = shift;
-    my $vol  = shift;
+=head2 $server->unmount_volume($volume)
 
-    my ($ebs_device,$mt_device,$mtpt);
-    
-    # handle the case of the volme already being attached
-    if (my $attachment = $vol->attachment) {
-	if ($attachment->status eq 'attached') {
-	    $attachment->instanceId eq $self->instanceId or
-		die "$vol is attached to wrong server";
-	    ($mt_device,$mtpt) = $self->_find_mount($attachment->device);
-	    unless ($mtpt) {
-		$mtpt = $vol->tags->{StagingMtPt} || '/mnt/Staging/'.$vol->name;
-		$self->_mount($mt_device,$mtpt);
-	    }
+Unmount the volume $volume. The volume will remain attached to the
+server. This method will die with a fatal error if the operation
+fails.
 
-	    #oops, device is in a semi-attached state. Let it settle then reattach.
-	} else {
-	    $self->info("$vol was recently used. Waiting for attachment state to settle...\n");
-	    $self->ec2->wait_for_attachments($attachment);
-	}
-    }
+See VM::EC2::Staging::Volume->detach() for the recommended way to
+unmount and detach the volume.
 
-    unless ($mt_device && $mtpt) {
-	($ebs_device,$mt_device) = $self->unused_block_device;
-	$self->info("attaching $vol to $self via $mt_device\n");
-	my $s = $vol->attach($self->instanceId,$mt_device);
-	$self->ec2->wait_for_attachments($s);
-	$s->current_status eq 'attached' or croak "Can't attach $vol to $self";
-	$mtpt = $vol->tags->{StagingMtPt} || '/mnt/Staging/'.$vol->name;
-	$self->_mount($mt_device,$mtpt);
-    }
-
-    $vol->mtpt($mtpt);
-    $vol->mtdev($mt_device);
-}
-
-# this gets called to find a device that is already mounted
-sub _find_mount {
-    my $self       = shift;
-    my $device     = shift;
-    my @mounts = $self->scmd('cat /proc/mounts');
-    my (%mounts,$xvd);
-    for my $m (@mounts) {
-	my ($dev,$mtpt) = split /\s+/,$m;
-	$xvd++ if $dev =~ m!^/dev/xvd!;
-	$mounts{$dev} = $mtpt;
-    }
-    $device =~ s!^/dev/sd!/dev/xvd! if $xvd;
-    return ($device,$mounts{$device});
-}
-
-sub mount_volume {
-    my $self = shift;
-    my $vol  = shift;
-    return if $vol->mtpt eq 'none';
-    if ($vol->mtpt) {
-	$self->_mount($vol->mtdev,$vol->mtpt);
-    } else {
-	$self->_find_or_create_mount($vol);
-    }
-    $vol->mounted(1);
-}
-
-sub _mount {
-    my $self = shift;
-    my ($mt_device,$mtpt) = @_;
-    $self->info("Mounting staging volume.\n");
-    $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt") or croak "mount failed";
-}
+=cut
 
 sub unmount_volume {
     my $self = shift;
@@ -660,16 +815,84 @@ sub unmount_volume {
     $vol->mounted(0);
 }
 
+=head2 $server->detach_volume($volume)
+
+Unmount and detach the volume from the server, waiting until EC2
+reports that the detachment completed. A fatal error will occur if the
+operation fails.
+
+=cut
+
+sub detach_volume {
+    my $self = shift;
+    my $vol  = shift;
+    return unless $vol->server;
+    return unless $vol->current_status eq 'in-use';
+    $vol->server eq $self or croak "Volume is not attached to this server";
+    my $status = $vol->detach();
+    $self->ec2->wait_for_attachments($status);
+}
+
+=head2 $server->mount_volume($volume)
+
+Mount the volume $volume using the mount information recorded inside
+the VM::EC2::Staging::Volume object (returned by its mtpt() and
+mtdev() methods). If the volume has not previously been mounted on
+this server, then it will be attached to the server and a new mountpoint
+will be allocated automatically.
+
+Here is the recommended way to detach a staging volume from one server
+and attach it to another:
+
+ $server1->detach_volume($volume);
+ $server2->mount_volume($volume);
+
+=cut
+
+sub mount_volume {
+    my $self = shift;
+    my $vol  = shift;
+    if ($vol->mtpt) {
+	return if $vol->mtpt eq 'none';
+	$self->_mount($vol->mtdev,$vol->mtpt);
+    } else {
+	$self->_find_or_create_mount($vol);
+    }
+    $vol->mounted(1);
+}
+
+=head2 $server->remount_volume($volume)
+
+This is similar to mount_volume(), except that it will fail with a
+fatal error if the volume was not previously mounted on this server.
+This is to be used when temporarily unmounting and remounting a volume
+on the same server:
+
+ $server->unmount_volume($volume);
+ # do some work on the volume
+ $server->remount_volume($volume)
+
+=cut
+
 sub remount_volume {
     my $self = shift;
     my $vol  = shift;
     my $mtpt = $vol->mtpt;
     return if $mtpt eq 'none';
     my $device = $vol->mtdev;
+    my $server = $vol->server;
+    ($mtpt && $device && $server eq $self)
+	or croak "attempt to remount a volume that was not previously mounted on this server";
     $self->info("remounting $vol\n");
     $self->ssh('sudo','mount',$device,$mtpt) or croak "Could not remount $mtpt";
     $vol->mounted(1);
 }
+
+=head2 $server->delete_volume($volume)
+
+Unmount, detach, and then delete the indicated volume entirely.
+
+=cut
 
 sub delete_volume {
    my $self = shift;
@@ -685,325 +908,17 @@ sub delete_volume {
    $vol->mounted(0);
 }
 
-# take real or symbolic name and turn it into a two element
-# list consisting of server object and mount point
-# possible forms:
-#            /local/path
-#            vol-12345/relative/path
-#            vol-12345:/relative/path
-#            vol-12345:relative/path
-#            $server:/absolute/path
-#            $server:relative/path
-# 
-# treat path as symbolic if it does not start with a slash
-# or dot characters
-sub resolve_path {
-    my $self  = shift;
-    my $vpath = shift;
+=head2 $snap = $server->create_snapshot($volume,$description)
 
-    my ($servername,$pathname);
-    if ($vpath =~ /^(vol-[0-9a-f]+):?(.*)/ &&
-	      (my $vol = VM::EC2::Staging::Manager->find_volume_by_volid($1))) {
-	my $path    = $2 || '/';
-	$path       = "/$path" if $path && $path !~ m!^/!;
-	$vol->_spin_up;
-	$servername = $LastHost = $vol->server;
-	my $mtpt    = $LastMt   = $vol->mtpt;
-	$pathname   = $mtpt;
-	$pathname  .= $path if $path;
-    } elsif ($vpath =~ /^(i-[0-9a-f]{8}):(.+)$/ && 
-	     (my $server = VM::EC2::Staging::Manager->find_server_by_instance($1))) {
-	$servername = $LastHost = $server;
-	$pathname   = $2;
-    } elsif ($vpath =~ /^:(.+)$/) {
-	$servername = $LastHost if $LastHost;
-	$pathname   = $LastHost && $LastMt ? "$LastMt/$2" : $2;
-    } else {
-	return [undef,$vpath];   # localhost
-    }
+Unmount the volume, snapshot it using the provided description, and
+then remount the volume. If successful, returns the snapshot.
 
-    $servername->start    if $servername && !$servername->is_up;
-    return [$servername,$pathname];
-}
-
-=head1 Data Copying Methods
+The snapshot is tagged with the identifying information needed to
+associate the snapshot with the staging volume. This information then
+used when creating new volumes from the snapshot with
+$server->provision_volume(-reuse=>1).
 
 =cut
-
-# most general form
-# 
-sub rsync {
-    my $self = shift;
-    croak "usage: VM::EC2::Staging::Server->rsync(\$source_path1,\$source_path2\...,\$dest_path)"
-	unless @_ >= 2;
-
-    my @p    = @_;
-    undef $LastHost;
-    undef $LastMt;
-    my @paths = map {$self->resolve_path($_)} @p;
-
-    my $dest   = pop @paths;
-    my @source = @paths;
-
-    my %hosts;
-    foreach (@source) {
-	$hosts{$_->[0]} = $_->[0];
-    }
-    croak "More than one source host specified" if keys %hosts > 1;
-    my ($source_host) = values %hosts;
-    my $dest_host     = $dest->[0];
-
-    my @source_paths      = map {$_->[1]} @source;
-    my $dest_path         = $dest->[1];
-
-    my $rsync_args        = $self->_rsync_args;
-
-    my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,__PACKAGE__);
-    my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,__PACKAGE__);
-
-    # this is true when one of the paths contains a ":", indicating an rsync
-    # path that contains a hostname, but not a managed server
-    my $remote_path      = "@source_paths $dest_path" =~ /:/;
-
-    # remote rsync on either src or dest server
-    if ($remote_path && ($src_is_server || $dest_is_server)) {
-	my $server = $source_host || $dest_host;
-	return $server->ssh(['-t','-A'],"sudo -E rsync -e 'ssh -o \"CheckHostIP no\" -o \"StrictHostKeyChecking no\"' $rsync_args @source_paths $dest_path");
-    }
-
-    # localhost => localhost
-    if (!($source_host || $dest_host)) {
-	return system("rsync @source $dest") == 0;
-    }
-
-    # localhost           => DataTransferServer
-    if ($dest_is_server && !$src_is_server) {
-	return $dest_host->_rsync_put(@source_paths,$dest_path);
-    }
-
-    # DataTransferServer  => localhost
-    if ($src_is_server && !$dest_is_server) {
-	return $source_host->_rsync_get(@source_paths,$dest_path);
-    }
-
-    if ($source_host eq $dest_host) {
-	return $source_host->ssh('sudo','rsync',$rsync_args,@source_paths,$dest_path);
-    }
-
-    # DataTransferServer1 => DataTransferServer2
-    # this one is slightly more difficult because datatransferserver1 has to
-    # ssh authenticate against datatransferserver2.
-    my $keyname = $self->_authorize($source_host => $dest_host);
-
-    my $dest_ip  = $dest_host->instance->dnsName;
-    my $ssh_args = $self->_ssh_escaped_args;
-    my $keyfile  = $self->keyfile;
-    $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-    return $source_host->ssh('sudo','rsync',$rsync_args,
-			     '-e',"'ssh $ssh_args'",
-			     "--rsync-path='sudo rsync'",
-			     @source_paths,"$dest_ip:$dest_path");
-}
-
-# for this to work, we have to create the concept of a "raw" staging volume
-# that is attached, but not mounted
-sub dd {
-    my $self = shift;
-
-    @_==2 or croak "usage: dd(\$source_vol=>\$dest_vol)";
-
-    my ($vol1,$vol2) = @_;
-    my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
-    my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
-    my $hush     = $self->manager->quiet ? '2>/dev/null' : '';
-
-    if ($server1 eq $server2) {
-	$server1->ssh("sudo dd if=$device1 of=$device2 $hush");
-    }  else {
-	my $keyname  = $self->_authorize($server1,$server2);
-	my $dest_ip  = $server2->instance->dnsName;
-	my $ssh_args = $self->_ssh_escaped_args;
-	my $keyfile  = $self->keyfile;
-	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-	$server1->ssh("sudo dd if=$device1 $hush | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
-    }
-}
-
-sub _authorize {
-    my $self = shift;
-    my ($source_host,$dest_host) = @_;
-    my $keyname = "/tmp/${source_host}_to_${dest_host}";
-    unless ($source_host->has_key($keyname)) {
-	$source_host->info("creating ssh key for server to server data transfer\n");
-	$source_host->ssh("ssh-keygen -t dsa -q -f $keyname</dev/null 2>/dev/null");
-	$source_host->has_key($keyname=>1);
-    }
-    unless ($dest_host->accepts_key($keyname)) {
-	my $key_stuff = $source_host->scmd("cat ${keyname}.pub");
-	chomp($key_stuff);
-	$dest_host->ssh("mkdir -p .ssh; chmod 0700 .ssh; (echo '$key_stuff' && cat .ssh/authorized_keys) | sort | uniq > .ssh/authorized_keys.tmp; mv .ssh/authorized_keys.tmp .ssh/authorized_keys; chmod 0600 .ssh/authorized_keys");
-	$dest_host->accepts_key($keyname=>1);
-    }
-
-    return $keyname;
-}
-
-sub _rsync_put {
-    my $self   = shift;
-    my @source = @_;
-    my $dest   = pop @source;
-    # resolve symbolic name of $dest
-    $dest        =~ s/^.+://;  # get rid of hostname, if it is there
-    my $host     = $self->instance->dnsName;
-    my $ssh_args = $self->_ssh_escaped_args;
-    my $rsync_args = $self->_rsync_args;
-    $self->info("Beginning rsync...\n");
-    system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest") == 0;
-}
-
-sub _rsync_get {
-    my $self = shift;
-    my @source = @_;
-    my $dest   = pop @source;
-
-    # resolve symbolic names of src
-    my $host     = $self->instance->dnsName;
-    foreach (@source) {
-	(my $path = $_) =~ s/^.+://;  # get rid of host part, if it is there
-	$_ = "$host:$path";
-    }
-    my $ssh_args   = $self->_ssh_escaped_args;
-    my $rsync_args = $self->_rsync_args;
-    
-    $self->info("Beginning rsync...\n");
-    system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
-}
-
-=head1 Remote Shell Methods
-
-=cut
-
-sub ssh {
-    my $self = shift;
-
-    my @extra_args;
-    if (ref($_[0]) && ref($_[0]) eq 'ARRAY') {
-	my $extra      = shift;
-	@extra_args = @$extra;
-    }
-    my @cmd   = @_;
-    my $Instance = $self->instance or die "Remote instance not set up correctly";
-    my $host     = $Instance->dnsName;
-    system('ssh',$self->_ssh_args,@extra_args,$host,@cmd)==0;
-}
-
-sub scmd {
-    my $self = shift;
-    my @extra_args;
-    if (ref($_[0]) && ref($_[0]) eq 'ARRAY') {
-	my $extra      = shift;
-	@extra_args = @$extra;
-    }
-    my @cmd   = @_;
-    my $Instance = $self->instance or die "Remote instance not set up correctly";
-    my $host     = $Instance->dnsName;
-
-    my $pid = open my $kid,"-|"; #this does a fork
-    die "Couldn't fork: $!" unless defined $pid;
-    if ($pid) {
-	my @results;
-	while (<$kid>) {
-	    push @results,$_;
-	}
-	close $kid;
-	if (wantarray) {
-	    chomp(@results);
-	    return @results;
-	} else {
-	    return join '',@results;
-	}
-    }
-
-    # in child
-    exec 'ssh',$self->_ssh_args,@extra_args,$host,@cmd;
-}
-
-# return a filehandle that you can write to:
-# e.g.
-# my $fh = $server->scmd_write('cat >/tmp/foobar');
-# print $fh, "testing\n";
-# close $fh;
-sub scmd_write {
-    my $self = shift;
-    return $self->_scmd_pipe('write',@_);
-}
-
-# same thing, but you read from it:
-# my $fh = $server->scmd_read('cat /tmp/foobar');
-# while (<$fh>) {
-#    print $_;
-#}
-sub scmd_read {
-    my $self = shift;
-    return $self->_scmd_pipe('read',@_);
-}
-
-sub _scmd_pipe {
-    my $self = shift;
-    my ($op,@cmd) = @_;
-    my @extra_args;
-    if (ref($cmd[0]) && ref($cmd[0]) eq 'ARRAY') {
-	my $extra      = shift @cmd;
-	@extra_args = @$extra;
-    }
-    my $operation = $op eq 'write' ? '|-' : '-|';
-    my $host = $self->dnsName;
-    my $pid = open(my $fh,$operation); # this does a fork
-    defined $pid or croak "piped open failed: $!" ;
-    return $fh if $pid;         # writing to the filehandle writes to an ssh session
-    exec 'ssh',$self->_ssh_args,@extra_args,$host,@cmd;
-    exit 0;
-}
-
-
-sub shell {
-    my $self = shift;
-    $self->start unless $self->is_up;
-    fork() && return;
-    setsid(); # so that we are independent of parent signals
-    my $host     = $self->instance->dnsName;
-    my $ssh_args = $self->_ssh_escaped_args;
-    my $emulator = $ENV{COLORTERM} || $ENV{TERM} || 'xterm';
-    exec $emulator,'-e',"ssh $ssh_args $host";
-}
-
-sub _ssh_args {
-    my $self = shift;
-    return (
-	'-o','CheckHostIP no',
-	'-o','StrictHostKeyChecking no',
-	'-o','UserKnownHostsFile /dev/null',
-	'-o','LogLevel QUIET',
-	'-i',$self->keyfile,
-	'-l',$self->username,
-	);
-}
-
-sub _ssh_escaped_args {
-    my $self = shift;
-    my @args = $self->_ssh_args;
-    for (my $i=1;$i<@args;$i+=2) {
-	$args[$i] = qq("$args[$i]") if $args[$i];
-    }
-    my $args = join ' ',@args;
-    return $args;
-}
-
-sub _rsync_args {
-    my $self = shift;
-    my $quiet = eval{$self->manager->quiet};
-    return $quiet ? '-aqz' : '-avz';
-}
 
 sub create_snapshot {
     my $self = shift;
@@ -1087,12 +1002,375 @@ sub _create_volume {
     return ($vol,$needs_mkfs,$needs_resize);
 }
 
-sub volumes {
-    my $self   = shift;
-    my @volIds = map {$_->volumeId} $self->blockDeviceMapping;
-    my @volumes = map {$self->manager->find_volume_by_volid($_)} @volIds;
-    return grep {defined $_} @volumes;
+sub _mount {
+    my $self = shift;
+    my ($mt_device,$mtpt) = @_;
+    $self->info("Mounting staging volume.\n");
+    $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt") or croak "mount failed";
 }
+
+sub _mkfs_packages {
+    my $self = shift;
+    return {
+	xfs       => 'xfsprogs',
+	reiserfs  => 'reiserfsprogs',
+	jfs       => 'jfsutils',
+	ntfs      => 'ntfsprogs',
+	hfs       => 'hfsprogs',
+    }
+}
+
+sub _find_or_create_mount {
+    my $self = shift;
+    my $vol  = shift;
+
+    my ($ebs_device,$mt_device,$mtpt);
+    
+    # handle the case of the volme already being attached
+    if (my $attachment = $vol->attachment) {
+	if ($attachment->status eq 'attached') {
+	    $attachment->instanceId eq $self->instanceId or
+		die "$vol is attached to wrong server";
+	    ($mt_device,$mtpt) = $self->_find_mount($attachment->device);
+	    unless ($mtpt) {
+		$mtpt = $vol->tags->{StagingMtPt} || '/mnt/Staging/'.$vol->name;
+		$self->_mount($mt_device,$mtpt);
+	    }
+
+	    #oops, device is in a semi-attached state. Let it settle then reattach.
+	} else {
+	    $self->info("$vol was recently used. Waiting for attachment state to settle...\n");
+	    $self->ec2->wait_for_attachments($attachment);
+	}
+    }
+
+    unless ($mt_device && $mtpt) {
+	($ebs_device,$mt_device) = $self->unused_block_device;
+	$self->info("attaching $vol to $self via $mt_device\n");
+	my $s = $vol->attach($self->instanceId,$mt_device);
+	$self->ec2->wait_for_attachments($s);
+	$s->current_status eq 'attached' or croak "Can't attach $vol to $self";
+	$mtpt = $vol->tags->{StagingMtPt} || '/mnt/Staging/'.$vol->name;
+	$self->_mount($mt_device,$mtpt);
+    }
+
+    $vol->mtpt($mtpt);
+    $vol->mtdev($mt_device);
+}
+
+# this gets called to find a device that is already mounted
+sub _find_mount {
+    my $self       = shift;
+    my $device     = shift;
+    my @mounts = $self->scmd('cat /proc/mounts');
+    my (%mounts,$xvd);
+    for my $m (@mounts) {
+	my ($dev,$mtpt) = split /\s+/,$m;
+	$xvd++ if $dev =~ m!^/dev/xvd!;
+	$mounts{$dev} = $mtpt;
+    }
+    $device =~ s!^/dev/sd!/dev/xvd! if $xvd;
+    return ($device,$mounts{$device});
+}
+
+=head1 Data Copying Methods
+
+The methods in this section are used to copy data from one staging server to another, and to
+copy data from a local file system to a staging server.
+
+=head2 $result = $server->rsync($src1,$src2,$src3...,$dest)
+
+This method is identical to VM::EC2::Staging::Manager->rsync(), and
+provides efficient file-level synchronization (rsync) file-level
+copying between one or more source locations and a destination
+location via an ssh tunnel. Copying among arbitrary combinations of
+local and remote filesystems is supported, with the caveat that the
+remote filesystems must be contained on volumes and servers managed by
+this module (see below for a workaround).
+
+You may provide two or more directory paths. The last path will be
+treated as the copy destination, and the source paths will be treated
+as copy sources. All copying is performed using the -avz options, which
+activates recursive directory copying in which ownership, modification
+times and permissions are preserved, and compresses the data to reduce
+network usage. 
+
+Source paths can be formatted in one of several ways:
+
+ /absolute/path 
+      Copy the contents of the directory /absolute/path located on the
+      local machine to the destination. This will create a
+      subdirectory named "path" on the destination disk. Add a slash
+      to the end of the path (i.e. "/absolute/path/") in order to
+      avoid creating this subdirectory on the destination disk.
+
+ ./relative/path
+      Relative paths work the way you expect, and depend on the current
+      working directory. The terminating slash rule applies.
+
+ $staging_server:/absolute/path
+     Pass a staging server object and absolute path to copy the contents
+     of this path to the destination disk. Because of string interpolation
+     you can include server objects in quotes: "$my_server:/opt"
+
+ $staging_server:relative/path
+     This form will copy data from paths relative to the remote user's home
+     directory on the staging server. Typically not very useful, but supported.
+
+ $staging_volume
+      Pass a VM::EC2::Staging::Volume to copy the contents of the
+      volume to the destination disk starting at the root of the
+      volume. Note that you do *not* need to have any knowledge of the
+      mount point for this volume in order to copy its contents.
+
+ $staging_volume:/absolute/path
+      Copy a subdirectory of a staging volume to the destination disk.
+      The root of the volume is its top level, regardless of where it
+      is mounted on the staging server.  Because of string
+      interpolation magic, you can enclose staging volume object names
+      in quotes in order to construct the path, as in
+      "$picture_volume:/family/vacations/". As in local paths, a
+      terminating slash indicates that the contents of the last
+      directory in the path are to be copied without creating the
+      enclosing directory on the desetination. Note that you do *not*
+      need to have any knowledge of the mount point for this volume in
+      order to copy its contents.
+
+ $staging_volume:absolute/path
+ $staging_volume/absolute/path
+     These are alternatives to the previous syntax, and all have the
+     same effect as $staging_volume:relative/path. There is no
+
+The same syntax is supported for destination paths, except that it
+makes no difference whether a path has a trailing slash or not.
+
+Note that neither the source nor destination paths need to reside on
+this server.
+
+See VM::EC2::Staging::Manager->rsync() for examples and more details.
+
+=cut
+
+# most general form
+# 
+sub rsync {
+    my $self = shift;
+    croak "usage: VM::EC2::Staging::Server->rsync(\$source_path1,\$source_path2\...,\$dest_path)"
+	unless @_ >= 2;
+
+    my @p    = @_;
+    undef $LastHost;
+    undef $LastMt;
+    my @paths = map {$self->_resolve_path($_)} @p;
+
+    my $dest   = pop @paths;
+    my @source = @paths;
+
+    my %hosts;
+    foreach (@source) {
+	$hosts{$_->[0]} = $_->[0];
+    }
+    croak "More than one source host specified" if keys %hosts > 1;
+    my ($source_host) = values %hosts;
+    my $dest_host     = $dest->[0];
+
+    my @source_paths      = map {$_->[1]} @source;
+    my $dest_path         = $dest->[1];
+
+    my $rsync_args        = $self->_rsync_args;
+
+    my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,__PACKAGE__);
+    my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,__PACKAGE__);
+
+    # this is true when one of the paths contains a ":", indicating an rsync
+    # path that contains a hostname, but not a managed server
+    my $remote_path      = "@source_paths $dest_path" =~ /:/;
+
+    # remote rsync on either src or dest server
+    if ($remote_path && ($src_is_server || $dest_is_server)) {
+	my $server = $source_host || $dest_host;
+	return $server->ssh(['-t','-A'],"sudo -E rsync -e 'ssh -o \"CheckHostIP no\" -o \"StrictHostKeyChecking no\"' $rsync_args @source_paths $dest_path");
+    }
+
+    # localhost => localhost
+    if (!($source_host || $dest_host)) {
+	return system("rsync @source $dest") == 0;
+    }
+
+    # localhost           => DataTransferServer
+    if ($dest_is_server && !$src_is_server) {
+	return $dest_host->_rsync_put(@source_paths,$dest_path);
+    }
+
+    # DataTransferServer  => localhost
+    if ($src_is_server && !$dest_is_server) {
+	return $source_host->_rsync_get(@source_paths,$dest_path);
+    }
+
+    if ($source_host eq $dest_host) {
+	return $source_host->ssh('sudo','rsync',$rsync_args,@source_paths,$dest_path);
+    }
+
+    # DataTransferServer1 => DataTransferServer2
+    # this one is slightly more difficult because datatransferserver1 has to
+    # ssh authenticate against datatransferserver2.
+    my $keyname = $self->_authorize($source_host => $dest_host);
+
+    my $dest_ip  = $dest_host->instance->dnsName;
+    my $ssh_args = $self->_ssh_escaped_args;
+    my $keyfile  = $self->keyfile;
+    $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
+    return $source_host->ssh('sudo','rsync',$rsync_args,
+			     '-e',"'ssh $ssh_args'",
+			     "--rsync-path='sudo rsync'",
+			     @source_paths,"$dest_ip:$dest_path");
+}
+
+=head2 $server->dd($source_vol=>$dest_vol)
+
+This method performs block-level copying of the contents of
+$source_vol to $dest_vol by using dd over an SSH tunnel, where both
+source and destination volumes are VM::EC2::Staging::Volume
+objects. The volumes must be attached to a server but not
+mounted. Everything in the volume, including its partition table, is
+copied, allowing you to make an exact image of a disk.
+
+The volumes do B<not> actually need to reside on this server, but can
+be attached to any staging server in the zone.
+
+=cut
+
+# for this to work, we have to create the concept of a "raw" staging volume
+# that is attached, but not mounted
+sub dd {
+    my $self = shift;
+
+    @_==2 or croak "usage: dd(\$source_vol=>\$dest_vol)";
+
+    my ($vol1,$vol2) = @_;
+    my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
+    my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
+    my $hush     = $self->manager->quiet ? '2>/dev/null' : '';
+
+    if ($server1 eq $server2) {
+	$server1->ssh("sudo dd if=$device1 of=$device2 $hush");
+    }  else {
+	my $keyname  = $self->_authorize($server1,$server2);
+	my $dest_ip  = $server2->instance->dnsName;
+	my $ssh_args = $self->_ssh_escaped_args;
+	my $keyfile  = $self->keyfile;
+	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
+	$server1->ssh("sudo dd if=$device1 $hush | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
+    }
+}
+
+# take real or symbolic name and turn it into a two element
+# list consisting of server object and mount point
+# possible forms:
+#            /local/path
+#            vol-12345/relative/path
+#            vol-12345:/relative/path
+#            vol-12345:relative/path
+#            $server:/absolute/path
+#            $server:relative/path
+# 
+# treat path as symbolic if it does not start with a slash
+# or dot characters
+sub _resolve_path {
+    my $self  = shift;
+    my $vpath = shift;
+
+    my ($servername,$pathname);
+    if ($vpath =~ /^(vol-[0-9a-f]+):?(.*)/ &&
+	      (my $vol = VM::EC2::Staging::Manager->find_volume_by_volid($1))) {
+	my $path    = $2 || '/';
+	$path       = "/$path" if $path && $path !~ m!^/!;
+	$vol->_spin_up;
+	$servername = $LastHost = $vol->server;
+	my $mtpt    = $LastMt   = $vol->mtpt;
+	$pathname   = $mtpt;
+	$pathname  .= $path if $path;
+    } elsif ($vpath =~ /^(i-[0-9a-f]{8}):(.+)$/ && 
+	     (my $server = VM::EC2::Staging::Manager->find_server_by_instance($1))) {
+	$servername = $LastHost = $server;
+	$pathname   = $2;
+    } elsif ($vpath =~ /^:(.+)$/) {
+	$servername = $LastHost if $LastHost;
+	$pathname   = $LastHost && $LastMt ? "$LastMt/$2" : $2;
+    } else {
+	return [undef,$vpath];   # localhost
+    }
+
+    $servername->start    if $servername && !$servername->is_up;
+    return [$servername,$pathname];
+}
+
+sub _authorize {
+    my $self = shift;
+    my ($source_host,$dest_host) = @_;
+    my $keyname = "/tmp/${source_host}_to_${dest_host}";
+    unless ($source_host->has_key($keyname)) {
+	$source_host->info("creating ssh key for server to server data transfer\n");
+	$source_host->ssh("ssh-keygen -t dsa -q -f $keyname</dev/null 2>/dev/null");
+	$source_host->has_key($keyname=>1);
+    }
+    unless ($dest_host->accepts_key($keyname)) {
+	my $key_stuff = $source_host->scmd("cat ${keyname}.pub");
+	chomp($key_stuff);
+	$dest_host->ssh("mkdir -p .ssh; chmod 0700 .ssh; (echo '$key_stuff' && cat .ssh/authorized_keys) | sort | uniq > .ssh/authorized_keys.tmp; mv .ssh/authorized_keys.tmp .ssh/authorized_keys; chmod 0600 .ssh/authorized_keys");
+	$dest_host->accepts_key($keyname=>1);
+    }
+
+    return $keyname;
+}
+
+sub _rsync_put {
+    my $self   = shift;
+    my @source = @_;
+    my $dest   = pop @source;
+    # resolve symbolic name of $dest
+    $dest        =~ s/^.+://;  # get rid of hostname, if it is there
+    my $host     = $self->instance->dnsName;
+    my $ssh_args = $self->_ssh_escaped_args;
+    my $rsync_args = $self->_rsync_args;
+    $self->info("Beginning rsync...\n");
+    system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest") == 0;
+}
+
+sub _rsync_get {
+    my $self = shift;
+    my @source = @_;
+    my $dest   = pop @source;
+
+    # resolve symbolic names of src
+    my $host     = $self->instance->dnsName;
+    foreach (@source) {
+	(my $path = $_) =~ s/^.+://;  # get rid of host part, if it is there
+	$_ = "$host:$path";
+    }
+    my $ssh_args   = $self->_ssh_escaped_args;
+    my $rsync_args = $self->_rsync_args;
+    
+    $self->info("Beginning rsync...\n");
+    system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
+}
+
+=head1 Internal Methods
+
+This section documents internal methods. They are not intended for use
+by end-user scripts but may be useful to know about during
+subclassing. There are also additional undocumented methods that begin
+with a "_" character which you can explore in the source code.
+
+=head2 $description = $server->volume_description($vol)
+
+This method is called to get the value of the Name tag assigned to new
+staging volume objects. The current value is "Staging volume for $name
+created by VM::EC2::Staging::Server."
+
+You will see these names associated with EBS volumes in the AWS console.
+
+=cut
 
 sub volume_description {
     my $self = shift;
@@ -1101,6 +1379,35 @@ sub volume_description {
     return "Staging volume for $name created by ".__PACKAGE__;
 }
 
+=head2 ($ebs_device,$local_device) = $server->unused_block_device([$major_start])
+
+This method returns an unused block device path. It is invoked when
+provisioning and mounting new volumes. The behavior is to take the
+following search path:
+
+ /dev/sdf1
+ /dev/sdf2
+ ...
+ /dev/sdf15
+ /dev/sdfg1
+ ...
+ /dev/sdp15
+
+You can modify the search path slightly by providing a single
+character major start. For example, to leave all the sdf's free and to
+start the search at /dev/sdg:
+
+ ($ebs_device,$local_device) = $server->unused_block_device('g');
+
+The result is a two element list consisting of the unused device name
+from the perspective of EC2 and the server respectively. The issue
+here is that on some recent Linux kernels, the EC2 device /dev/sdf1 is
+known to the server as /dev/xvdf1. This module understands that
+complication and uses the EC2 block device name when managing EBS
+volumes, and the kernel block device name when communicating with the
+server.
+
+=cut
 
 # find an unused block device
 sub unused_block_device {
@@ -1129,10 +1436,13 @@ sub unused_block_device {
     return;
 }
 
-sub info {
-    my $self = shift;
-    $self->manager->info(@_);
-}
+=head2 $flag = $server->has_key($keyname)
+
+Returns true if the server has a copy of the private key corresponding
+to $keyname. This is used by the rsync() method to enable server to
+server data transfers.
+
+=cut
 
 sub has_key {
     my $self    = shift;
@@ -1142,6 +1452,14 @@ sub has_key {
     return $self->{_has_key}{$keyname} = $self->scmd("if [ -e $keyname ]; then echo 1; fi");
 }
 
+=head2 $flag = $server->accepts_key($keyname)
+
+Returns true if the server has a copy of the public key part of
+$keyname in its .ssh/authorized_keys file. This is used by the rsync()
+method to enable server to server data transfers.
+
+=cut
+
 sub accepts_key {
     my $self = shift;
     my $keyname = shift;
@@ -1149,9 +1467,10 @@ sub accepts_key {
     return $self->{_accepts_key}{$keyname};
 }
 
-=head1 Internal methods
+=head2 $up = $server->is_up([$new_value])
 
-The methods in this section are intended primarily for internal use.
+Get/set the internal is_up() flag, which indicates whether the server
+is up and running. This is used to cache the results of the ping() method.
 
 =cut
 
@@ -1162,6 +1481,33 @@ sub is_up {
     $d;
 }
 
+=head2 $server->info(@message)
+
+Log a message to standard output, respecting the staging manager's quiet() setting.
+
+=cut
+
+sub info {
+    my $self = shift;
+    $self->manager->info(@_);
+}
+
+=head1 Subclassing
+
+For reasons having to do with the order in which objects are created,
+VM::EC2::Staging::Server is a wrapper around VM::EC2::Instance rather
+than a subclass of it. To access the VM::EC2::Instance object, you
+call the server object's instance() method. In practice this means
+that to invoke the underlying instance's method for, say, start() you
+will need to do this:
+
+  $server->instance->start();
+
+rather than this:
+
+  $server->SUPER::start();
+
+You may subclass VM::EC2::Staging::Server in the usual way.
 
 =head1 SEE ALSO
 

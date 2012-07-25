@@ -284,10 +284,11 @@ sub detach {
     $self->current_status eq 'in-use' or return;
     $self->unmount;  # make sure we are not mounted; this might involve starting a server
     $server->info("detaching $self\n");
-    $self->volume->detach;
+    my $status = $self->volume->detach;
     $self->mtpt(undef);
     $self->mtdev(undef);
     $self->server(undef);
+    return $status;
 }
 
 # remove volume entirely

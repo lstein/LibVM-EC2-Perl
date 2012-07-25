@@ -996,10 +996,12 @@ below for a workaround).
 
 You may provide two or more directory paths. The last path will be
 treated as the copy destination, and the source paths will be treated
-as copy sources. All copying is performed using the -az options, which
-activates recursive directory copying in which ownership, modification
-times and permissions are preserved, and compresses the data to reduce
-network usage. 
+as copy sources. All copying is performed using the -avz options,
+which activates recursive directory copying in which ownership,
+modification times and permissions are preserved, and compresses the
+data to reduce network usage. Verbosity is set so that the names of
+copied files are printed to STDERR. If you do not wish this, then use
+call the manager's quiet() method with a true value.
 
 Source paths can be formatted in one of several ways:
 
