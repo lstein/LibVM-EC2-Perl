@@ -905,6 +905,22 @@ Options:
              volume. This is the default. Pass 0 to disable this
              behavior.
 
+The B<-reuse> argument is intended to support the following use case
+in which you wish to rsync a directory on a host system somewhere to
+an EBS snapshot, without maintaining a live server and volume on EC2:
+
+ my $volume = $manager->provision_volume(-name=>'backup_1',
+                                         -reuse  => 1,
+                                         -fstype => 'ext3',
+                                         -size   => 10);
+ $volume->put('fred@gw.harvard.edu:my_music');
+ $volume->create_snapshot('Music Backup '.localtime);
+ $volume->delete;
+
+The next time this script is run, the "backup_1" volume will be
+recreated from the most recent snapshot, minimizing copying. A new
+snapshot is created, and the staging volume is deleted.
+
 =cut
 
 sub provision_volume {
