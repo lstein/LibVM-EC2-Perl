@@ -669,7 +669,7 @@ sub provision_volume {
 
     my $ec2      = $self->ec2;
     my $fstype   = $args{-fstype} || 'ext4';
-    my $mtpt     = $fstype eq 'raw' ? 'none' : ($args{-mount}  || $args{-mtpt} || '/mnt/Staging/'.$name);
+    my $mtpt     = $fstype eq 'raw' ? 'none' : ($args{-mount}  || $args{-mtpt} || $self->default_mtpt($name));
     my $username = $self->username;
     
     $size = int($size) < $size ? int($size)+1 : $size;  # dirty ceil() function
@@ -824,6 +824,7 @@ sub detach_volume {
     $vol->server eq $self or croak "Volume is not attached to this server";
     my $status = $vol->detach();
     $self->ec2->wait_for_attachments($status);
+    $vol->refresh;
 }
 
 =head2 $server->mount_volume($volume [,$mountpt])
@@ -846,15 +847,15 @@ and attach it to another:
 sub mount_volume {
     my $self = shift;
     my ($vol,$mtpt)  = @_;
-    $mtpt ||= $vol->mtpt;
-    if ($mtpt) {
-	return if $mtpt eq 'none';
-	$self->_mount($vol->mtdev,$mtpt);
-	$vol->mtpt($mtpt);
+    $vol->mounted and croak "$vol already mounted";
+    if ($vol->mtpt) {
+	return if $vol->mtpt eq 'none';
+	$self->_mount($vol->mtdev,$vol->mtpt);
     } else {
-	$self->_find_or_create_mount($vol);
+	$self->_find_or_create_mount($vol,$mtpt);
     }
     $vol->add_tags(StagingMtPt   => $vol->mtpt);
+    $vol->server($self);
     $vol->mounted(1);
 }
 
@@ -1019,9 +1020,9 @@ sub _mkfs_packages {
 
 sub _find_or_create_mount {
     my $self = shift;
-    my $vol  = shift;
+    my ($vol,$mtpt)  = @_;
 
-    my ($ebs_device,$mt_device,$mtpt);
+    my ($ebs_device,$mt_device);
     
     # handle the case of the volme already being attached
     if (my $attachment = $vol->attachment) {
@@ -1030,7 +1031,7 @@ sub _find_or_create_mount {
 		die "$vol is attached to wrong server";
 	    ($mt_device,$mtpt) = $self->_find_mount($attachment->device);
 	    unless ($mtpt) {
-		$mtpt = $vol->tags->{StagingMtPt} || '/mnt/Staging/'.$vol->name;
+		$mtpt ||= $vol->tags->{StagingMtPt} || $self->default_mtpt($vol);
 		$self->_mount($mt_device,$mtpt);
 	    }
 
@@ -1047,7 +1048,7 @@ sub _find_or_create_mount {
 	my $s = $vol->attach($self->instanceId,$mt_device);
 	$self->ec2->wait_for_attachments($s);
 	$s->current_status eq 'attached' or croak "Can't attach $vol to $self";
-	$mtpt = $vol->tags->{StagingMtPt} || '/mnt/Staging/'.$vol->name;
+	$mtpt ||= $vol->tags->{StagingMtPt} || $self->default_mtpt($vol);
 	$self->_mount($mt_device,$mtpt);
     }
 
@@ -1171,15 +1172,51 @@ sub dd {
     shift->manager->dd(@_);
 }
 
+=head2 $server->put($source1,$source2,$source3,...,$dest)
+
+Use rsync to copy the indicated source directories into the
+destination path indicated by $dest. The destination is either a path
+on the server machine, or a staging volume object mounted on the
+server (string interpolation is accepted). The sources can be local
+paths on the machine the perl script is running on, or any of the
+formats described for rsync().
+
+Examples:
+
+ $server1->put("$ENV{HOME}/my_pictures"     => '/var/media');
+ $server1->put("$ENV{HOME}/my_pictures","$ENV{HOME}/my_audio" => '/var/media');
+ $server1->put("$ENV{HOME}/my_pictures"     => "$backup_volume/home_media");
+ $server1->put("fred@gw.harvard.edu:media/" => "$backup_volume/home_media");
+
+=cut
+
 # last argument is implied on this server
 sub put {
     my $self  = shift;
     my @paths = @_;
     @paths >= 2 or croak "usage: VM::EC2::Staging::Server->put(\$source1,\$source2...,\$dest)";
     $paths[-1] =~ m/:/ && croak "invalid pathname; must not contain a hostname";
-    $paths[-1] = "$self:$paths[-1]";
+    $paths[-1] = "$self:$paths[-1]" unless $paths[-1] =~ /^vol-[0-9a-f]{8}/;
     $self->manager->rsync(@paths);
 }
+
+=head2 $server->get($source1,$source2,$source3,...,$dest)
+
+Use rsync to copy the indicated source directories into the
+destination path indicated by $dest. The source directories are either
+paths on the server, or staging volume(s) mounted on the server
+(string interpolation to indicate subdirectories on the staging volume
+also works). The destination can be any of the path formats described
+for rsync(), including unmanaged hosts that accept ssh login.
+
+Examples:
+
+ $server1->get('/var/media' =>"$ENV{HOME}/my_pictures");
+ $server1->get('/var/media','/usr/bin' => "$ENV{HOME}/test");
+ $server1->get("$backup_volume/home_media" => "$ENV{HOME}/my_pictures");
+ $server1->get("$backup_volume/home_media" => "fred@gw.harvard.edu:media/");
+
+=cut
 
 # source arguments are implied on this server+
 sub get {
@@ -1189,7 +1226,7 @@ sub get {
     my $dest = pop @paths;
     foreach (@paths) {
 	m/:/ && croak "invalid pathname; must not contain a hostname";
-	$_ = "$self:$_";
+	$_ = "$self:$_" unless /^vol-[0-9a-f]{8}/;
     }
     $self->manager->rsync(@paths,$dest);
 }
@@ -1350,6 +1387,21 @@ sub is_up {
     my $d    = $self->{_is_up};
     $self->{_is_up} = shift if @_;
     $d;
+}
+
+=head2 $path = $server->default_mtpt($volume)
+
+Given a staging volume, return its default mount point on the server
+('/mnt/Staging/'.$volume->name). Can also pass a string corresponding
+to the volume's name.
+
+=cut
+
+sub default_mtpt {
+    my $self = shift;
+    my $vol  = shift;
+    my $name = ref $vol ? $vol->name : $vol;
+    return "/mnt/Staging/$name";
 }
 
 =head2 $server->info(@message)

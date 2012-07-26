@@ -664,7 +664,7 @@ sub get_server {
     # find servers of same name
     my %servers = map {$_->name => $_} $self->servers;
     my $server = $servers{$args{-name}} || $self->provision_server(%args);
-    $server->start unless $server->is_up;
+    $server->start unless $server->ping;
     return $server;
 }
 
