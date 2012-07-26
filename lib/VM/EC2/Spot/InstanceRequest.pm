@@ -6,9 +6,7 @@ VM::EC2::Spot::InstanceRequest - Object describing an Amazon EC2 spot instance r
 
 =head1 SYNOPSIS
 
-  use VM::EC2;
-
-  $ec2     = VM::EC2->new(...);
+See L<VM::EC2/SPOT INSTANCES>.
 
 =head1 DESCRIPTION
 

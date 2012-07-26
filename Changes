@@ -1,11 +1,16 @@
-1.10
+1.10 
+     - Add new high level framework for managing servers and volumes (see
+       VM::EC2::Staging::Manager).
      - Add missing documentation, including removing spot instance methods from
         "unsupported" list.
      - Document fact that VM::EC2->instance_metadata() can be called as a class
        method.
+     - Add "platform" to valid_fields function in Instance.pm
      - Fix SignatureDoesNotMatch breakage under HTTP::Request::Common version 6.03
        (see https://rt.cpan.org/Ticket/Display.html?id=75359).
-     - Add "platform" to valid_fields function in Instance.pm
+     - Automatically base64 encode userdata passed to spot instance
+       requests (see
+       https://rt.cpan.org/Public/Bug/Display.html?id=77116).
 
 1.09   Tue Oct  4 19:04:52 EDT 2011
      - Fixed return value from delete_security_group().

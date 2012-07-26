@@ -926,7 +926,7 @@ sub run_instances {
        qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIPAddress
           InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
     push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
-    push @p,('UserData' =>encode_base64($args{-user_data},''))           if $args{-user_data};
+    push @p,('UserData' =>encode_base64($args{-user_data},''))        if $args{-user_data};
     push @p,('Placement.AvailabilityZone'=>$args{-availability_zone}) if $args{-availability_zone};
     push @p,('Placement.GroupName'=>$args{-placement_group})          if $args{-placement_group};
     push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-placement_tenancy};
@@ -3062,6 +3062,8 @@ sub request_spot_instances {
 	if $args{-availability_zone};
     push @p,('Placement.GroupName'       =>$args{-placement_group})   if $args{-placement_group};
     push @p,('LaunchSpecification.Monitoring.Enabled'   => 'true')    if $args{-monitoring};
+    push @p,('LaunchSpecification.UserData' =>
+	     encode_base64($args{-user_data},''))                     if $args{-user_data};
     return $self->call('RequestSpotInstances',@p);
 }
 

@@ -56,10 +56,13 @@ VM::EC2::Staging::Server - High level interface to EC2-based servers
  # copy some data from the local filesystem onto the opt volume
  $server1->rsync("$ENV{HOME}/local_staging_volume/" => $opt);
 
+ # same thing, but using server path name
+ $server1->put("$ENV{HOME}/local_staging_volume/" => '/opt');
+
  # provision a volume attached to another server, and let the
  # system choose the filesystem and mount point for us
  my $backups = $server2->provision_volume(-name => 'Backup',
-                                         -size => 10);
+                                          -size => 10);
 
  # copy some data from opt to the new volume using rsync
  $server1->rsync($opt => "$backups/opt");

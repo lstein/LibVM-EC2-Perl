@@ -6,17 +6,26 @@ VM::EC2::Staging::Volume - High level functions for provisioning and populating 
 
 =head1 SYNOPSIS
 
- use VM::EC2::Staging::Volume;
+ use VM::EC2::Staging::manager;
 
- my $ec2 = VM::EC2->new;
- my $vol1 = $ec2->staging_volume(-name => 'Backup',
+ # get a new staging manager
+ my $ec2     = VM::EC2->new;
+ my $staging = $ec2->staging_manager();                                         );
+
+ my $vol1 = $staging->get_volume(-name => 'Backup',
                                  -fstype => 'ext4',
                                  -size   => 11,
                                  -zone   => 'us-east-1a');
+
+ # make a couple of directories in new volume
  $vol1->mkdir('pictures');
  $vol1->mkdir('videos');
- $vol1->put('/usr/local/my_pictures/' =>'pictures/');
- $vol1->put('/usr/local/my_videos/'   =>'videos/');
+
+ # use rsync to copy local files onto a subdirectory of this volume
+ $vol1->put('/usr/local/my_pictures/' =>'pictures');
+ $vol1->put('/usr/local/my_videos/'   =>'videos');
+
+ # use rsync to to copy a set of files on the volume to a local directory 
  mkdir('/tmp/jpegs');
  $vol1->get('pictures/*.jpg','/tmp/jpegs');
 
@@ -28,28 +37,41 @@ VM::EC2::Staging::Volume - High level functions for provisioning and populating 
  $vol1->rm('-rf','pictures/*');
  $vol1->rmdir('pictures');
 
- my $path = $vol1->mtpt;
+ # get some information about the volume
+ my $mtpt     = $vol->mtpt;
+ my $mtdev    = $vol->mtdev;
+ my $mounted  = $vol->mounted;
+ my $server   = $vol->server;
+
+ # detach the volume
+ $vol->detach;
+
+ # delete the volume entirely
+ $vol->delete;
 
 =head1 DESCRIPTION
 
-=head1 SEE ALSO
+This is a high-level interface to EBS volumes which is used in
+conjunction with VM::EC2::Staging::Manager and
+VM::EC2::Staging::Server. It is intended to ease the process of
+allocating and managing EBS volumes, and provides for completely
+automated filesystem creation, directory management, and data transfer
+to and from the volume.
 
-L<VM::EC2>
-L<VM::EC2::Instance>
-L<VM::EC2::Volume>
-L<VM::EC2::Snapshot>
+You can use staging volumes without having to manually create and
+manage the instances needed to manipulate the volumes. As needed, the
+staging manager will create the server(s) needed to execute the
+desired actions on the volumes.
 
-=head1 AUTHOR
-
-Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
-
-Copyright (c) 2011 Ontario Institute for Cancer Research
-
-This package and its accompanying libraries is free software; you can
-redistribute it and/or modify it under the terms of the GPL (either
-version 1, or at your option, any later version) or the Artistic
-License 2.0.  Refer to LICENSE for the full license text. In addition,
-please see DISCLAIMER.txt for disclaimers of warranty.
+Staging volumes are wrappers around VM::EC2::Volume, and have all the
+methods associated with those objects. In addition to the standard EC2
+volume characteristics, each staging volume in an EC2 region has a
+symbolic name, which can be used to retrieve previously-created
+volumes without remembering their volume ID. This symbolic name is
+stored in the tag StagingName. Volumes also have a filesystem type
+(stored in the tag StagingFsType). When a volume is mounted on a
+staging server, it will also have a mount point on the file system,
+and a mounting device (e.g. /dev/sdf1).
 
 =cut
 
@@ -87,35 +109,79 @@ sub can {
     return $ebs->can($method);
 }
 
-# can be called as class method
-sub provision_volume {
-    my $self = shift;
-    my $ec2   = shift or croak "Usage: $self->new(\$ec2,\@args)";
+=head1 Staging Volume Creation
 
-    my %args  = @_;
+Staging volumes are created via a staging manager's get_volume() or
+provision_volume() methods. See L<VM::EC2::Staging::Manager>. One
+typical invocation is:
 
-    $args{-availability_zone}  = $self->_get_vol_zone($ec2,$args{-volume_id}) if $args{-volume_id};
-    $args{-name}             ||= $args{-volume_id} || $args{-snapshot_id} || sprintf("Volume%02d",$Volume++);
-    $args{-fstype}           ||= 'ext4';
-    $args{-availability_zone}||= $self->_select_zone($ec2);
-    my $server = $self->_get_server_in_zone($args{-availability_zone}) or croak "Can't launch a server to provision volume";
-    my $vol    = $server->provision_volume(%args) or croak "Can't provision volume";
-    return $vol;
-}
+ my $ec2     = VM::EC2->new;
+ my $manager = $ec2->staging_manager();                                         );
+ my $vol = $manager->get_volume(-name => 'Backup',
+                                -fstype => 'ext4',
+                                -size   => 5,
+                                -zone   => 'us-east-1a');
 
-# look up our filesystem type
-sub get_fstype {
-    my $self = shift;
-    return $self->fstype if $self->fstype;
-    return 'raw'         if $self->mtpt eq 'none';
+This will either retrieve an existing volume named "Backup", or, if
+none exists, create a new one using the provided specification. Behind
+the scenes, a staging server will be allocated to mount the
+volume. The manager tries to conserve resources, and so will reuse a
+suitable running staging server if one is available.
 
-    $self->_spin_up;
-    my $dev    = $self->mtdev;
-    my $blkid  = $self->server->scmd("sudo blkid $dev");
-    my ($type) = $blkid =~ /TYPE="([^"]+)"/;
-    $self->fstype($type);
-    return $type || 'raw';
-}
+The other typical invocation is:
+
+ my $vol = $manager->provision_volume(-name => 'Backup',
+                                      -fstype => 'ext4',
+                                      -size   => 5,
+                                      -zone   => 'us-east-1a');
+
+This forces creation of a new volume with the indicated
+characteristics. If a volume of the same name already exists, this
+method will die with a fatal error (to avoid this, either wrap in an
+eval, or leave off the -name argument and let the manager pick a
+unique name for you).
+
+=cut
+
+=head1 Volume Information
+
+The methods in this section return status information about the staging volume.
+
+=head2 $name = $vol->name([$newname])
+
+Get/set the symbolic name associated with this volume.
+
+=head2 $mounted = $vol->mounted
+
+Returns true if the volume is currently mounted on a server.
+
+=head2 $type = $vol->fstype
+
+Return the filesystem type requested at volume creation time.
+
+=head2 $server = $vol->server
+
+Get the server associated with this volume, if any.
+
+=head2 $device = $vol->mtdev
+
+Get the device that the volume is attached to, e.g. /dev/sdf1. If the
+volume is not attached to a server, returns undef.
+
+=head2 $device = $vol->mtpt
+
+Get the mount point for this volume on the attached server. If the
+volume is not mounted, returns undef.
+
+=head2 $ebs_vol = $vol->ebs
+
+Get the underlying EBS volume associated with the staging volume object.
+
+=head2 $manager = $vol->manager
+
+Return the VM::EC2::Staging::Manager which manages this volume.
+
+=cut
 
 # $stagingvolume->new({-server => $server,  -volume => $volume,
 #                      -mtdev => $device,   -mtpt   => $mtpt,
@@ -155,6 +221,30 @@ sub manager {
     my $self = shift;
     my $ep   = $self->endpoint;
     return VM::EC2::Staging::Manager->find_manager($ep);
+}
+
+=head2 $type = $vol->get_fstype
+
+Return the volume's actual filesystem type. This can be different from
+the requested type if it was later altered by running mkfs on the
+volume, or the contents of the disk were overwritten by a block-level
+dd command. As a side effect, this method sets fstype() to the current
+correct value.
+
+=cut
+
+# look up our filesystem type
+sub get_fstype {
+    my $self = shift;
+    return $self->fstype if $self->fstype;
+    return 'raw'         if $self->mtpt eq 'none';
+
+    $self->_spin_up;
+    my $dev    = $self->mtdev;
+    my $blkid  = $self->server->scmd("sudo blkid $dev");
+    my ($type) = $blkid =~ /TYPE="([^"]+)"/;
+    $self->fstype($type);
+    return $type || 'raw';
 }
 
 sub mount {
@@ -375,5 +465,28 @@ sub DESTROY {
     my $ebs     = $self->ebs     or return;
     $manager->unregister_volume($self);
 }
+
+=head1 SEE ALSO
+
+L<VM::EC2>
+L<VM::EC2::Staging::Manager>
+L<VM::EC2::Staging::Server>
+L<VM::EC2::Instance>
+L<VM::EC2::Volume>
+L<VM::EC2::Snapshot>
+
+=head1 AUTHOR
+
+Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
+
+Copyright (c) 2012 Ontario Institute for Cancer Research
+
+This package and its accompanying libraries is free software; you can
+redistribute it and/or modify it under the terms of the GPL (either
+version 1, or at your option, any later version) or the Artistic
+License 2.0.  Refer to LICENSE for the full license text. In addition,
+please see DISCLAIMER.txt for disclaimers of warranty.
+
+=cut
 
 1;
