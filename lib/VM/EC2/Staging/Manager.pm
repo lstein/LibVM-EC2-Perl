@@ -1027,7 +1027,10 @@ Source paths can be formatted in one of several ways:
       mount point for this volume in order to copy its contents.
 
  $staging_volume:/absolute/path
-      Copy a subdirectory of a staging volume to the destination disk.
+ $staging_volume:absolute/path
+ $staging_volume/absolute/path
+      All these syntaxes accomplish the same thing, which is to
+      copy a subdirectory of a staging volume to the destination disk.
       The root of the volume is its top level, regardless of where it
       is mounted on the staging server.  Because of string
       interpolation magic, you can enclose staging volume object names
@@ -1038,11 +1041,6 @@ Source paths can be formatted in one of several ways:
       enclosing directory on the desetination. Note that you do *not*
       need to have any knowledge of the mount point for this volume in
       order to copy its contents.
-
- $staging_volume:absolute/path
- $staging_volume/absolute/path
-     These are alternatives to the previous syntax, and all have the
-     same effect as $staging_volume:relative/path. There is no
 
  $staging_server:/absolute/path
      Pass a staging server object and absolute path to copy the contents
@@ -1055,6 +1053,10 @@ Source paths can be formatted in one of several ways:
 
 The same syntax is supported for destination paths, except that it
 makes no difference whether a path has a trailing slash or not.
+
+As with the rsync command, if you proceed a path with a single colon
+(:/my/path), it is a short hand to use the previous server/volume/host
+in the source list.
 
 When specifying multiple source directories, all source directories must
 reside on the same local or remote machine. This is legal:

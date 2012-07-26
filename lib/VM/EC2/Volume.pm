@@ -38,7 +38,7 @@ The following object methods are supported:
  
  volumeId         -- ID of this volume.
  size             -- Size of this volume (in GB).
- snapshotId       -- ID of snapshot this 
+ snapshotId       -- ID of snapshot this volume was created from.
  availabilityZone -- Availability zone in which this volume resides.
  status           -- Volume state, one of "creating", "available",
                      "in-use", "deleting", "deleted", "error"

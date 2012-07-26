@@ -155,6 +155,16 @@ Get/set the symbolic name associated with this volume.
 
 Returns true if the volume is currently mounted on a server.
 
+=cut
+
+sub mounted {
+    my $self = shift;
+    my $m    = $self->{mounted};
+    $self->{mounted} = shift if @_;
+    return $m;
+}
+
+
 =head2 $type = $vol->fstype
 
 Return the filesystem type requested at volume creation time.
@@ -182,6 +192,30 @@ Get the underlying EBS volume associated with the staging volume object.
 Return the VM::EC2::Staging::Manager which manages this volume.
 
 =cut
+
+=head2 $string = $vol->fstab_line();
+
+This method returns the line in /etc/fstab that would be necessary to
+mount this volume on the server to which it is currently attached at
+boot time. For example:
+
+ /dev/sdf1 /mnt/staging/Backups ext4 defaults,nobootwait 0 2
+
+You can add this to the current server's fstab using the following
+code fragment:
+
+ my $server = $vol->server;
+ my $fh = $server->scmd_write('sudo -s "cat >>/etc/fstab"');
+ print $fh $vol->fstab,"\n";
+ close $fh;
+
+=cut
+
+sub fstab_line {
+    my $self = shift;
+    return join "\t",$self->mtdev,$self->mtpt,$self->fstype,'defaults,nobootwait',0,2;
+}
+
 
 # $stagingvolume->new({-server => $server,  -volume => $volume,
 #                      -mtdev => $device,   -mtpt   => $mtpt,
@@ -247,19 +281,6 @@ sub get_fstype {
     return $type || 'raw';
 }
 
-sub mount {
-    my $self = shift;
-    $self->_spin_up;
-    $self->fstype($self->get_fstype) unless $self->fstype;
-}
-
-sub mounted {
-    my $self = shift;
-    my $m    = $self->{mounted};
-    $self->{mounted} = shift if @_;
-    return $m;
-}
-
 sub _spin_up {
     my $self = shift;
     my $nomount = shift;
@@ -280,7 +301,19 @@ sub _spin_up {
 #    return $self->server.':'.$self->mtpt;
 #}
 
-sub snapshot {shift->create_snapshot(@_)}
+=head1 Lifecycle Methods
+
+The methods in this section control the state of the volume.
+
+=head2 $snapshot = $vol->create_snapshot('description')
+
+Create a VM::EC2::Snapshot of the volume with an optional
+description. This differs from the VM::EC2::Volume method of the same
+name in that it is aware of the mount state of the volume and will
+first try to unmount it so that the snapshot is clean. After the
+snapshot is started, the volume is remounted.
+
+=cut
 
 sub create_snapshot {
     my $self = shift;
@@ -293,70 +326,47 @@ sub create_snapshot {
     }
 }
 
-#
-# $vol->get($source1,$source2,$source3....,$dest)
-# If $source not in format hostname:/path then 
-# volume will be appended to it.
-sub get {
-    my $self = shift;
-    croak 'usage: ',ref($self),'->get($source1,$source2,$source3....,$dest_path)'
-	unless @_;
-    unshift @_,'./' if @_ < 2;
-    
-    my $dest   = pop;
-    my $server = $self->server or croak "no staging server available";
+=head2 $snapshot = $vol->snapshot('description')
 
-    $self->mounted or croak "Volume is not currently mounted";
-    my @source = $self->_rel2abs(@_);
-    $server->rsync(@source,$dest);
+Identical to create_snapshot(), but the method name is shorter.
+
+=cut
+
+sub snapshot {shift->create_snapshot(@_)}
+
+=head2 $vol->mount($server [,$mtpt])
+
+Mount the volume on the indicated VM::EC2::Staging::Server, optionally
+at a named mount point on the file system. If the volume is already
+attached to a different server, it will be detached first. If any of
+these step fails, the method will die with a fatal error.
+
+=cut
+
+# mount the volume on a server
+sub mount {
+    my $self = shift;
+    my ($server,$mtpt) = @_;
+    if (my $existing_server = $self->server) {
+	if ($existing_server eq $server) {
+	    $self->unmount;
+	} else {
+	    $self->detach;
+	}
+    }
+    $server->mount_volume($self,$mtpt);
 }
 
-# $vol->put($source1,$source2,$source3....,$dest)
-# If $dest not in format hostname:/path then 
-# volume will be appended to it.
-sub put {
-    my $self = shift;
-    croak 'usage: ',ref($self),'->put($source1,$source2,$source3....,$dest_path)'
-	unless @_;
-    push @_,'.' if @_ < 2;
+=head2 $vol->unmount()
 
-    my $dest = pop;
-    my @source = @_;
+Unmount the volume from wherever it is, but leave it attached to the
+staging server. If the volume is not already mounted, nothing happens.
 
-    $self->_spin_up;
-    my $server = $self->server or croak "no staging server available";
-    ($dest)    = $self->_rel2abs($dest);
-    $server->rsync(@source,$dest);
-}
+Note that it is possible for a volume to be mounted on a I<stopped>
+server, in which case the server will be started and the volume only
+unmounted when it is up and running.
 
-sub rsync {
-    my $self = shift;
-    $self->mounted or croak "Volume is not currently mounted";
-    unshift @_,"$self/" if @_ <= 1;
-    $self->server->rsync(@_);
-}
-
-sub copy { shift->rsync(@_)      }
-sub dd   { 
-    my $self = shift;
-    unshift @_,$self if @_ < 2;
-    $self->server->dd(@_);
-}
-
-sub ls    { shift->_cmd('sudo ls',@_)    }
-sub df    { shift->_cmd('df',@_)    }
-
-sub mkdir { shift->_ssh('sudo mkdir',@_) }
-sub chown { shift->_ssh('sudo chown',@_) }
-sub chgrp { shift->_ssh('sudo chgrp',@_) }
-sub chmod { shift->_ssh('sudo chmod',@_) }
-sub rm    { shift->_ssh('sudo rm',@_)    }
-sub rmdir { shift->_ssh('sudo rmdir',@_) }
-
-sub fstab_line {
-    my $self = shift;
-    return join "\t",$self->mtdev,$self->mtpt,$self->fstype,'defaults,nobootwait',0,2;
-}
+=cut
 
 # unmount volume from wherever it is
 sub unmount {
@@ -367,6 +377,16 @@ sub unmount {
     $self->_spin_up('nomount'); 
     $server->unmount_volume($self);
 }
+
+=head2 $vol->detach()
+
+Unmount and detach the volume from its current server, if any.
+
+Note that it is possible for a volume to be mounted on a I<stopped>
+server, in which case the server will be started and the volume only
+unmounted when it is up and running.
+
+=cut
 
 sub detach {
     my $self = shift;
@@ -380,6 +400,14 @@ sub detach {
     $self->server(undef);
     return $status;
 }
+
+=head2 $vol->delete()
+
+Delete the volume entirely. If it is mounted and/or attached to a
+server, it will be unmounted/detached first. If any steps fail, the
+method will die with a fatal error.
+
+=cut
 
 # remove volume entirely
 sub delete {
@@ -399,6 +427,181 @@ sub delete {
     $self->fstype(undef);
 }
 
+=head1 Data Operations
+
+The methods in this section operate on the contents of the volume.  By
+and large, they operate with root privileges on the server machine via
+judicious use of sudo. Elevated permissions on the local machine (on
+which the script is running) are not needed.
+
+=cut
+
+=head2 $vol->get($source_on_vol_1,$source_on_vol_2,...,$dest)
+
+Invoke rsync() on the server to copy files & directories from the
+indicated source locations on the staging volume to the
+destination. Source paths can be relative paths, such as
+"media/photos/vacation", in which case they are relative to the top
+level of the mounted volume, or absolute paths, such as
+"/usr/local/media/photos/vacation", in which case they are treated as
+absolute paths on the server on which the volume is mounted.
+
+The destination can be a path on the local machine, a host:/path on a
+remote machine, a staging server and path in the form $server:/path,
+or a staging volume and path in the form "$volume/path". See
+L<VM::EC2::Staging::Manager/Instance Methods for Managing Staging Volumes> 
+for more formats you can use.
+
+As a special case, if you invoke get() with a
+single argument:
+
+ $vol->get('/tmp/foo')
+
+Then the entire volume will be rsynced into the destination directory
+/tmp/foo.
+
+=cut
+
+# $vol->get($source1,$source2,$source3....,$dest)
+# If $source not in format hostname:/path then 
+# volume will be appended to it.
+sub get {
+    my $self = shift;
+    croak 'usage: ',ref($self),'->get($source1,$source2,$source3....,$dest_path)'
+	unless @_;
+    unshift @_,'./' if @_ < 2;
+    
+    my $dest   = pop;
+    my $server = $self->server or croak "no staging server available";
+
+    $self->mounted or croak "Volume is not currently mounted";
+    my @source = $self->_rel2abs(@_);
+    $server->rsync(@source,$dest);
+}
+
+=head2 $vol->put($source1,$source2,$source3,...,$dest_on_volume)
+
+Invoke rsync() on the server to copy files & directories from the
+indicated source locations a destination located on the staging
+volume. The rules for paths are the same as for the get() method and as described in
+L<VM::EC2::Staging::Manager/Instance Methods for Managing Staging Volumes> .
+
+As a special case, if you invoke put() with a single argument:
+
+ $vol->put('/tmp/foo')
+
+Then the local directory /tmp/foo will be copied onto the top level of
+the staging volume. To do something similar with multiple source
+directories, use '/' or '.' as the destination:
+
+ $vol->put('/tmp/pictures','/tmp/audio' => '/');
+
+=cut
+
+# $vol->put($source1,$source2,$source3....,$dest)
+# If $dest not in format hostname:/path then 
+# volume will be appended to it.
+sub put {
+    my $self = shift;
+    croak 'usage: ',ref($self),'->put($source1,$source2,$source3....,$dest_path)'
+	unless @_;
+    push @_,'.' if @_ < 2;
+
+    my $dest = pop;
+    my @source = @_;
+
+    $self->_spin_up;
+    my $server = $self->server or croak "no staging server available";
+    ($dest)    = $self->_rel2abs($dest);
+    $server->rsync(@source,$dest);
+}
+
+=head2 $vol->dd($destination_volume)
+
+The dd() method performs a block level copy of the volume's disk onto
+the destination. The destination must be another staging volume.
+
+=cut
+
+sub dd   { 
+    my $self = shift;
+    unshift @_,$self if @_ < 2;
+    $self->_spin_up;
+    $self->server->dd(@_);
+}
+
+=head2 $output = $vol->df(@args)
+
+=head2 $output = $vol->ls(@args)
+
+=head2 $success = $vol->mkdir(@args)
+
+=head2 $success = $vol->chown(@args)
+
+=head2 $success = $vol->chgrp(@args)
+
+=head2 $success = $vol->chmod(@args)
+
+=head2 $success = $vol->rm(@args)
+
+=head2 $success = $vol->rmdir(@args)
+
+=head2 $output = $vol->cmd(@args);
+
+=head $success = $vol->ssh(@args);
+
+Each of these methods performs the same function as the like-named
+command-line function, after first changing the working directory to
+the top level of the volume. They behave as shown in the pseudocode
+below:
+
+ chdir $vol->mtpt;
+ sudo  $method @args
+
+The df() and ls() methods return the output of their corresponding
+commands. In a scalar context each method returns a string
+corresponding to the output of running the command on the server to
+which the volume is attached. In a list context, the methods return
+one element per line of output.
+
+For example:
+
+ my $free      = $volume->df('.');  # free on current directory
+ my ($percent) = $free =~ /(\d+)%/;
+ warn "almost out of space" if $percent > 90;
+
+The other methods return a boolean value indicating successful
+execution of the command on the remote machine.
+
+Command line switches can be passed along with other arguments:
+
+ $volume->mkdir('-p','media/photos/vacation');
+ $volume->chown('-R','fred','media');
+
+With the exception of df, each of these commands runs as the
+superuser, so be careful how you call them.
+
+You may run your own commands using the cmd() and ssh() methods. The
+former returns the output of the command. The latter returns a success
+code:
+
+ @log = $volume->cmd('tar cvf /tmp/archive.tar .');
+ $volume->ssh('gzip /tmp/archive.tar') or die "couldn't compress archive";
+
+Before calling any of these methods, the volume must be mounted and
+its server running. A fatal error will occur otherwise.
+
+=cut
+
+sub df    { shift->_cmd('df',@_)    }
+sub ls    { shift->_cmd('sudo ls',@_)    }
+sub mkdir { shift->_ssh('sudo mkdir',@_) }
+sub chown { shift->_ssh('sudo chown',@_) }
+sub chgrp { shift->_ssh('sudo chgrp',@_) }
+sub chmod { shift->_ssh('sudo chmod',@_) }
+sub rm    { shift->_ssh('sudo rm',@_)    }
+sub rmdir { shift->_ssh('sudo rmdir',@_) }
+
 sub _cmd {
     my $self = shift;
     my $cmd          = shift;
@@ -416,6 +619,9 @@ sub _ssh {
     my $mtpt         = $self->mtpt;
     $self->server->ssh("cd '$mtpt'; $cmd @args");
 }
+
+sub cmd { shift->_cmd(@_) }
+sub ssh { shift->_ssh(@_) }
 
 
 sub _rel2abs {

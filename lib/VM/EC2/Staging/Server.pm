@@ -845,6 +845,8 @@ and attach it to another:
  $server1->detach_volume($volume);
  $server2->mount_volume($volume);
 
+This method will die in case of error.
+
 =cut
 
 sub mount_volume {
