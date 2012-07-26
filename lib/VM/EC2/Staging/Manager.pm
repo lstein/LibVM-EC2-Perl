@@ -685,8 +685,8 @@ sub get_server_in_zone {
     my $self = shift;
     unshift @_,'-availability_zone' if @_ == 1;
     my %args = @_;
-    my $zone = $args{-availability_zone} or croak "must provide -availability_zone argument";
-    if (my $servers = $Zones{$zone}{Servers}) {
+    my $zone = $args{-availability_zone};
+    if ($zone && (my $servers = $Zones{$zone}{Servers})) {
 	my $server = (values %{$servers})[0];
 	$server->start unless $server->is_up;
 	return $server;
@@ -845,7 +845,7 @@ efficiently updating a snapshotted volume:
  my $vol = $manager->provision_volume(-name=>'MyPictures',
                                       -size=>10);
  $vol->put('/usr/local/my_pictures/');   # will do an rsync from local directory
- $vol->snapshot;  # write out to a snapshot
+ $vol->create_snapshot;  # write out to a snapshot
  $vol->delete;
 
 You may also explicitly specify a volumeId or snapshotId. The former
@@ -954,7 +954,8 @@ sub provision_volume {
 	$self->info("Provisioning a new $args{-size} GB $args{-fstype} volume\n");
     }
 
-    $self->info("Obtaining a staging server in appropriate availability zone $args{-availability_zone}\n");
+    $args{-availability_zone} ? $self->info("Obtaining a staging server in zone $args{-availability_zone}\n")
+                              : $self->info("Obtaining a staging server\n");
     my $server = $self->get_server_in_zone($args{-availability_zone});
     $server->start unless $server->ping;
     my $volume = $server->provision_volume(%args);
@@ -1122,8 +1123,8 @@ sub rsync {
 
     my $rsync_args        = $self->_rsync_args;
 
-    my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,__PACKAGE__);
-    my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,__PACKAGE__);
+    my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,'VM::EC2::Staging::Server');
+    my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,'VM::EC2::Staging::Server');
 
     # this is true when one of the paths contains a ":", indicating an rsync
     # path that contains a hostname, but not a managed server
@@ -1243,8 +1244,6 @@ sub _resolve_path {
     } else {
 	return [undef,$vpath];   # localhost
     }
-
-    $servername->start    if $servername && !$servername->is_up;
     return [$servername,$pathname];
 }
 
@@ -1639,7 +1638,7 @@ sub _scan_instances {
 	    -keyfile  => $keyfile,
 	    -username => $username,
 	    -instance => $instance,
-	    -endpoint => $self->ec2->endpoint,
+	    -manager  => $self,
 	    );
 	$self->register_server($server);
     }
@@ -1660,13 +1659,16 @@ sub _scan_volumes {
 	$args{-endpoint} = $self->ec2->endpoint;
 	$args{-volume}   = $volume;
 	$args{-name}     = $volume->tags->{StagingName};
+	$args{-fstype}   = $volume->tags->{StagingFsType};
+	$args{-mtpt}     = $volume->tags->{StagingMtPt};
 
 	if (my $attachment = $volume->attachment) {
-	    $args{-server} = $self->find_server_by_instance($attachment->instance);
-	    $args{-mtpt}   = undef; # leave blank - volume will fill in when server is up
+	    my $server = $self->find_server_by_instance($attachment->instance);
+	    $args{-server} = $server;
 	}
 
 	my $vol = VM::EC2::Staging::Volume->new(%args);
+	$vol->mounted(defined $args{-mtpt});
 	$self->register_volume($vol);
     }
 }

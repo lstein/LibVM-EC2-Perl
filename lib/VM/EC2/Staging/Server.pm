@@ -290,7 +290,7 @@ Also check out $manager->start_all_servers().
 
 sub start {
     my $self = shift;
-    return if $self->ping;
+    return if $self->is_up;
     $self->manager->info("Starting staging server\n");
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
@@ -383,7 +383,6 @@ If the remote command was successful, the method result will be true.
 
 sub ssh {
     my $self = shift;
-    $self->start unless $self->is_up;
 
     my @extra_args;
     if (ref($_[0]) && ref($_[0]) eq 'ARRAY') {
@@ -416,7 +415,6 @@ sub scmd {
     }
     my @cmd   = @_;
 
-    $self->start unless $self->is_up;
     my $Instance = $self->instance or die "Remote instance not set up correctly";
     my $host     = $Instance->dnsName;
 
@@ -496,24 +494,25 @@ the rest of the script continues running.  If X Windows is not
 running, then the method behaves the same as calling ssh() with no
 arguments.
 
-The terminal emulator to run is determined by examining first the
-COLORTERM environment variable and then the TERM variable. If neither
-is set, then it falls back to "xterm".
+The terminal emulator to run is determined by calling the method get_xterm().
 
 =cut
 
 sub shell {
     my $self = shift;
-    $self->start unless $self->is_up;
-
     return $self->ssh() unless $ENV{DISPLAY};
     
     fork() && return;
     setsid(); # so that we are independent of parent signals
     my $host     = $self->instance->dnsName;
     my $ssh_args = $self->_ssh_escaped_args;
-    my $emulator = $ENV{COLORTERM} || $ENV{TERM} || 'xterm';
-    exec $emulator,'-e',"ssh $ssh_args $host";
+    my $emulator = $self->get_xterm;
+    exec $emulator,'-e',"ssh $ssh_args $host" or die "$emulator: $!";
+}
+
+sub get_xterm {
+    my $self = shift;
+    return 'xterm';
 }
 
 sub _ssh_args {
@@ -548,7 +547,6 @@ sub _scmd_pipe {
     }
     my $operation = $op eq 'write' ? '|-' : '-|';
 
-    $self->start unless $self->is_up;
     my $host = $self->dnsName;
     my $pid = open(my $fh,$operation); # this does a fork
     defined $pid or croak "piped open failed: $!" ;
@@ -681,9 +679,10 @@ sub provision_volume {
     my ($vol,$needs_mkfs,$needs_resize) = $self->_create_volume($name,$size,$zone,$volid,$snapid,$reuse);
 
     $vol->add_tag(Name        => $self->volume_description($name)) unless exists $vol->tags->{Name};
-    $vol->add_tags(StagingName => $name,
-		   StagingMtPt => $mtpt,
-		   Role        => 'StagingVolume');
+    $vol->add_tags(StagingName   => $name,
+		   StagingMtPt   => $mtpt,
+		   StagingFsType => $fstype,
+		   Role          => 'StagingVolume');
     
     my ($ebs_device,$mt_device) = eval{$self->unused_block_device()}           
                       or die "Couldn't find suitable device to attach this volume to";
@@ -805,6 +804,7 @@ sub unmount_volume {
     return unless $vol->mounted;
     $self->info("unmounting $vol...\n");
     $self->ssh('sudo','umount',$mtpt) or croak "Could not umount $mtpt";
+    $vol->delete_tags('StagingMtPt');
     $vol->mounted(0);
 }
 
@@ -826,13 +826,14 @@ sub detach_volume {
     $self->ec2->wait_for_attachments($status);
 }
 
-=head2 $server->mount_volume($volume)
+=head2 $server->mount_volume($volume [,$mountpt])
 
 Mount the volume $volume using the mount information recorded inside
 the VM::EC2::Staging::Volume object (returned by its mtpt() and
 mtdev() methods). If the volume has not previously been mounted on
-this server, then it will be attached to the server and a new mountpoint
-will be allocated automatically.
+this server, then it will be attached to the server and a new
+mountpoint will be allocated automatically. You can change the mount
+point by specifying it explicitly in the second argument.
 
 Here is the recommended way to detach a staging volume from one server
 and attach it to another:
@@ -844,13 +845,16 @@ and attach it to another:
 
 sub mount_volume {
     my $self = shift;
-    my $vol  = shift;
-    if ($vol->mtpt) {
-	return if $vol->mtpt eq 'none';
-	$self->_mount($vol->mtdev,$vol->mtpt);
+    my ($vol,$mtpt)  = @_;
+    $mtpt ||= $vol->mtpt;
+    if ($mtpt) {
+	return if $mtpt eq 'none';
+	$self->_mount($vol->mtdev,$mtpt);
+	$vol->mtpt($mtpt);
     } else {
 	$self->_find_or_create_mount($vol);
     }
+    $vol->add_tags(StagingMtPt   => $vol->mtpt);
     $vol->mounted(1);
 }
 
