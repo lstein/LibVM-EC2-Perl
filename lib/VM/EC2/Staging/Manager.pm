@@ -134,7 +134,7 @@ use strict;
 use VM::EC2;
 # use VM::EC2::Staging::Volume;
 # use VM::EC2::Staging::Server;
-use Carp 'croak';
+use Carp 'croak','longmess';
 use File::Spec;
 use File::Path 'make_path','remove_tree';
 use File::Basename 'dirname';
@@ -145,7 +145,7 @@ use constant SERVER_STARTUP_TIMEOUT => 120;
 
 my (%Zones,%Instances,%Volumes,%Managers);
 my $Quiet;
-my ($LastHost,$LastMt);
+my ($LastHost,$LastMt,$LastStack);
 
 =head2 $manager = $ec2->staging_manager(@args)
 
