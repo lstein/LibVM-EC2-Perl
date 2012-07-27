@@ -132,8 +132,8 @@ the same region will return the same one each time.
 
 use strict;
 use VM::EC2;
-use VM::EC2::Staging::Volume;
-use VM::EC2::Staging::Server;
+# use VM::EC2::Staging::Volume;
+# use VM::EC2::Staging::Server;
 use Carp 'croak';
 use File::Spec;
 use File::Path 'make_path','remove_tree';
@@ -240,6 +240,16 @@ servers and volumes.
                 in order to share keyfiles among machines. Be aware of
                 the security implications of sharing private key files.
 
+ -server_class  By default, staging server objects created by the manager
+                are of class type VM::EC2::Staging::Server. If you create
+                a custom server subclass, you need to let the manager know
+                about it by passing the class name to this argument.
+
+ -volume_class  By default, staging volume objects created by the manager
+                are of class type VM::EC2::Staging::Volume. If you create
+                a custom volume subclass, you need to let the manager know
+                about it by passing the class name to this argument.
+
 =back
 
 =head2 $manager = VM::EC2::Staging::Manager(-ec2 => $ec2,@args)
@@ -289,6 +299,14 @@ sub new {
     $args{-scan}                = 1 unless exists $args{-scan};
     $args{-pid}                 = $$;
     $args{-dotdir}            ||= $self->default_dot_directory_path;
+    $args{-volume_class}      ||= $self->default_volume_class;
+    $args{-server_class}      ||= $self->default_server_class;
+
+    # bring in classes
+    foreach ('-server_class','-volume_class') {
+	eval "use $args{$_};1" or croak "Can't use $args{$_}"
+	    unless $args{$_}->can('new');
+    }
 
     # create accessors
     my $class = ref $self || $self;
@@ -609,12 +627,12 @@ sub provision_server {
 	%args,
 	);
     $instance or croak $self->ec2->error_str;
-    $instance->add_tags(Role            => 'StagingInstance',
+    $instance->add_tags(StagingRole     => 'StagingInstance',
 			Name            => "Staging server $args{-name} created by ".__PACKAGE__,
 			StagingUsername => $self->username,
 			StagingName     => $args{-name});
 			
-    my $server = VM::EC2::Staging::Server->new(
+    my $server = $self->server_class()->new(
 	-keyfile  => $keyfile,
 	-username => $self->username,
 	-instance => $instance,
@@ -1385,6 +1403,18 @@ choose the zone in a way that minimizes resources.
 Get or set the "quiet" flag, which if true suppresses all non-fatal
 warning and informational messages.
 
+=head2 $class_name = $manager->volume_class([$new_class])
+
+Get or set the name of the perl package that implements staging
+volumes, VM::EC2::Staging::Volume by default. Staging volumes created
+by the manager will have this class type.
+
+=head2 $class_name = $manager->server_class([$new_class])
+
+Get or set the name of the perl package that implements staging
+servers, VM::EC2::Staging::Server by default. Staging servers created
+by the manager will have this class type.
+
 =head2 $boolean = $manager->scan([$boolean])
 
 Get or set the "scan" flag, which if true will cause the zone to be
@@ -1532,6 +1562,32 @@ sub default_dot_directory_path {
     return $dir;
 }
 
+=head2 $class_name = $manager->default_volume_class
+
+Return the class name for staging volumes created by the manager,
+VM::EC2::Staging::Volume by default. If you wish a subclass of
+VM::EC2::Staging::Manager to create a different type of volume,
+override this method.
+
+=cut
+
+sub default_volume_class {
+    return 'VM::EC2::Staging::Volume';
+}
+
+=head2 $class_name = $manager->default_server_class
+
+Return the class name for staging servers created by the manager,
+VM::EC2::Staging::Server by default. If you wish a subclass of
+VM::EC2::Staging::Manager to create a different type of volume,
+override this method.
+
+=cut
+
+sub default_server_class {
+    return 'VM::EC2::Staging::Server';
+}
+
 =head2 $server = $manager->register_server($server)
 
 Register a VM::EC2::Staging::Server object. Usually called
@@ -1628,14 +1684,14 @@ sub scan_region {
 sub _scan_instances {
     my $self = shift;
     my $ec2  = shift;
-    my @instances = $ec2->describe_instances({'tag:Role'            => 'StagingInstance',
+    my @instances = $ec2->describe_instances({'tag:StagingRole'     => 'StagingInstance',
 					      'instance-state-name' => ['running','stopped']});
     for my $instance (@instances) {
 	my $keyname  = $instance->keyName                   or next;
 	my $keyfile  = $self->_check_keyfile($keyname)      or next;
 	my $username = $instance->tags->{'StagingUsername'} or next;
 	my $name     = $instance->tags->{StagingName} || $self->new_server_name;
-	my $server   = VM::EC2::Staging::Server->new(
+	my $server   = $self->server_class()->new(
 	    -name     => $name,
 	    -keyfile  => $keyfile,
 	    -username => $username,
@@ -1651,7 +1707,7 @@ sub _scan_volumes {
     my $ec2  = shift;
 
     # now the volumes
-    my @volumes = $ec2->describe_volumes(-filter=>{'tag:Role'          => 'StagingVolume',
+    my @volumes = $ec2->describe_volumes(-filter=>{'tag:StagingRole'   => 'StagingVolume',
 						   'status'            => ['available','in-use']});
     for my $volume (@volumes) {
 	my $status = $volume->status;
@@ -1669,7 +1725,7 @@ sub _scan_volumes {
 	    $args{-server} = $server;
 	}
 
-	my $vol = VM::EC2::Staging::Volume->new(%args);
+	my $vol = $self->volume_class()->new(%args);
 	$vol->mounted(defined $args{-mtpt});
 	$self->register_volume($vol);
     }
@@ -1725,7 +1781,7 @@ sub _security_key {
 sub _security_group {
     my $self = shift;
     my $ec2  = $self->ec2;
-    my @groups = $ec2->describe_security_groups(-filter=>{'tag:Role' => 'StagingGroup'});
+    my @groups = $ec2->describe_security_groups(-filter=>{'tag:StagingRole' => 'StagingGroup'});
     return $groups[0] if @groups;
     my $name = $self->_token('ssh');
     $self->info("Creating staging security group $name.\n");
@@ -1735,7 +1791,7 @@ sub _security_group {
     $sg->authorize_incoming(-protocol   => 'tcp',
 			    -port       => 'ssh');
     $sg->update or die $ec2->error_str;
-    $sg->add_tag(Role  => 'StagingGroup');
+    $sg->add_tag(StagingRole  => 'StagingGroup');
     return $sg;
 
 }

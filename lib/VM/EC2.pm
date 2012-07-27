@@ -54,7 +54,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
  # find instances tagged with Role=Server that are
  # stopped, change the user data and restart.
  @instances = $ec2->describe_instances({'tag:Role'       => 'Server',
-                                        'run-state-name' => 'stopped'});
+                                        'instance-state-name' => 'stopped'});
  for my $i (@instances) {
     $i->userData('Secure-mode: off');
     $i->start or warn "Couldn't start $i: ",$i->error_str;

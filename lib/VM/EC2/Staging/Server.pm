@@ -90,7 +90,6 @@ Windows host.
 
 use strict;
 use VM::EC2;
-use VM::EC2::Staging::Volume;
 use Carp 'croak';
 use Scalar::Util 'weaken';
 use File::Spec;
@@ -99,7 +98,7 @@ use File::Basename 'dirname';
 use POSIX 'setsid';
 use overload
     '""'     => sub {my $self = shift;
- 		     return $self->short_name;  # "inherited" from VM::EC2::Volume
+ 		     return $self->short_name;  # "inherited" from VM::EC2::Server
 },
     fallback => 1;
 
@@ -111,8 +110,8 @@ sub AUTOLOAD {
     my $self = shift;
     my ($pack,$func_name) = $AUTOLOAD=~/(.+)::([^:]+)$/;
     return if $func_name eq 'DESTROY';
-    my $vol = eval {$self->instance} or croak "Can't locate object method \"$func_name\" via package \"$pack\"";;
-    return $vol->$func_name(@_);
+    my $inst = eval {$self->instance} or croak "Can't locate object method \"$func_name\" via package \"$pack\"";;
+    return $inst->$func_name(@_);
 }
 
 sub can {
@@ -122,8 +121,8 @@ sub can {
     my $can  = $self->SUPER::can($method);
     return $can if $can;
 
-    my $ebs  = $self->ebs or return;
-    return $ebs->can($method);
+    my $inst  = $self->instance or return;
+    return $inst->can($method);
 }
 
 =head1 Staging Server Creation
@@ -685,7 +684,7 @@ sub provision_volume {
     $vol->add_tags(StagingName   => $name,
 		   StagingMtPt   => $mtpt,
 		   StagingFsType => $fstype,
-		   Role          => 'StagingVolume');
+		   StagingRole   => 'StagingVolume');
     
     my ($ebs_device,$mt_device) = eval{$self->unused_block_device()}           
                       or die "Couldn't find suitable device to attach this volume to";
@@ -739,7 +738,7 @@ sub provision_volume {
 	}
     }
 
-    my $volobj = VM::EC2::Staging::Volume->new({
+    my $volobj = $self->manager->volume_class->new({
 	-volume    => $vol,
 	-mtdev     => $mt_device,
 	-mtpt      => $mtpt,
@@ -854,7 +853,7 @@ sub mount_volume {
     my ($vol,$mtpt)  = @_;
     $vol->mounted and croak "$vol already mounted";
     if ($vol->mtpt) {
-	return if $vol->mtpt eq 'none';
+	return 1 if $vol->mtpt eq 'none';
 	$self->_mount($vol->mtdev,$vol->mtpt);
     } else {
 	$self->_find_or_create_mount($vol,$mtpt);
@@ -862,6 +861,7 @@ sub mount_volume {
     $vol->add_tags(StagingMtPt   => $vol->mtpt);
     $vol->server($self);
     $vol->mounted(1);
+    return $vol->mounted;
 }
 
 =head2 $server->remount_volume($volume)
@@ -1050,7 +1050,8 @@ sub _find_or_create_mount {
     unless ($mt_device && $mtpt) {
 	($ebs_device,$mt_device) = $self->unused_block_device;
 	$self->info("attaching $vol to $self via $mt_device\n");
-	my $s = $vol->attach($self->instanceId,$mt_device);
+	my $s = $vol->attach($self->instanceId,$mt_device) 
+	    or croak "Can't attach $vol to $self: ",$self->ec2->error_str;
 	$self->ec2->wait_for_attachments($s);
 	$s->current_status eq 'attached' or croak "Can't attach $vol to $self";
 	$mtpt ||= $vol->tags->{StagingMtPt} || $self->default_mtpt($vol);

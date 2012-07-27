@@ -78,7 +78,6 @@ and a mounting device (e.g. /dev/sdf1).
 use strict;
 use VM::EC2;
 use Carp 'croak';
-use VM::EC2::Staging::Server;
 use File::Spec;
 
 use overload
@@ -163,7 +162,6 @@ sub mounted {
     $self->{mounted} = shift if @_;
     return $m;
 }
-
 
 =head2 $type = $vol->fstype
 
@@ -336,16 +334,24 @@ sub snapshot {shift->create_snapshot(@_)}
 
 =head2 $vol->mount($server [,$mtpt])
 
+=head2 $vol->mount()
+
 Mount the volume on the indicated VM::EC2::Staging::Server, optionally
 at a named mount point on the file system. If the volume is already
 attached to a different server, it will be detached first. If any of
 these step fails, the method will die with a fatal error.
+
+When called with no arguments, the volume is automounted on a staging
+server, creating or starting the server if necessary.
 
 =cut
 
 # mount the volume on a server
 sub mount {
     my $self = shift;
+    unless (@_) {
+	return $self->_spin_up;
+    }
     my ($server,$mtpt) = @_;
     if (my $existing_server = $self->server) {
 	if ($existing_server eq $server) {
@@ -414,8 +420,9 @@ sub delete {
     my $self = shift;
     my $status = $self->current_status;
     if ($status eq 'in-use') {
-	my $server = $self->server;
-	$server->delete_volume($self);
+	my $server = $self->server 
+	    || $self->manager->find_server_by_instance($self->attachment->instanceId);
+	$server->delete_volume($self) if $server;
     } elsif ($status eq 'available') {
 	$self->ec2->delete_volume($self);
     } else {
@@ -530,9 +537,33 @@ sub dd   {
     $self->server->dd(@_);
 }
 
-=head2 $output = $vol->df(@args)
+=head2 $output = $vol->cmd($cmd,@args)
 
-=head2 $output = $vol->ls(@args)
+This method runs command $cmd on the server that is mounting the
+volume using ssh. Before the command is run, the working directory is
+changed to the top level of the volume's mount point. Any arguments,
+switches, etc you wish to pass to the command can be provided as
+@args. The output of the command is returned as a string in a scalar
+context, or an array of lines in a list context.
+
+Example:
+
+ @log = $volume->cmd('tar cvf /tmp/archive.tar .');
+
+=head2 $result = $vol->ssh($cmd,@args)
+
+This is similar to cmd(), except that the output of the command is
+sent to STDOUT and the method returns true if the command executed
+succcessfully on the remote machine. The cmd() and ssh() methods are
+equivalent to backticks are system() respectively.
+
+Example:
+
+ $volume->ssh('gzip /tmp/archive.tar') or die "couldn't compress archive";
+
+=head2 $output  = $vol->df(@args)
+
+=head2 $output  = $vol->ls(@args)
 
 =head2 $success = $vol->mkdir(@args)
 
@@ -542,13 +573,13 @@ sub dd   {
 
 =head2 $success = $vol->chmod(@args)
 
+=head2 $success = $vol->cp(@args)
+
+=head2 $success = $vol->mv(@args)
+
 =head2 $success = $vol->rm(@args)
 
 =head2 $success = $vol->rmdir(@args)
-
-=head2 $output = $vol->cmd(@args);
-
-=head $success = $vol->ssh(@args);
 
 Each of these methods performs the same function as the like-named
 command-line function, after first changing the working directory to
@@ -601,6 +632,8 @@ sub chgrp { shift->_ssh('sudo chgrp',@_) }
 sub chmod { shift->_ssh('sudo chmod',@_) }
 sub rm    { shift->_ssh('sudo rm',@_)    }
 sub rmdir { shift->_ssh('sudo rmdir',@_) }
+sub cp    { shift->_ssh('sudo cp',@_) }
+sub mv    { shift->_ssh('sudo mv',@_) }
 
 sub _cmd {
     my $self = shift;
@@ -622,7 +655,6 @@ sub _ssh {
 
 sub cmd { shift->_cmd(@_) }
 sub ssh { shift->_ssh(@_) }
-
 
 sub _rel2abs {
     my $self  = shift;
