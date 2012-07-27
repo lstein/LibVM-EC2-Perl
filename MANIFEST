@@ -59,4 +59,5 @@ t/03.securitygroup.t
 t/04.volume.t
 t/05.spot_instance.t
 t/06.instance.t
+t/07.staging.t
 t/lib/EC2TestSupport.pm
