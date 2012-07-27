@@ -27,10 +27,10 @@ $manager = $ec2->staging_manager(-instance_type=> 't1.micro',
 
 SKIP: {
 
-skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
-skip "instance tests declined",        TEST_COUNT-1 unless confirm_payment();
+skip "; account information unavailable",TEST_COUNT-1 unless setup_environment();
+skip "; instance tests declined",        TEST_COUNT-1 unless confirm_payment();
 
-skip "test system does not have ssh & rsh command line tools in PATH", TEST_COUNT-1
+skip "; this system does not have ssh, rsh and dd command line tools in PATH", TEST_COUNT-1
     unless VM::EC2::Staging::Manager->environment_ok();
 
 # remove preexisting volumes, servers used for testing
@@ -56,7 +56,7 @@ my $volume = $manager->get_volume(-name    => 'test_volume',
 ok($volume,'volume creation works');
 $volume->add_tag(StagingTest=>1);  # so that we can correctly identify and remove it
 is($volume->fstype,'ext3','volume fstype method returns correct value');
-ok($volume->size==1,'volume fstype method returns correct value');
+ok($volume->size==1,'volume size method returns correct value');
 is($volume->server,$server1,'volume is automounted on preexisting server');
 
 my $vol  = $manager->get_volume(-name    => 'test_volume',
@@ -86,15 +86,18 @@ $ec2->wait_for_volumes($volume);
 ok(!$volume->mounted,'mounted state correct when detached');
 
 my @volumes = $server1->volumes;
-ok(@volumes==0,'server1 has no volumes as expected');
+cmp_ok(scalar @volumes,0,'server1 has 0 volumes mounted');
 
-ok($server1->mount_volume($volume=>'/mnt/test'),'mounting successful');
+$server1->mount_volume($volume=>'/mnt/test');
 ok($volume->mounted,'mounted state correct when mounted');
 is($volume->mtpt,'/mnt/test','volume mounted on correct mtpt');
 is($volume->server,$server1,'volume mounted on correct server');
+my $output = $server1->scmd('df /mnt/test');
+my $mtdev  = $volume->mtdev;
+like($output,"/$mtdev/mi",'server agrees with volume on mount point and device');
 
 my @volumes = $server1->volumes;
-ok(@volumes==1,'server1 has 1 volumes as expected');
+ok(@volumes==1,'server1 has 1 volume mounted');
 
 my $volume2 = $server2->provision_volume(-size=>1);
 ok($volume2,'volume creation on server2 successful');
@@ -145,9 +148,9 @@ sub confirm_payment {
     print STDERR <<END;
 
 # This test will launch two "micro" instance under your Amazon account
-# and then terminate it, incurring a one hour runtime charge. This will
-# incur a charge of \$0.04 (as of July 2012), which may be covered under 
-# the AWS free tier. Also be aware that this test may take a while
+# and then terminate them, incurring a one hour runtime charge for each.
+# This will incur a charge of \$0.04 (as of July 2012), which may be covered
+# under the AWS free tier. Also be aware that this test may take a while
 # (several minutes) due to tests that launch, start, and stop instances.
 # (this prompt will timeout automatically in 15s)
 END

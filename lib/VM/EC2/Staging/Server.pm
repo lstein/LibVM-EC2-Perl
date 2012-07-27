@@ -781,7 +781,8 @@ in the list.
 
 sub volumes {
     my $self   = shift;
-    my @volIds = map {$_->volumeId} $self->blockDeviceMapping;
+    $self->refresh;
+    my @volIds  = map {$_->volumeId} $self->blockDeviceMapping;
     my @volumes = map {$self->manager->find_volume_by_volid($_)} @volIds;
     return grep {defined $_} @volumes;
 }
@@ -853,7 +854,7 @@ sub mount_volume {
     my ($vol,$mtpt)  = @_;
     $vol->mounted and croak "$vol already mounted";
     if ($vol->mtpt) {
-	return 1 if $vol->mtpt eq 'none';
+	return if $vol->mtpt eq 'none';
 	$self->_mount($vol->mtdev,$vol->mtpt);
     } else {
 	$self->_find_or_create_mount($vol,$mtpt);
@@ -861,7 +862,6 @@ sub mount_volume {
     $vol->add_tags(StagingMtPt   => $vol->mtpt);
     $vol->server($self);
     $vol->mounted(1);
-    return $vol->mounted;
 }
 
 =head2 $server->remount_volume($volume)
