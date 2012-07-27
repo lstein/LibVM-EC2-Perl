@@ -81,12 +81,12 @@ $server2->add_tag(StagingTest=>1);  # so that we can correctly identify and remo
 
 ok($volume->mounted,'mounted state correct when mounted');
 print STDERR "# detaching/remounting volume...\n";
-$volume->detach;
-$ec2->wait_for_volumes($volume);
+my $status = $volume->detach;
+$ec2->wait_for_attachments($status);
 ok(!$volume->mounted,'mounted state correct when detached');
 
 my @volumes = $server1->volumes;
-cmp_ok(scalar @volumes,0,'server1 has 0 volumes mounted');
+cmp_ok(scalar @volumes,'==',0,'server1 has 0 volumes mounted');
 
 $server1->mount_volume($volume=>'/mnt/test');
 ok($volume->mounted,'mounted state correct when mounted');
@@ -99,6 +99,7 @@ like($output,"/$mtdev/mi",'server agrees with volume on mount point and device')
 my @volumes = $server1->volumes;
 ok(@volumes==1,'server1 has 1 volume mounted');
 
+print STDERR "# provisioning a second test volume...\n";
 my $volume2 = $server2->provision_volume(-size=>1);
 ok($volume2,'volume creation on server2 successful');
 is($volume2->server,$server2,"volume2 has correct server");

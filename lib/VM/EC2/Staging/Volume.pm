@@ -486,6 +486,20 @@ sub get {
     $server->rsync(@source,$dest);
 }
 
+=head2 $vol->copy($source_on_vol_1,$source_on_vol_2,...,$dest)
+
+This is an alias for get(). It is intended to make it easier to read the
+intent of this command:
+
+ $source_volume->copy($destination_volume);
+
+Which basically makes a copy of $source_volume onto
+$destination_volume.
+
+=cut
+
+sub copy { shift->get(@_) }
+
 =head2 $vol->put($source1,$source2,$source3,...,$dest_on_volume)
 
 Invoke rsync() on the server to copy files & directories from the

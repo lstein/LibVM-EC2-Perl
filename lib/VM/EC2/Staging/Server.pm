@@ -1027,6 +1027,7 @@ sub _find_or_create_mount {
     my $self = shift;
     my ($vol,$mtpt)  = @_;
 
+    $vol->refresh;
     my ($ebs_device,$mt_device);
     
     # handle the case of the volme already being attached

@@ -328,7 +328,7 @@ END
     my $obj = bless \%args,ref $class || $class;
     weaken($Managers{$obj->ec2->endpoint} = $obj);
     if ($args{-scan}) {
-	$obj->info("Scanning for existing staging servers and volumes in ",$obj->ec2->endpoint,"\n");
+	$obj->info("Scanning for existing staging servers and volumes in ",$obj->ec2->endpoint,".\n");
 	$obj->scan_region;
     }
     return $obj;
@@ -471,7 +471,7 @@ sub copy_snapshot {
 	) or croak "Couldn't create new destination volume for $snapId";
 
     if ($fstype eq 'raw') {
-	$self->info("Using dd for block level disk copy (will take a while)\n");
+	$self->info("Using dd for block level disk copy (will take a while).\n");
 	$source->dd($dest)    or croak "dd failed";
     } else {
 	# this now works?
@@ -503,7 +503,7 @@ sub _copy_ebs_image {
 
     # hashref with keys 'name', 'description','architecture','kernel','ramdisk','block_devices','root_device'
     # 'is_public','authorized_users'
-    $self->info("Gathering information about image $image\n");
+    $self->info("Gathering information about image $image.\n");
     my $info = $self->_gather_image_info($image);
 
     my $name         = $info->{name};
@@ -520,7 +520,7 @@ sub _copy_ebs_image {
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
     my $root_device     = $info->{root_device};
 
-    $self->info("Copying EBS volumes attached to this image (this may take a long time)\n");
+    $self->info("Copying EBS volumes attached to this image (this may take a long time).\n");
     my @bd              = @$block_devices;
     my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @bd;
     
@@ -962,18 +962,18 @@ sub provision_volume {
 	croak "There is already a volume named $args{-name} in this region";
     
     if ($args{-snapshot_id}) {
-	$self->info("Provisioning volume from snapshot $args{-snapshot_id}\n");
+	$self->info("Provisioning volume from snapshot $args{-snapshot_id}.\n");
     } elsif ($args{-volume_id}) {
-	$self->info("Provisioning volume from volume $args{-volume_id}\n");
+	$self->info("Provisioning volume from volume $args{-volume_id}.\n");
 	my $v = $self->ec2->describe_volumes($args{-volume_id});
 	$args{-availability_zone} = $v->availabilityZone if $v;
 	$args{-size}              = $v->size             if $v;
     } else {
-	$self->info("Provisioning a new $args{-size} GB $args{-fstype} volume\n");
+	$self->info("Provisioning a new $args{-size} GB $args{-fstype} volume.\n");
     }
 
-    $args{-availability_zone} ? $self->info("Obtaining a staging server in zone $args{-availability_zone}\n")
-                              : $self->info("Obtaining a staging server\n");
+    $args{-availability_zone} ? $self->info("Obtaining a staging server in zone $args{-availability_zone}.\n")
+                              : $self->info("Obtaining a staging server.\n");
     my $server = $self->get_server_in_zone($args{-availability_zone});
     $server->start unless $server->ping;
     my $volume = $server->provision_volume(%args);
@@ -1278,7 +1278,7 @@ sub _authorize {
     my ($source_host,$dest_host) = @_;
     my $keyname = "/tmp/${source_host}_to_${dest_host}";
     unless ($source_host->has_key($keyname)) {
-	$source_host->info("creating ssh key for server to server data transfer\n");
+	$source_host->info("creating ssh key for server to server data transfer.\n");
 	$source_host->ssh("ssh-keygen -t dsa -q -f $keyname</dev/null 2>/dev/null");
 	$source_host->has_key($keyname=>1);
     }
@@ -1895,7 +1895,7 @@ sub _search_for_image {
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
     my ($most_recent) = sort {$b->name cmp $a->name} @candidates;
-    $self->info("found $most_recent: ",$most_recent->name,"\n");
+    $self->info("found $most_recent: ",$most_recent->name,".\n");
     return $most_recent;
 }
 
