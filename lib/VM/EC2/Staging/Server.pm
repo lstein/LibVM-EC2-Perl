@@ -720,7 +720,7 @@ sub provision_volume {
 			  :/^hfs/     ? ''
 			  :'')
 	          : '';
-	my $quiet = $self->manager->quiet && ! /msdos|vfat|hfs/ ? "-q" : '';
+	my $quiet = $self->manager->verbosity < 3 && !/msdos|vfat|hfs/ ? "-q" : '';
 
 	my $apt_packages = $self->_mkfs_packages();
 	if (my $package = $apt_packages->{$fstype}) {
@@ -1248,8 +1248,9 @@ sub _rsync_put {
     my $host     = $self->instance->dnsName;
     my $ssh_args = $self->_ssh_escaped_args;
     my $rsync_args = $self->manager->_rsync_args;
-    $self->info("Beginning rsync...\n");
+    $self->info("Beginning rsync @source $host:$dest ...\n");
     system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest") == 0;
+    $self->info("...rsync done\n");
 }
 
 sub _rsync_get {
@@ -1266,8 +1267,9 @@ sub _rsync_get {
     my $ssh_args   = $self->_ssh_escaped_args;
     my $rsync_args = $self->manager->_rsync_args;
     
-    $self->info("Beginning rsync...\n");
+    $self->info("Beginning rsync @source $host:$dest ...\n");
     system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
+    $self->info("...rsync done\n");
 }
 
 =head1 Internal Methods
@@ -1413,7 +1415,8 @@ sub default_mtpt {
 
 =head2 $server->info(@message)
 
-Log a message to standard output, respecting the staging manager's quiet() setting.
+Log a message to standard output, respecting the staging manager's
+verbosity() setting.
 
 =cut
 

@@ -10,7 +10,7 @@ VM::EC2::Staging::Manager - Automate VMs and volumes for moving data in and out 
 
  my $ec2     = VM::EC2->new(-region=>'us-east-1');
  my $staging = $ec2->staging_manager(-on_exit     => 'stop', # default, stop servers when process exists
-                                     -quiet       => 0,      # default, verbose progress messages
+                                     -verbose     => 1,      # default, verbose progress messages
                                      -scan        => 1,      # default, scan region for existing staging servers and volumes
                                      -image_name  => 'ubuntu-maverick-10.10', # default server image
                                      -user_name   => 'ubuntu',                # default server login name
@@ -142,9 +142,12 @@ use Scalar::Util 'weaken';
 
 use constant                     GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
+use constant VERBOSE_DEBUG => 3;
+use constant VERBOSE_INFO  => 2;
+use constant VERBOSE_WARN  => 1;
 
 my (%Zones,%Instances,%Volumes,%Managers);
-my $Quiet;
+my $Verbose;
 my ($LastHost,$LastMt);
 
 =head2 $manager = $ec2->staging_manager(@args)
@@ -208,8 +211,12 @@ servers and volumes.
                 sudo on the instance without providing a password,
                 or functionality of this module will be limited.
   
- -quiet         Boolean, default false. If true, turns off most informational
-                messages.
+ -verbose       Integer level of verbosity. Level 1 prints warning
+                messages. Level 2 (the default) adds informational
+                messages as well. Level 3 adds verbose debugging
+                messages. Level 0 suppresses all messages.
+
+ -quiet         (deprecated) If true, turns off all verbose messages.
 
  -scan          Boolean, default true. If true, scans region for
                 volumes and servers created by earlier manager
@@ -295,12 +302,14 @@ sub new {
     $args{-reuse_volumes}     ||= $self->default_reuse_volumes;
     $args{-image_name}        ||= $self->default_image_name;
     $args{-availability_zone} ||= undef;
-    $args{-quiet}             ||= undef;
+    $args{-verbose}             = $self->default_verbosity unless exists $args{-verbose};
     $args{-scan}                = 1 unless exists $args{-scan};
     $args{-pid}                 = $$;
     $args{-dotdir}            ||= $self->default_dot_directory_path;
     $args{-volume_class}      ||= $self->default_volume_class;
     $args{-server_class}      ||= $self->default_server_class;
+
+    $args{-quiet}             = !$args{-verbose};
 
     # bring in classes
     foreach ('-server_class','-volume_class') {
@@ -324,7 +333,7 @@ END
     die $@ if $@;
     }
 
-    $Quiet  = $args{-quiet};  # package global, for a few edge cases
+    $Verbose  = $args{-verbose};  # package global, for a few edge cases
     my $obj = bless \%args,ref $class || $class;
     weaken($Managers{$obj->ec2->endpoint} = $obj);
     if ($args{-scan}) {
@@ -1217,7 +1226,7 @@ sub dd {
     my ($vol1,$vol2) = @_;
     my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
     my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
-    my $hush     = $self->hush ? '2>/dev/null' : '';
+    my $hush     = $self->verbosity < VERBOSE_DEBUG ? '2>/dev/null' : '';
 
     if ($server1 eq $server2) {
 	$server1->ssh("sudo dd if=$device1 of=$device2 $hush");
@@ -1272,7 +1281,7 @@ sub _resolve_path {
 
 sub _rsync_args {
     my $self  = shift;
-    my $quiet = $self->hush;
+    my $quiet = $self->verbosity < VERBOSE_DEBUG; 
     return $quiet ? '-aqz' : '-avz';
 }
 
@@ -1401,11 +1410,6 @@ Get or set the default availability zone to use when creating new
 servers and volumes. An undef value allows the staging manager to
 choose the zone in a way that minimizes resources.
 
-=head2 $boolean = $manager->quiet([$boolean])
-
-Get or set the "quiet" flag, which if true suppresses all non-fatal
-warning and informational messages.
-
 =head2 $class_name = $manager->volume_class([$new_class])
 
 Get or set the name of the perl package that implements staging
@@ -1466,6 +1470,15 @@ sub environment_ok {
     }
     return 1;
 }
+
+=head2 $name = $manager->default_verbosity
+
+Returns the default verbosity level (2: warning+informational messages). This
+is overridden using -verbose at create time.
+
+=cut
+
+sub default_verbosity { 2 }
 
 =head2 $name = $manager->default_exit_behavior
 
@@ -1553,7 +1566,7 @@ sub default_reuse_volumes { 1               }
 =head2 $path = $manager->default_dot_directory_path
 
 Return the default value of the -dotdir argument
-("$ENV{HOME}/.vm_ec2_staging"). This value instructs the manager to
+("$ENV{HOME}/.vm-ec2-staging"). This value instructs the manager to
 use the symbolic name of the volume to return an existing volume
 whenever a request is made to provision a new one of the same name.
 
@@ -1561,7 +1574,7 @@ whenever a request is made to provision a new one of the same name.
 
 sub default_dot_directory_path {
     my $class = shift;
-    my $dir = File::Spec->catfile($ENV{HOME},'.vm_ec2_staging');
+    my $dir = File::Spec->catfile($ENV{HOME},'.vm-ec2-staging');
     return $dir;
 }
 
@@ -1848,35 +1861,54 @@ sub volume_description {
     return "Staging volume for $name created by ".__PACKAGE__;
 }
 
+=head2 $manager->debug("Debugging message\n")
+
 =head2 $manager->info("Informational message\n")
 
-Prints an informational message to standard error, unless the "quiet"
-option is set.
+=head2 $manager->warn("Warning message\n")
+
+Prints an informational message to standard error if current
+verbosity() level allows.
 
 =cut
 
 sub info {
     my $self = shift;
-    return if $self->hush;
+    return if $self->verbosity < VERBOSE_INFO;
     my @lines       = split "\n",longmess();
     my $stack_count = grep /VM::EC2::Staging::Manager/,@lines;
     print STDERR '[info] ',' ' x (($stack_count-1)*3),@_;
 }
 
-=head2 $quiet = $manager->hush([$new_value])
+sub warn {
+    my $self = shift;
+    return if $self->verbosity < VERBOSE_WARN;
+    my @lines       = split "\n",longmess();
+    my $stack_count = grep /VM::EC2::Staging::Manager/,@lines;
+    print STDERR '[warn] ',' ' x (($stack_count-1)*3),@_;
+}
 
-The hush() method get/sets a flag that if true disables informational
-messages. It is similar to quiet() except that it also sets a package
-variable, enabling the method to be used in a class context.
+sub debug {
+    my $self = shift;
+    return if $self->verbosity < VERBOSE_DEBUG;
+    my @lines       = split "\n",longmess();
+    my $stack_count = grep /VM::EC2::Staging::Manager/,@lines;
+    print STDERR '[debug] ',' ' x (($stack_count-1)*3),@_;
+}
+
+=head2 $verbosity = $manager->verbosity([$new_value])
+
+The verbosity() method get/sets a flag that sets the level of
+informational messages.
 
 =cut
 
-sub hush {
+sub verbosity {
     my $self = shift;
-    my $d    = ref $self ? $self->quiet : $Quiet;
+    my $d    = ref $self ? $self->verbose : $Verbose;
     if (@_) {
-	$Quiet = shift;
-	$self->quiet($Quiet) if ref $self;
+	$Verbose = shift;
+	$self->verbose($Verbose) if ref $self;
     }
     return $d;
 }
