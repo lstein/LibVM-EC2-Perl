@@ -21,7 +21,7 @@ reset_declined();
 SKIP: {
 skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
 
-my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
+my $ec2 = VM::EC2->new(-print_error=>1,-region=>'us-east-1') or BAIL_OUT("Can't load VM::EC2 module");
 ok($ec2,'VM::EC2->new');
 
 my $natty = $ec2->describe_images(TEST_IMAGE);  # defined in t/EC2TestSupport

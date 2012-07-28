@@ -341,6 +341,7 @@ END
 sub find_manager {
     my $class    = shift;
     my $endpoint = shift;
+    return unless $endpoint;
     return $Managers{$endpoint};
 }
 
@@ -680,6 +681,7 @@ sub get_server {
     $args{-name}              ||= $self->new_server_name;
 
     # find servers of same name
+    local $^W = 0; # prevent an uninitialized value warning
     my %servers = map {$_->name => $_} $self->servers;
     my $server = $servers{$args{-name}} || $self->provision_server(%args);
     $server->start unless $server->ping;
@@ -1131,6 +1133,7 @@ sub rsync {
     my @source = @paths;
 
     my %hosts;
+    local $^W=0; # avoid uninit value errors
     foreach (@source) {
 	$hosts{$_->[0]} = $_->[0];
     }

@@ -23,7 +23,7 @@ SKIP: {
 skip "account information unavailable",TEST_COUNT unless setup_environment();
 
 require_ok('VM::EC2');
-$ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
+$ec2 = VM::EC2->new(-print_error=>1,-region=>'us-east-1') or BAIL_OUT("Can't load VM::EC2 module");
 
 my @requests = $ec2->request_spot_instances(-spot_price    => 0.001,  # too low - will never be satisfied
 					    -instance_type => 't1.micro',

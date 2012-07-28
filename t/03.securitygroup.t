@@ -54,7 +54,7 @@ ok($g->authorize_incoming(-protocol=>'tcp',
 			  -source=>['192.168.0.0/24','192.168.1.0/24']),
    'authorize incoming using a list of sources');
 ok($g->authorize_incoming(-protocol=>'udp',
-			  -port    => 'www',
+			  -port    => 'discard',
 			  -groups  => [$g->groupId,'default','979382823631/default']),
    'authorize incoming using a list of groups');
 @perm = $g->ipPermissions;
@@ -68,7 +68,7 @@ is($perm[0],'tcp(22..22) FROM CIDR 0.0.0.0/0','firewall rule one correct');
 is($perm[1],'tcp(23..29) FROM CIDR 192.168.0.0/24,192.168.1.0/24','firewall rule two correct');
 $gg = $ec2->describe_security_groups(-name=>'default');
 my $from = join (',',sort ($gg->name,$g->name,'979382823631/default'));
-is($perm[2],"udp(80..80) GRPNAME $from",'firewall rule three correct');
+is($perm[2],"udp(9..9) GRPNAME $from",'firewall rule three correct');
 
 # try revoking
 ok($g->revoke_incoming(-protocol=>'tcp',
@@ -79,7 +79,7 @@ ok($g->revoke_incoming($perm[0]),'revoke with IpPermissions object');
 ok($g->update,'update with revocation');
 @perm = sort $g->ipPermissions;
 is(scalar @perm,1,'revoke worked');
-is($perm[0],"udp(80..80) GRPNAME $from",'correct firewall rules revoked');
+is($perm[0],"udp(9..9) GRPNAME $from",'correct firewall rules revoked');
 }
 
 exit 0;

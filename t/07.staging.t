@@ -101,7 +101,7 @@ my $output = $server1->scmd('df /mnt/test');
 my $mtdev  = $volume->mtdev;
 like($output,"/$mtdev/mi",'server agrees with volume on mount point and device');
 
-my @volumes = $server1->volumes;
+@volumes = $server1->volumes;
 cmp_ok(scalar @volumes,'==',1,'server1 has 1 volume mounted');
 
 print STDERR "# provisioning a second test volume...\n";

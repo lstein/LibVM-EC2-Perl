@@ -25,7 +25,7 @@ skip "account information unavailable",TEST_COUNT unless setup_environment();
 skip "instance tests declined",        TEST_COUNT unless confirm_payment();
 
 require_ok('VM::EC2');
-$ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
+$ec2 = VM::EC2->new(-print_error=>1,-region=>'us-east-1') or BAIL_OUT("Can't load VM::EC2 module");
 
 cleanup();
 
