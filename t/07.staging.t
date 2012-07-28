@@ -9,7 +9,7 @@ use File::Temp qw(tempfile);
 use FindBin '$Bin';
 use lib "$Bin/lib","$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
-use constant TEST_COUNT => 30;
+use constant TEST_COUNT => 31;
 use Test::More tests => TEST_COUNT;
 use EC2TestSupport;
 
@@ -35,6 +35,8 @@ skip "; this system does not have ssh, rsh and dd command line tools in PATH", T
 
 # remove preexisting volumes, servers used for testing
 cleanup();
+
+my $volume_count = $manager->volumes;
 
 print STDERR "# spinning up a test server...\n";
 my $server1 = $manager->get_server(-name => 'test_server');
@@ -80,12 +82,15 @@ isnt($server1,$server2,'got new server in new zone when zone forced');
 $server2->add_tag(StagingTest=>1);  # so that we can correctly identify and remove it
 
 ok($volume->mounted,'mounted state correct when mounted');
+my @volumes = $server1->volumes;
+cmp_ok(scalar @volumes,'==',1,'server1 has 1 volumes mounted');
+
 print STDERR "# detaching/remounting volume...\n";
 my $status = $volume->detach;
 $ec2->wait_for_attachments($status);
 ok(!$volume->mounted,'mounted state correct when detached');
 
-my @volumes = $server1->volumes;
+@volumes = $server1->volumes;
 cmp_ok(scalar @volumes,'==',0,'server1 has 0 volumes mounted');
 
 $server1->mount_volume($volume=>'/mnt/test');
@@ -97,7 +102,7 @@ my $mtdev  = $volume->mtdev;
 like($output,"/$mtdev/mi",'server agrees with volume on mount point and device');
 
 my @volumes = $server1->volumes;
-ok(@volumes==1,'server1 has 1 volume mounted');
+cmp_ok(scalar @volumes,'==',1,'server1 has 1 volume mounted');
 
 print STDERR "# provisioning a second test volume...\n";
 my $volume2 = $server2->provision_volume(-size=>1);
@@ -105,7 +110,7 @@ ok($volume2,'volume creation on server2 successful');
 is($volume2->server,$server2,"volume2 has correct server");
 
 @volumes    = $server2->volumes;
-ok(@volumes==1,'server2 now has 1 volume as expected');
+cmp_ok(scalar @volumes,'==',1,'server2 has 1 registered volume');
 
 # try a copy
 ok($manager->rsync($volume=>$volume2),'rsync from volume to volume successful');
@@ -113,12 +118,12 @@ ok($manager->rsync($volume=>$volume2),'rsync from volume to volume successful');
 is($listing[0],'01.describe.t','rsync copied files with correct structure');
 
 @volumes    = $manager->volumes;
-ok(@volumes==2,'manager has 2 volumes as expected');
+cmp_ok(scalar @volumes,'==',$volume_count + 2,'manager has 2 new registered volumes');
 print STDERR "# deleting a volume...\n";
 ok($volume2->delete,'volume deletion successful');
 
 @volumes   = $manager->volumes;
-ok(@volumes==1,'manager has 1 volume as expected');
+cmp_ok(scalar @volumes,'==',$volume_count + 1,'manager has 1 new registered volume');
 
 } # SKIP
 
@@ -151,9 +156,10 @@ sub confirm_payment {
 # This test will launch two "micro" instance under your Amazon account
 # and then terminate them, incurring a one hour runtime charge for each.
 # This will incur a charge of \$0.04 (as of July 2012), which may be covered
-# under the AWS free tier. Also be aware that this test may take a while
-# (several minutes) due to tests that launch, start, and stop instances.
-# (this prompt will timeout automatically in 15s)
+# under the AWS free tier. Also be aware that this test may take several
+# minutes to complete due to tests that launch, start, and stop instances.
+#
+# [this prompt will timeout automatically in 15s]
 END
 ;
     print STDERR "Do you want to proceed? [Y/n] ";

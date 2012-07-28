@@ -145,7 +145,7 @@ use constant SERVER_STARTUP_TIMEOUT => 120;
 
 my (%Zones,%Instances,%Volumes,%Managers);
 my $Quiet;
-my ($LastHost,$LastMt,$LastStack);
+my ($LastHost,$LastMt);
 
 =head2 $manager = $ec2->staging_manager(@args)
 
@@ -1726,7 +1726,7 @@ sub _scan_volumes {
 	}
 
 	my $vol = $self->volume_class()->new(%args);
-	$vol->mounted(defined $args{-mtpt});
+	$vol->mounted(defined $args{-mtpt} && $args{-server});
 	$self->register_volume($vol);
     }
 }
@@ -1855,7 +1855,9 @@ option is set.
 sub info {
     my $self = shift;
     return if $self->hush;
-    print STDERR @_;
+    my @lines       = split "\n",longmess();
+    my $stack_count = grep /VM::EC2::Staging::Manager/,@lines;
+    print STDERR '[info] ',' ' x (($stack_count-1)*3),@_;
 }
 
 =head2 $quiet = $manager->hush([$new_value])
@@ -1882,7 +1884,7 @@ sub _search_for_image {
     my %args = @_;
     my $name = $args{-image_name};
 
-    $self->info("Searching for a staging image...");
+    $self->info("Searching for a staging image...\n");
 
     my $root_type    = $self->on_exit eq 'stop' ? 'ebs' :
     $args{-root_type};
@@ -1895,7 +1897,7 @@ sub _search_for_image {
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
     my ($most_recent) = sort {$b->name cmp $a->name} @candidates;
-    $self->info("found $most_recent: ",$most_recent->name,".\n");
+    $self->info("...found $most_recent: ",$most_recent->name,".\n");
     return $most_recent;
 }
 

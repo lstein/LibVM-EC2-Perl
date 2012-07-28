@@ -853,7 +853,7 @@ sub mount_volume {
     my $self = shift;
     my ($vol,$mtpt)  = @_;
     $vol->mounted and croak "$vol already mounted";
-    if ($vol->mtpt) {
+    if ($vol->mtdev && $vol->mtpt) {
 	return if $vol->mtpt eq 'none';
 	$self->_mount($vol->mtdev,$vol->mtpt);
     } else {
@@ -1008,7 +1008,7 @@ sub _create_volume {
 sub _mount {
     my $self = shift;
     my ($mt_device,$mtpt) = @_;
-    $self->info("Mounting staging volume.\n");
+    $self->info("Mounting staging volume at $mt_device on $mtpt.\n");
     $self->ssh("sudo mkdir -p $mtpt; sudo mount $mt_device $mtpt") or croak "mount failed";
 }
 
