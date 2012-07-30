@@ -120,20 +120,10 @@ use constant ObjectRegistration => {
     DescribeVolumes   => 'fetch_items,volumeSet,VM::EC2::Volume',
     DescribeImages    => 'fetch_items,imagesSet,VM::EC2::Image',
     DescribeRegions   => 'fetch_items,regionInfo,VM::EC2::Region',
-    DescribeInstanceStatus     => sub {
-	# 'fetch_items,instanceStatusSet,VM::EC2::Instance::StatusItem',
-	 my ($data,$ec2,$xmlns,$request_id) = @_;
-	 if ($ec2->{instance_status_token} && !$data->{nextToken}) {
-	     $ec2->{instance_status_stop}++;
-	 } else {
-	     $ec2->{instance_status_token} = $data->{nextToken};
-	 }
-	 my $items = $data->{instanceStatusSet}{item} or return;
-	 load_module('VM::EC2::Instance::StatusItem');
-	 return map {VM::EC2::Instance::StatusItem->new($_,$ec2,$xmlns,$request_id)} @$items;
-    },
+    DescribeInstanceStatus => 'fetch_items_iterator,instanceStatusSet,VM::EC2::Instance::StatusItem,instance_status',
     DescribeAvailabilityZones  => 'fetch_items,availabilityZoneInfo,VM::EC2::AvailabilityZone',
     DescribeSecurityGroups   => 'fetch_items,securityGroupInfo,VM::EC2::SecurityGroup',
+    DescribeVolumeStatus => 'fetch_items_iterator,volumeStatusSet,VM::EC2::Volume::StatusItem,volume_status',
     CreateSecurityGroup      => 'VM::EC2::SecurityGroup',
     DeleteSecurityGroup      => 'boolean',
     AuthorizeSecurityGroupIngress  => 'boolean',
@@ -198,16 +188,7 @@ use constant ObjectRegistration => {
     CreateSpotDatafeedSubscription    => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
     DescribeSpotDatafeedSubscription  => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
     DeleteSpotDatafeedSubscription    => 'boolean',
-    DescribeSpotPriceHistory          => sub { my ($data,$ec2,$xmlns,$request_id) = @_;
-					       if ($ec2->{spot_price_history_token} && !$data->{nextToken}) {
-						   $ec2->{spot_price_history_stop}++;
-					       }
-					       $ec2->{spot_price_history_token} = $data->{nextToken};
-					       my $items = $data->{spotPriceHistorySet}{item} or return;
-					       load_module('VM::EC2::Spot::PriceHistory');
-					       return map {VM::EC2::Spot::PriceHistory->new($_,$ec2,$xmlns,$request_id)}
-					          @$items;
-    },
+    DescribeSpotPriceHistory          =>'fetch_items_iterator,spotPriceHistorySet,VM::EC2::Spot::PriceHistory,spot_price_history',
     RequestSpotInstances              => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     CancelSpotInstanceRequests        => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     DescribeSpotInstanceRequests      => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
@@ -358,6 +339,43 @@ sub fetch_items {
     my $parser = $self->new_xml_parser($nokey);
     my $parsed = $parser->XMLin($content);
     my $list   = $parsed->{$tag}{item} or return;
+    return map {$class->new($_,$ec2,@{$parsed}{'xmlns','requestId'})} @$list;
+}
+
+=head2 @objects = $dispatch->fetch_items_iterator($raw_xml,$ec2,$container_tag,$object_class,$token_name)
+
+This is used for requests that have a -max_results argument. In this
+case, the response will have a nextToken field, which can be used to
+fetch the "next page" of results.
+
+The $token_name is some unique identifying token. It will be turned
+into two temporary EC2 instance variables, one named
+"${token_name}_token", which contains the nextToken value, and the
+other "${token_name}_stop", which flags the caller that no more
+results will be forthcoming.
+
+This must all be coordinated with the request subroutine. See how
+describe_instance_status() and describe_spot_price_history() do it.
+
+=cut
+
+sub fetch_items_iterator {
+    my $self = shift;
+    my ($content,$ec2,$tag,$class,$base_name) = @_;
+    my $token = "${base_name}_token";
+    my $stop  = "${base_name}_stop";
+
+    load_module($class);
+    my $parser = $self->new_xml_parser();
+    my $parsed = $parser->XMLin($content);
+    my $list   = $parsed->{$tag}{item} or return;
+
+    if ($ec2->{$token} && !$parsed->{nextToken}) {
+	delete $ec2->{$token};
+	$ec2->{$stop}++;
+    } else {
+	$ec2->{$token} = $parsed->{nextToken};
+    }
     return map {$class->new($_,$ec2,@{$parsed}{'xmlns','requestId'})} @$list;
 }
 

@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2011-12-15 version of the Amazon AWS API
+This is an interface to the 2012-06-15 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -1501,7 +1501,7 @@ Request arguments are:
                            the status of running instances only.
 
  -max_results             An integer corresponding to the number of instance items
-                           per response.
+                           per response (must be greater than 5).
 
 If -max_results is specified, then the call will return at most the
 number of instances you requested. You may see whether there are additional
@@ -1531,11 +1531,6 @@ sub describe_instance_status {
     my $self = shift;
     my @parms;
 
-    if ($self->{instance_status_stop}) {
-	delete $self->{instance_status_stop};
-	return;
-    }
-
     if (!@_ && $self->{instance_status_token} && $self->{instance_status_args}) {
 	@parms = (@{$self->{instance_status_args}},NextToken=>$self->{instance_status_token});
     }
@@ -1545,6 +1540,7 @@ sub describe_instance_status {
 	push @parms,$self->list_parm('InstanceId',\%args);
 	push @parms,$self->filter_parm(\%args);
 	push @parms,$self->boolean_parm('IncludeAllInstances',\%args);
+	push @parms,$self->single_parm('MaxResults',\%args);
 	
 	if ($args{-max_results}) {
 	    $self->{instance_status_token} = 'xyzzy'; # dummy value
@@ -1986,6 +1982,72 @@ sub detach_volume {
     push @param,$self->single_parm(Device=>\%args);
     push @param,$self->single_parm(Force=>\%args);
     return $self->call('DetachVolume',@param) or return;
+}
+
+=head2 @v = $ec2->describe_volume_status(-volume_id=>\@ids,-filter=>\%filters)
+
+=head2 @v = $ec2->describe_volume_status(@volume_ids)
+
+=head2 @v = $ec2->describe_volume_status(\%filters)
+
+Return a series of VM::EC2::Volume::StatusItem objects. Optional parameters:
+
+ -volume_id    The id of the volume to fetch, either a string
+               scalar or an arrayref.
+
+ -filter       One or more filters to apply to the search
+
+ -max_results  Maximum number of items to return (must be more than
+                5).
+
+The -filter argument name can be omitted if there are no other
+arguments you wish to pass.
+
+The full list of volume filters can be found at:
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVolumeStatus.html
+
+If -max_results is specified, then the call will return at most the
+number of volume status items you requested. You may see whether there
+are additional results by calling more_volume_status(), and then
+retrieve the next set of results with additional call(s) to
+describe_volume_status():
+
+ my @results = $ec2->describe_volume_status(-max_results => 10);
+ do_something(\@results);
+ while ($ec2->more_volume_status) {
+    @results = $ec2->describe_volume_status;
+    do_something(\@results);
+ }
+
+=cut
+
+sub more_volume_status {
+    my $self = shift;
+    return $self->{volume_status_token} &&
+           !$self->{volume_status_stop};
+}
+
+sub describe_volume_status {
+    my $self = shift;
+    my @parms;
+
+    if (!@_ && $self->{volume_status_token} && $self->{volume_status_args}) {
+	@parms = (@{$self->{volume_status_args}},NextToken=>$self->{volume_status_token});
+    }
+    
+    else {
+	my %args = $self->args('-volume_id',@_);
+	push @parms,$self->list_parm('VolumeId',\%args);
+	push @parms,$self->filter_parm(\%args);
+	push @parms,$self->single_parm('MaxResults',\%args);
+	
+	if ($args{-max_results}) {
+	    $self->{volume_status_token} = 'xyzzy'; # dummy value
+	    $self->{volume_status_args} = \@parms;
+	}
+
+    }
+    return $self->call('DescribeVolumeStatus',@parms);
 }
 
 =head2 @snaps = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_param)
@@ -3008,11 +3070,6 @@ sub describe_spot_price_history {
     my $self = shift;
     my @parms;
 
-    if ($self->{spot_price_history_stop}) {
-	delete $self->{spot_price_history_stop};
-	return;
-    }
-
     if (!@_ && $self->{spot_price_history_token} && $self->{price_history_args}) {
 	@parms = (@{$self->{price_history_args}},NextToken=>$self->{spot_price_history_token});
     }
@@ -3482,7 +3539,7 @@ API version.
 =cut
 
 #sub version  { '2011-12-15'      }
-sub version  { '2012-04-01'      }
+sub version  { '2012-06-15'      }
 
 =head2 $ts = $ec2->timestamp
 
@@ -3613,11 +3670,13 @@ sub args {
 
 =head1 MISSING METHODS
 
-As of 27 July 2011, the following Amazon API calls were NOT implemented:
+As of 30 July 2012, the following Amazon API calls were NOT
+implemented. Volumteers to implement these calls are most welcome.
 
 AssociateDhcpOptions
 AssociateRouteTable
 AttachInternetGateway
+AttachNetworkInterface
 AttachVpnGateway
 BundleInstance
 CancelBundleTask
@@ -3628,6 +3687,7 @@ CreateDhcpOptions
 CreateInternetGateway
 CreateNetworkAcl
 CreateNetworkAclEntry
+CreateNetworkInterface
 CreatePlacementGroup
 CreateRoute
 CreateRouteTable
@@ -3640,6 +3700,7 @@ DeleteDhcpOptions
 DeleteInternetGateway
 DeleteNetworkAcl
 DeleteNetworkAclEntry
+DeleteNetworkInterface
 DeletePlacementGroup
 DeleteRoute
 DeleteRouteTable
@@ -3652,6 +3713,8 @@ DescribeConversionTasks
 DescribeCustomerGateways
 DescribeDhcpOptions
 DescribeNetworkAcls
+DescribeNetworkInterfaces
+DescribeNetworkInterfaceAttribute
 DescribePlacementGroups
 DescribeRouteTables
 DescribeSubnets
@@ -3659,13 +3722,17 @@ DescribeVpcs
 DescribeVpnConnections
 DescribeVpnGateways
 DetachInternetGateway
+DetachNetworkInterface
 DetachVpnGateway
 DisassociateRouteTable
 ImportInstance
+ImportVolume
+ModifyNetworkInterfaceAttribute
 ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
 ReplaceRoute
 ReplaceRouteTableAssociation
+ResetNetworkInterfaceAttribute
 
 =head1 OTHER INFORMATION
 

@@ -25,22 +25,35 @@ $ec2->describe_instance_status().
 
 These object methods are supported:
 
- instance_id()          -- The ID of the affected instance.
- availability_zone      -- The availability zone of this instance.
- events                 -- A list of VM::EC2::Instance::Status::Event objects
+ instanceId            -- The ID of the affected instance.
+ instance              -- The VM::EC2::Instance object
+ availabilityZone      -- The availability zone of this instance.
+ events                -- A list of VM::EC2::Instance::Status::Event objects
                            representing a scheduled maintenance events on this
                            instance (see note).
- instance_state         -- The state of this instance (e.g. "running")
- system_status          -- A VM::EC2::Instance::Status object indicating the
+ instanceState         -- The state of this instance (e.g. "running")
+ systemStatus          -- A VM::EC2::Instance::Status object indicating the
                             status of the system check.
- instance_status        -- A VM::EC2::Instance::Status object indicating the
+ instanceStatus        -- A VM::EC2::Instance::Status object indicating the
                             status of the instance availability check.
 
 NOTE: There is an inconsistency in the AWS documentation for this data
 type. The events field is documented as being a list, but the examples
-shown show a single object. At release time, I was unable to verify
-which is correct and have written the code such that it will return a
-list, depending on what is detected in the response object.
+shown return a single object. At release time, I was unable to verify
+which is correct and have written the code such that it will always
+return a list, which may be single elementin length.
+
+In a string context, this object will interpolate as:
+
+ "$instanceId: XX/2 tests passed"
+
+where XX is the number of checks that passed.
+
+In the case of an instance that is not running, the interpolation will be:
+
+ "$instanceId: $state"
+
+Where $state is the state of the instance (e.g. "stopped").
 
 =head1 SEE ALSO
 
@@ -77,11 +90,16 @@ sub valid_fields {
 sub events {
     my $self = shift;
     my $e    = $self->eventsSet or return;
-    if (ref $e && $e->{items}) {
-	return map {VM::EC2::Instance::Status::Event->new($_,$self->ec2)} @{$e->{items}};
+    if (ref $e && $e->{item}) {
+	return map {VM::EC2::Instance::Status::Event->new($_,$self->ec2)} @{$e->{item}};
     }  else {
 	return VM::EC2::Instance::Status::Event->new($e,$self->ec2);
     }
+}
+
+sub instance {
+    my $self = shift;
+    return $self->ec2->describe_instances($self->instanceId);
 }
 
 sub instanceState {
@@ -100,6 +118,14 @@ sub instanceStatus {
     my $self = shift;
     my $s    = $self->SUPER::systemStatus or return;
     return VM::EC2::Instance::Status->new($s,$self->ec2);
+}
+
+sub short_name {
+    my $self = shift;
+    my $instance = $self->instanceId;
+    my $passed   = grep {$_ eq 'ok'} ($self->instanceStatus,$self->systemStatus);
+    my $state    = $self->instance_state;
+    return $state eq 'running' ? "$instance: $passed/2 checks passed" : "$instance: $state";
 }
 
 
