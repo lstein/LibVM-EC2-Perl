@@ -120,6 +120,18 @@ use constant ObjectRegistration => {
     DescribeVolumes   => 'fetch_items,volumeSet,VM::EC2::Volume',
     DescribeImages    => 'fetch_items,imagesSet,VM::EC2::Image',
     DescribeRegions   => 'fetch_items,regionInfo,VM::EC2::Region',
+    DescribeInstanceStatus     => sub {
+	# 'fetch_items,instanceStatusSet,VM::EC2::Instance::StatusItem',
+	 my ($data,$ec2,$xmlns,$request_id) = @_;
+	 if ($ec2->{instance_status_token} && !$data->{nextToken}) {
+	     $ec2->{instance_status_stop}++;
+	 } else {
+	     $ec2->{instance_status_token} = $data->{nextToken};
+	 }
+	 my $items = $data->{instanceStatusSet}{item} or return;
+	 load_module('VM::EC2::Instance::StatusItem');
+	 return map {VM::EC2::Instance::StatusItem->new($_,$ec2,$xmlns,$request_id)} @$items;
+    },
     DescribeAvailabilityZones  => 'fetch_items,availabilityZoneInfo,VM::EC2::AvailabilityZone',
     DescribeSecurityGroups   => 'fetch_items,securityGroupInfo,VM::EC2::SecurityGroup',
     CreateSecurityGroup      => 'VM::EC2::SecurityGroup',

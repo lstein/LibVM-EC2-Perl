@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2011-05-15 version of the Amazon AWS API
+This is an interface to the 2011-12-15 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -1468,6 +1468,94 @@ sub reset_instance_attribute {
     $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
     return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
 }
+
+=head2 @status_list = $ec2->describe_instance_status(-instance_id=>\@ids,-filter=>\%filters,@other_args);
+
+=head2 @status_list = $ec2->describe_instance_status(@instance_ids);
+
+=head2 @status_list = $ec2->describe_instance_status(\%filters);
+
+This method returns a list of VM::EC2::Instance::Status objects
+corresponding to status checks and scheduled maintenance events on the
+instances of interest. You may provide a list of instances to return
+information on, a set of filters, or both.
+
+The filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInstanceStatus.html. The
+brief list is:
+
+availability-zone, event.code, event.description, event.not-after,
+event.not-before, instance-state-name, instance-state-code,
+system-status.status, system-status.reachability,
+instance-status.status, instance-status.reachability.
+
+Request arguments are:
+
+  -instance_id            Scalar or array ref containing the instance ID(s) to return
+                           information about (optional).
+
+  -filter                 Filters to apply (optional).
+
+  -include_all_instances  If true, include all instances, including those that are 
+                           stopped, pending and shutting down. Otherwise, returns
+                           the status of running instances only.
+
+ -max_results             An integer corresponding to the number of instance items
+                           per response.
+
+If -max_results is specified, then the call will return at most the
+number of instances you requested. You may see whether there are additional
+results by calling more_instance_status(), and then retrieve the next set of
+results with additional call(s) to describe_instance_status():
+
+ my @results = $ec2->describe_instance_status(-max_results => 10);
+ do_something(\@results);
+ while ($ec2->more_instance_status) {
+    @results = $ec2->describe_instance_status;
+    do_something(\@results);
+ }
+
+NOTE: As of 29 July 2012, passing -include_all_instances causes an EC2
+"unknown parameter" error, indicating some mismatch between the
+documented API and the actual one.
+
+=cut
+
+sub more_instance_status {
+    my $self = shift;
+    return $self->{instance_status_token} &&
+           !$self->{instance_status_stop};
+}
+
+sub describe_instance_status {
+    my $self = shift;
+    my @parms;
+
+    if ($self->{instance_status_stop}) {
+	delete $self->{instance_status_stop};
+	return;
+    }
+
+    if (!@_ && $self->{instance_status_token} && $self->{instance_status_args}) {
+	@parms = (@{$self->{instance_status_args}},NextToken=>$self->{instance_status_token});
+    }
+    
+    else {
+	my %args = $self->args('-instance_id',@_);
+	push @parms,$self->list_parm('InstanceId',\%args);
+	push @parms,$self->filter_parm(\%args);
+	push @parms,$self->boolean_parm('IncludeAllInstances',\%args);
+	
+	if ($args{-max_results}) {
+	    $self->{instance_status_token} = 'xyzzy'; # dummy value
+	    $self->{instance_status_args} = \@parms;
+	}
+
+    }
+    return $self->call('DescribeInstanceStatus',@parms);
+}
+
+
 
 =head1 EC2 AMAZON MACHINE IMAGES
 
@@ -3393,7 +3481,8 @@ API version.
 
 =cut
 
-sub version  { '2011-05-15'      }
+#sub version  { '2011-12-15'      }
+sub version  { '2012-04-01'      }
 
 =head2 $ts = $ec2->timestamp
 

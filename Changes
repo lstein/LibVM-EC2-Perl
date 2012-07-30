@@ -1,4 +1,5 @@
 1.11
+    - Add support for DescribeInstanceStatus call.
 
 1.10  Sat Jul 28 15:59:41 EDT 2012
      - Add new high level framework for managing servers and volumes (see
