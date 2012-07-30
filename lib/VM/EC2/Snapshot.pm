@@ -219,6 +219,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 use VM::EC2::Snapshot::CreateVolumePermission;
+use VM::EC2::ProductCode;
 use Carp 'croak';
 
 sub valid_fields {
@@ -339,5 +340,11 @@ sub reset_authorized_users {
     $self->aws->reset_snapshot_attribute($self->snapshotId,'createVolumePermission');
 }
 
+
+sub product_codes {
+    my $self = shift;
+    my @codes = $self->aws->describe_snapshot_attribute($self,'productCodes');
+    return map {VM::EC2::ProductCode->new($_,$self->aws)} @codes;
+}
 
 1;

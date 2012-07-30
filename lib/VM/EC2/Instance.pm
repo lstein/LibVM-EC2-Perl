@@ -397,6 +397,7 @@ use VM::EC2::Instance::State;
 use VM::EC2::Instance::State::Reason;
 use VM::EC2::BlockDevice::Mapping;
 use VM::EC2::Instance::Placement;
+use VM::EC2::ProductCode;
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Carp 'croak';
 
@@ -759,7 +760,7 @@ sub metadata {
 sub productCodes {
     my $self = shift;
     my $codes = $self->SUPER::productCodes or return;
-    return map {$_->{productCode}} @{$codes->{item}};
+    return map {VM::EC2::ProductCode->new($_)} @{$codes->{item}};
 }
 
 1;

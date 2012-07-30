@@ -143,6 +143,10 @@ Here is an example:
 This returns the up-to-date status of the volume. It works by calling
 refresh() and then returning status().
 
+=head2 $boolean = $vol->auto_enable_io([$new_boolean])
+
+Get or set the auto-enable IO flag.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
@@ -173,6 +177,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 use VM::EC2::BlockDevice::Attachment;
+use VM::EC2::ProductCode;
 use Carp 'croak';
 
 sub valid_fields {
@@ -253,6 +258,19 @@ sub refresh {
     my $self = shift;
     my $v    = $self->aws->describe_volumes($self->volumeId);
     %$self   = %$v;
+}
+
+sub auto_enable_io {
+    my $self = shift;
+    return $self->aws->modify_volume_attribute($self,
+					       -auto_enable_io => shift) if @_;
+    return $self->aws->describe_volume_attribute($self,'autoEnableIO');
+}
+
+sub product_codes {
+    my $self = shift;
+    my @codes = $self->aws->describe_volume_attribute($self,'productCodes');
+    return map {VM::EC2::ProductCode->new($_,$self->aws)} @codes;
 }
 
 1;

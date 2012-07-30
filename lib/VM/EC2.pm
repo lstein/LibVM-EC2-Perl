@@ -2050,6 +2050,41 @@ sub describe_volume_status {
     return $self->call('DescribeVolumeStatus',@parms);
 }
 
+=head2 @data = $ec2->describe_volume_attribute($volume_id,$attribute)
+
+This method returns volume attributes.  Only one attribute can be
+retrieved at a time. The following is the list of attributes that can be
+retrieved:
+
+ autoEnableIO                      -- boolean
+ productCodes                      -- list of scalar
+
+These values can be retrieved more conveniently from the
+L<VM::EC2::Volume> object returned from describe_volumes():
+
+ $volume->auto_enable_io(1);
+ @codes = $volume->product_codes;
+
+=cut
+
+sub describe_volume_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_volume_attribute(\$instance_id,\$attribute_name)";
+    my ($instance_id,$attribute) = @_;
+    my @param  = (VolumeId=>$instance_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeVolumeAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+sub modify_volume_attribute {
+    my $self = shift;
+    my $volume_id = shift or croak "Usage: modify_volume_attribute(\$volumeId,%param)";
+    my %args   = @_;
+    my @param  = (VolumeId=>$volume_id);
+    push @param,('AutoEnableIO.Value'=>$args{-auto_enable_io} ? 'true':'false');
+    return $self->call('ModifyVolumeAttribute',@param);
+}
+
 =head2 @snaps = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_param)
 
 =head2 @snaps = $ec2->describe_snapshots(@snapshot_ids)
@@ -2090,9 +2125,11 @@ sub describe_snapshots {
 
 This method returns snapshot attributes. The first argument is the
 snapshot ID, and the second is the name of the attribute to
-fetch. Currently Amazon defines only one attribute,
-"createVolumePermission", which will return a list of user Ids who are
-allowed to create volumes from this snapshot.
+fetch. Currently Amazon defines two attributes:
+
+ createVolumePermission   -- return a list of user Ids who are
+                             allowed to create volumes from this snapshot.
+ productCodes             -- product codes for this snapshot
 
 The result is a raw hash of attribute values. Please see
 L<VM::EC2::Snapshot> for a more convenient way of accessing and
