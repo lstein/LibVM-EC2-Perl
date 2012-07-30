@@ -246,8 +246,12 @@ sub stateReason {
 
 sub productCodes {
     my $self = shift;
-    my $codes = $self->SUPER::productCodes or return;
-    return map {VM::EC2::ProductCode->new($_)} @{$codes->{item}};
+    if (@_) {
+	$self->aws->modify_image_attribute($self,ProductCode=>\@_);
+    } else {
+	my $codes = $self->SUPER::productCodes or return;
+	return map {VM::EC2::ProductCode->new($_)} @{$codes->{item}};
+    }
 }
 
 sub blockDeviceMapping {
