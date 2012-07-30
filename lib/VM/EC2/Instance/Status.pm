@@ -2,22 +2,43 @@ package VM::EC2::Instance::Status;
 
 =head1 NAME
 
-VM::EC2::Instance::Status - Object describing an instance/system status
+VM::EC2::Instance::Status - Object describing an instance/system status check
 
 =head1 SYNOPSIS
 
+ @status_items = $ec2->describe_instance_status();
+ for my $i (@status_items) {
+    print $i->instance_id,
+           ': instance check=',$i->instance_status,
+           ', system check=',$i->system_status,"\n";
+   if ($i->instance_status ne 'ok') {
+      print $i->instance_status->details,"\n";
+   }
+ }
+
 =head1 DESCRIPTION
 
+This object represents the result of a system or instance status check
+operation.
+
 =head1 METHODS
+
+The following methods are supported:
+
+ status()              -- The status, one of "ok", "impaired", "insufficient-data",
+                            or "not-applicable"
+ details()             -- A list of information about system instance health or
+                           application instance health.
+
+In a string context, this object interpolates with the status string.
 
 =head1 SEE ALSO
 
 L<VM::EC2>
 L<VM::EC2::Generic>
-L<VM::EC2::BlockDevice>
-L<VM::EC2::State::Reason>
 L<VM::EC2::State>
 L<VM::EC2::Instance>
+L<VM::EC2::Instance::StatusItem>
 L<VM::EC2::Tag>
 
 =head1 AUTHOR
