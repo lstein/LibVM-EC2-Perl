@@ -116,6 +116,7 @@ use constant ObjectRegistration => {
 			       my $s = VM::EC2::Instance::Set->new(@_) or return;
 			       return $s->instances;
     },
+    EnableVolumeIO    => 'boolean',
     DescribeSnapshots => 'fetch_items,snapshotSet,VM::EC2::Snapshot',
     DescribeVolumes   => 'fetch_items,volumeSet,VM::EC2::Volume',
     DescribeImages    => 'fetch_items,imagesSet,VM::EC2::Image',
@@ -170,6 +171,7 @@ use constant ObjectRegistration => {
     StopInstances        => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
     TerminateInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
     RebootInstances      => 'boolean',
+    ConfirmProductInstance => 'boolean',
     MonitorInstances     => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
     UnmonitorInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
     GetConsoleOutput     => 'VM::EC2::Instance::ConsoleOutput',

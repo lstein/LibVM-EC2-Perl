@@ -147,6 +147,11 @@ refresh() and then returning status().
 
 Get or set the auto-enable IO flag.
 
+=head2 $boolean = $vol->enable_volume_io()
+
+Enable volume I/O after it has been disabled by an Amazon health
+check. If successful, the call will return true.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
@@ -267,10 +272,16 @@ sub auto_enable_io {
     return $self->aws->describe_volume_attribute($self,'autoEnableIO');
 }
 
+sub enable_io {
+    my $self = shift;
+    $self->aws->enable_volume_io($self);
+}
+
 sub product_codes {
     my $self = shift;
     my @codes = $self->aws->describe_volume_attribute($self,'productCodes');
     return map {VM::EC2::ProductCode->new($_,$self->aws)} @codes;
 }
+
 
 1;

@@ -247,7 +247,7 @@ sub stateReason {
 sub productCodes {
     my $self = shift;
     if (@_) {
-	$self->aws->modify_image_attribute($self,ProductCode=>\@_);
+	$self->aws->modify_image_attribute($self,-product_code=>\@_);
     } else {
 	my $codes = $self->SUPER::productCodes or return;
 	return map {VM::EC2::ProductCode->new($_)} @{$codes->{item}};

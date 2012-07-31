@@ -710,7 +710,7 @@ You may omit the -filter argument name if there are no other arguments:
                              'tag:Role'                        => 'Server'});
 
 There are a large number of filters, which are listed in full at
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeInstances.html.
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInstances.html.
 
 Here is a alpha-sorted list of filter names: architecture,
 availability-zone, block-device-mapping.attach-time,
@@ -1090,6 +1090,22 @@ sub reboot_instances {
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
     return $self->call('RebootInstances',@params) or return;
+}
+
+=head2 $boolean = $ec2->confirm_product_instance($instance_id,$product_code)
+
+Return "true" if the instance indicated by $instance_id is associated
+with the given product code.
+
+=cut
+
+sub confirm_product_instance {
+    my $self = shift;
+    @_ == 1 or croak "Usage: confirm_product_instance(\$instance_id,\$product_code)";
+    my ($instance_id,$product_code) = @_;
+    my @params = (InstanceId=>$instance_id,
+		  ProductCode=>$product_code);
+    return $self->call('ConfirmProductInstance',@params);
 }
 
 =head2 $t = $ec2->token
@@ -1571,7 +1587,8 @@ AMI. Optional parameters:
 
  -executable_by   Filter by images executable by the indicated user account
 
- -owner           Filter by owner account
+ -owner           Filter by owner account number or one of the aliases "self",
+                    "aws-marketplace" or "amazon".
 
  -filter          Tags and other filters to apply
 
@@ -1580,7 +1597,7 @@ name and call describe_images() with a single hashref consisting of
 the search filters you wish to apply.
 
 The full list of image filters can be found at:
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeImages.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeImages.html
 
 =cut
 
@@ -1833,7 +1850,7 @@ The -filter argument name can be omitted if there are no other
 arguments you wish to pass.
 
 The full list of volume filters can be found at:
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeVolumes.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVolumes.html
 
 =cut
 
@@ -2085,6 +2102,24 @@ sub modify_volume_attribute {
     return $self->call('ModifyVolumeAttribute',@param);
 }
 
+=head2 $boolean = $ec2->enable_volume_io(-volume_id=>$volume_id)
+
+=head2 $boolean = $ec2->enable_volume_io($volume_id)
+
+Given the ID of a volume whose I/O has been disabled (e.g. due to
+hardware degradation), this method will reenable the I/O and return
+true if successful.
+
+=cut
+
+sub enable_volume_io {
+    my $self = shift;
+    my %args = $self->args('-volume_id',@_);
+    $args{-volume_id} or croak "Usage: enable_volume_io(\$volume_id)";
+    my @param = $self->single_parm('VolumeId',\%args);
+    return $self->call('EnableVolumeIO',@param);
+}
+
 =head2 @snaps = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_param)
 
 =head2 @snaps = $ec2->describe_snapshots(@snapshot_ids)
@@ -2105,7 +2140,7 @@ The -filter argument name can be omitted if there are no other
 arguments you wish to pass.
 
 The full list of applicable filters can be found at
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeSnapshots.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeSnapshots.html
 
 =cut
 
@@ -2290,7 +2325,7 @@ The -filter argument name can be omitted if there are no other
 arguments you wish to pass.
 
 The full list of security group filters can be found at:
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeSecurityGroups.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeSecurityGroups.html
 
 =cut
 
@@ -2492,7 +2527,7 @@ Optional parameters:
  -filter          Filter on tags and other attributes.
 
 The full list of key filters can be found at:
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeKeyPairs.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeKeyPairs.html
 
 =cut
 
@@ -2625,7 +2660,7 @@ Return a series of VM::EC2::Tag objects, each describing an
 AMI. A single optional -filter argument is allowed.
 
 Available filters are: key, resource-id, resource-type and value. See
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeTags.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeTags.html
 
 =cut
 
@@ -2735,7 +2770,7 @@ you. All parameters are optional:
                    on.
 
 The list of applicable filters can be found at
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeAddresses.html.
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeAddresses.html.
 
 This method returns a list of L<VM::EC2::ElasticAddress>.
 
@@ -2877,7 +2912,7 @@ arguments are treated as Reserved Instance Offering IDs.
 
  -filter                          A set of filters to apply.
 
-For available filters, see http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeReservedInstancesOfferings.html.
+For available filters, see http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeReservedInstancesOfferings.html.
 
 The returned objects are of type L<VM::EC2::ReservedInstance::Offering>
 
@@ -2956,7 +2991,7 @@ arguments are treated as Reserved Instance  IDs.
 
  -filter                -- A set of filters to apply.
 
-For available filters, see http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeReservedInstances.html.
+For available filters, see http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeReservedInstances.html.
 
 The returned objects are of type L<VM::EC2::ReservedInstance>
 
@@ -3718,7 +3753,6 @@ AttachVpnGateway
 BundleInstance
 CancelBundleTask
 CancelConversionTask
-ConfirmProductInstance
 CreateCustomerGateway
 CreateDhcpOptions
 CreateInternetGateway
@@ -3777,12 +3811,11 @@ This section contains technical information that may be of interest to developer
 
 =head2 Signing and authentication protocol
 
-This module uses Amazon AWS signing protocol version 2, as described
-at
-http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?using-query-api.html. It
-uses the HmacSHA256 signature method, which is the most secure method
-currently available. For additional security, use "https" for the
-communications endpoint:
+This module uses Amazon AWS signing protocol version 2, as described at
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?using-query-api.html.
+It uses the HmacSHA256 signature method, which is the most secure
+method currently available. For additional security, use "https" for
+the communications endpoint:
 
   $ec2 = VM::EC2->new(-endpoint=>'https://ec2.amazonaws.com');
 

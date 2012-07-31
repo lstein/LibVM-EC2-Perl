@@ -2,6 +2,7 @@
     - Add support for DescribeInstanceStatus call.
     - Add support for DescribeVolumeStatus, DescribeVolumeAttribute and ModifyVolumeAttribute calls.
     - Add support for product codes in Instance, Image and Snapshot.
+    - Add support for enabling volume I/O on degraded volumes and auto enabling I/O.
 
 1.10  Sat Jul 28 15:59:41 EDT 2012
      - Add new high level framework for managing servers and volumes (see
