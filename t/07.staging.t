@@ -19,19 +19,20 @@ $SIG{TERM} = $SIG{INT} = sub { exit 0 };  # run the termination
 my($ec2,$manager);
 
 require_ok('VM::EC2::Staging::Manager');
+
+SKIP: {
+
+skip "; account information unavailable",TEST_COUNT-1 unless setup_environment();
+skip "; instance tests declined",        TEST_COUNT-1 unless confirm_payment();
+skip "; this system does not have ssh, rsh and dd command line tools in PATH", TEST_COUNT-1
+    unless VM::EC2::Staging::Manager->environment_ok();
+
 $ec2     = VM::EC2->new;
 $manager = $ec2->staging_manager(-instance_type=> 't1.micro',
 				 -on_exit      => 'run', # don't terminate user's servers!
 				 -quiet        => 1,
     ) or BAIL_OUT("Can't load VM::EC2::Staging::Manager module");
 
-SKIP: {
-
-skip "; account information unavailable",TEST_COUNT-1 unless setup_environment();
-skip "; instance tests declined",        TEST_COUNT-1 unless confirm_payment();
-
-skip "; this system does not have ssh, rsh and dd command line tools in PATH", TEST_COUNT-1
-    unless VM::EC2::Staging::Manager->environment_ok();
 
 # remove preexisting volumes, servers used for testing
 cleanup();
