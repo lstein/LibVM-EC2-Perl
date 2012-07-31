@@ -806,6 +806,11 @@ VM::EC2::Instance objects.
                      $ec2->token() to generate a suitable identifier.
                      See http://docs.amazonwebservices.com/AWSEC2/
                          latest/UserGuide/Run_Instance_Idempotency.html
+  -iam_arn           The Amazon resource name (ARN) of the IAM Instance Profile (IIP)
+                       to associate with the instances.
+
+  -iam_name          The name of the IAM instance profile (IIP) to associate with the
+                       instances.
 
 =item Instance types
 
@@ -934,6 +939,7 @@ sub run_instances {
     push @p,('DisableApiTermination'=>'true')                         if $args{-termination_protection};
     push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
     push @p,$self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
+    push @p,$self->iam_parm(\%args);
     return $self->call('RunInstances',@p);
 }
 
@@ -2910,6 +2916,10 @@ arguments are treated as Reserved Instance Offering IDs.
                                    offering, either "default" or
                                    "dedicated". (VPC instances only)
 
+ -offering_type                  The reserved instance offering type, one of
+                                   "Heavy Utilization", "Medium Utilization",
+                                   or "Light Utilization".
+
  -filter                          A set of filters to apply.
 
 For available filters, see http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeReservedInstancesOfferings.html.
@@ -2936,7 +2946,8 @@ sub describe_reserved_instances_offerings {
     push @param,$self->single_parm('ProductDescription',\%args);
     push @param,$self->single_parm('InstanceType',\%args);
     push @param,$self->single_parm('AvailabilityZone',\%args);
-    push @param,$self->single_parm('InstanceTenancy',\%args);  # should initial "i" be upcase?
+    push @param,$self->single_parm('instanceTenancy',\%args);  # should initial "i" be upcase?
+    push @param,$self->single_parm('offeringType',\%args);     # should initial "o" be upcase?
     push @param,$self->filter_parm(\%args);
     return $self->call('DescribeReservedInstancesOfferings',@param);
 }
@@ -3242,11 +3253,21 @@ objects, one for each instance specified in -instance_count.
 
   -monitoring        Pass a true value to enable detailed monitoring.
 
-  -subnet_id         Subnet ID in which to place instances launched under
-                      this request (VPC only).
+  -subnet            The ID of the Amazon VPC subnet in which to launch the
+                      spot instance (VPC only).
+
+  -subnet_id         deprecated
 
   -addressing_type   Deprecated and undocumented, but present in the
                        current EC2 API documentation.
+
+  -iam_arn           The Amazon resource name (ARN) of the IAM Instance Profile (IIP)
+                       to associate with the instances.
+
+  -iam_name          The name of the IAM instance profile (IIP) to associate with the
+                       instances.
+
+NOTE: The network interface specification is currently not supported.
 
 =cut
 
@@ -3261,7 +3282,7 @@ sub request_spot_instances {
     $args{-availability_zone} ||= $args{-placement_zone};
 
     my @p = map {$self->single_parm($_,\%args)}
-            qw(SpotPrice InstanceCount Type ValidFrom ValidUntil LaunchGroup AvailabilityZoneGroup);
+            qw(SpotPrice InstanceCount Type ValidFrom ValidUntil LaunchGroup AvailabilityZoneGroup Subnet);
 
     # oddly enough, the following args need to be prefixed with "LaunchSpecification."
     my @launch_spec = map {$self->single_parm($_,\%args)}
@@ -3269,13 +3290,14 @@ sub request_spot_instances {
     push @launch_spec, map {$self->list_parm($_,\%args)}
          qw(SecurityGroup SecurityGroupId);
     push @launch_spec, $self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
+    push @launch_spec,$self->iam_args;
 
     while (my ($key,$value) = splice(@launch_spec,0,2)) {
 	push @p,("LaunchSpecification.$key" => $value);
     }
     
     # a few more oddballs
-    push @p,('LaunchSpecification.Placement.AvailabilityZone'=>$args{-availability_zone})
+    push @p,('LaunchSpecification.Placement.AvailabilityZone'=> $args{-availability_zone})
 	if $args{-availability_zone};
     push @p,('Placement.GroupName'       =>$args{-placement_group})   if $args{-placement_group};
     push @p,('LaunchSpecification.Monitoring.Enabled'   => 'true')    if $args{-monitoring};
@@ -3359,7 +3381,19 @@ sub describe_spot_instance_requests {
 }
 
 
+=head1 AWS SECURITY TOKENS
 
+*documentation pending*
+
+=cut
+
+sub get_federation_token {
+    my $self = shift;
+    my %args = $self->args('-name',@_);
+    $args{-name} or croak "Usage: get_federation_token(-name=>\$name,\@more_args)";
+    my @p = map {$self->single_parm($_,\%args)} qw(Name DurationSeconds Policy);
+    return $self->sts_call('GetFederationToken',@p);
+}
 
 # ------------------------------------------------------------------------------------------
 
@@ -3483,7 +3517,7 @@ sub tagdelete_parm {
     return $self->key_value_parameters('Tag','Key','Value',$args,1);
 }
 
-=head2 @parameters = $ec2->key_value_parm($param_name,$keyname,$valuename,\%args,$skip_undef_values)
+=head2 @parameters = $ec2->key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
 
 =cut
 
@@ -3555,6 +3589,19 @@ sub _perm_parm {
     return @param;
 }
 
+=head2 @parameters = $ec2->iam_parm($args)
+
+=cut
+
+sub iam_parm {
+    my $self = shift;
+    my $args = shift;
+    my @p;
+    push @p,('IamInstanceProfile.Arn'  => $args->{-iam_arn})             if $args->{-iam_arn};
+    push @p,('IamInstanceProfile.Name' => $args->{-iam_name})            if $args->{-iam_name};
+    return @p;
+}
+
 =head2 @parameters = $ec2->block_device_parm($block_device_mapping_string)
 
 =cut
@@ -3611,7 +3658,10 @@ API version.
 =cut
 
 #sub version  { '2011-12-15'      }
-sub version  { '2012-06-15'      }
+sub version  { 
+    my $self = shift;
+    return $self->{version} ||=  '2012-06-15';
+}
 
 =head2 $ts = $ec2->timestamp
 
@@ -3672,6 +3722,13 @@ sub call {
     } else {
 	return @obj;
     }
+}
+
+sub sts_call {
+    my $self = shift;
+    local $self->{endpoint} = 'https://sts.amazonaws.com';
+    local $self->{version}  = '2011-06-15';
+    $self->call(@_);
 }
 
 =head2 $request = $ec2->make_request($action,@param);

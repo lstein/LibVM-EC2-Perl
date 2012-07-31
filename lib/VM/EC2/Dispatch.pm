@@ -194,6 +194,7 @@ use constant ObjectRegistration => {
     RequestSpotInstances              => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     CancelSpotInstanceRequests        => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     DescribeSpotInstanceRequests      => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
+    GetFederationToken                => 'fetch_one,GetFederationTokenResult,VM::EC2::Security::FederationToken',
 };
 
 sub new {
