@@ -41,6 +41,6 @@ sub valid_fields {
     return qw(AccessKeyId Expiration SecretAccessKey SessionToken);
 }
 
-sub short_name {shift->SessionToken}
+sub short_name {shift->access_key_id}
 
 1;

@@ -77,6 +77,7 @@ sub AUTOLOAD {
 
     if ($mixed eq $flat) {
 	return $self->{data}{$mixed} if $fields{$mixed};
+	return $self->{data}{ucfirst $mixed} if $fields{ucfirst $mixed};
 	croak "Can't locate object method \"$func_name\" via package \"$pack\"";
     }
 
@@ -86,6 +87,10 @@ sub AUTOLOAD {
 	return $self->$flat(@_);
     } elsif ($fields{$mixed}) {
 	return $self->{data}{$mixed} if $fields{$mixed};
+    } elsif ($fields{ucfirst($mixed)}) {  
+	# very occasionally an API field breaks Amazon's coding 
+	# conventions and starts with an uppercase
+	return $self->{data}{ucfirst($mixed)};
     } else {
 	croak "Can't locate object method \"$func_name\" via package \"$pack\"";
     }

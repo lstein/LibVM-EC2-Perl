@@ -386,6 +386,9 @@ Create a new Amazon access object. Required parameters are:
 
  -secret_key   Secret key corresponding to the Access ID
 
+ -security_token Temporary security token obtained through a call to the
+               AWS Security Token Service
+
  -endpoint     The URL for making API requests
 
  -region       The region to make API requests
@@ -394,7 +397,8 @@ Create a new Amazon access object. Required parameters are:
 
  -print_error  If true, print errors to STDERR.
 
-One or more of -access_key, -secret_key can be omitted if the
+
+One or more of -access_key or -secret_key can be omitted if the
 environment variables EC2_ACCESS_KEY and EC2_SECRET_KEY are
 defined. If no endpoint is specified, then the environment variable
 EC2_URL is consulted; otherwise the generic endpoint
@@ -402,6 +406,14 @@ http://ec2.amazonaws.com/ is used. You can also select the endpoint by
 specifying one of the Amazon regions, such as "us-west-2", with the
 -region argument. The endpoint specified by -region will override
 -endpoint.
+
+You may provide a temporary security token returned by an earlier call
+to the AWS Security Token Service (see
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html). The
+access and secret keys provided must be the same ones returned when
+the security token was generated. As a special case, you may pass a
+VM::EC2::Security::FederationToken object to -security_token in lieu of
+the two keys. Also see L</AWS SECURITY TOKENS>.
 
 To use a Eucalyptus cloud, please provide the appropriate endpoint
 URL.
@@ -426,10 +438,20 @@ The error object can be retrieved with $ec2->error() as before.
 sub new {
     my $self = shift;
     my %args = @_;
-    my $id           = $args{-access_key} || $ENV{EC2_ACCESS_KEY}
-                       or croak "Please provide AccessKey parameter or define environment variable EC2_ACCESS_KEY";
-    my $secret       = $args{-secret_key} || $ENV{EC2_SECRET_KEY} 
-                       or croak "Please provide SecretKey parameter or define environment variable EC2_SECRET_KEY";
+
+    my ($id,$secret,$token);
+    if (ref $args{-security_token} && $args{-security_token}->can('credentials')) {
+	$id     = $args{-security_token}->credentials->AccessKeyId;
+	$secret = $args{-security_token}->credentials->SecretAccessKey;
+	$token  = $args{-security_token}->credentials->SessionToken;
+    }
+
+    $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY}
+                      or croak "Please provide -access_key parameter or define environment variable EC2_ACCESS_KEY";
+    $secret       ||= $args{-secret_key} || $ENV{EC2_SECRET_KEY}
+                      or croak "Please provide -secret_key or define environment variable EC2_SECRET_KEY";
+    $token          = $args{-security_token};
+
     my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL} || 'http://ec2.amazonaws.com/';
     $endpoint_url   .= '/'                     unless $endpoint_url =~ m!/$!;
     $endpoint_url    = "http://".$endpoint_url unless $endpoint_url =~ m!https?://!;
@@ -439,6 +461,7 @@ sub new {
     my $obj = bless {
 	id              => $id,
 	secret          => $secret,
+	security_token  => $token,
 	endpoint        => $endpoint_url,
 	idempotent_seed => sha1_hex(rand()),
 	raise_error     => $raise_error,
@@ -478,6 +501,19 @@ sub secret   {
     my $self = shift;
     my $d    = $self->{secret};
     $self->{secret} = shift if @_;
+    $d;
+}
+
+=head2 $secret = $ec2->security_token(<$new_token>)
+
+Get or set the temporary security token
+
+=cut
+
+sub security_token   {
+    my $self = shift;
+    my $d    = $self->{security_token};
+    $self->{security_token} = shift if @_;
     $d;
 }
 
@@ -3383,7 +3419,7 @@ sub describe_spot_instance_requests {
 
 =head1 AWS SECURITY TOKENS
 
-*documentation pending*
+
 
 =cut
 
@@ -3393,6 +3429,13 @@ sub get_federation_token {
     $args{-name} or croak "Usage: get_federation_token(-name=>\$name,\@more_args)";
     my @p = map {$self->single_parm($_,\%args)} qw(Name DurationSeconds Policy);
     return $self->sts_call('GetFederationToken',@p);
+}
+
+sub get_session_token {
+    my $self = shift;
+    my %args = @_;
+    my @p = map {$self->single_parm($_,\%args)} qw(SerialNumber DurationSeconds TokenCode);
+    return $self->sts_call('GetSessionToken',@p);
 }
 
 # ------------------------------------------------------------------------------------------
@@ -3765,6 +3808,7 @@ sub _sign {
     $sign_hash{Version}          = $self->version;
     $sign_hash{SignatureVersion} = 2;
     $sign_hash{SignatureMethod}  = 'HmacSHA256';
+    $sign_hash{SecurityToken}    = $self->security_token if $self->security_token;
 
     my @param;
     my @parameter_keys = sort keys %sign_hash;

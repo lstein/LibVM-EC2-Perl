@@ -1,8 +1,8 @@
-package VM::EC2::Security::FederationToken;
+package VM::EC2::Security::Token;
 
 =head1 NAME
 
-VM::EC2::Security::FederationToken - FederationToken object
+VM::EC2::Security::Token - Security token object for use with GetFederationToken and GetSessionToken
 
 =head1 SYNOPSIS
 
@@ -47,13 +47,17 @@ sub credentials {
     my $self = shift;
     return VM::EC2::Security::Credentials->new($self->{data}{Credentials},$self->ec2);
 }
-sub federated_user {
-    my $self = shift;
-    return VM::EC2::Security::FederatedUser->new($self->{data}{FederatedUser},$self->ec2);
-}
+#sub federated_user {
+#    my $self = shift;
+#    return VM::EC2::Security::FederatedUser->new($self->{data}{FederatedUser},$self->ec2);
+#}
+
+sub secret_access_key { shift->credentials->secret_access_key }
+sub access_key_id     { shift->credentials->access_key_id     }
+sub token             { shift->credentials->session_token     }
 
 sub short_name {
-    shift->credentials;
+    shift->credentials->session_token;
 }
 
 1;
