@@ -2,7 +2,7 @@ package VM::EC2::Security::Credentials;
 
 =head1 NAME
 
-VM::EC2::Security::FederatedUser -- ??
+VM::EC2::Security::Credentials -- ??
 
 =head1 SYNOPSIS
 
@@ -35,10 +35,26 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
+use Storable 'nfreeze','thaw';
+use MIME::Base64 'encode_base64','decode_base64';
 
 sub valid_fields {
     my $self = shift;
     return qw(AccessKeyId Expiration SecretAccessKey SessionToken);
+}
+
+# serialize the credentials in a packed form
+sub serialize {
+    my $self = shift;
+    my $data = nfreeze($self);
+    return encode_base64($data);
+}
+
+sub new_from_serialized {
+    my $class = shift;
+    my $data  = shift;
+    my $obj   = thaw(decode_base64($data));
+    return bless $obj,ref $class || $class;
 }
 
 sub short_name {shift->access_key_id}

@@ -7,19 +7,75 @@ VM::EC2::Security::Policy -- Simple IAM policy generator for EC2
 =head1 SYNOPSIS
 
  my $policy = VM::EC2::Security::Policy->new;
- $policy->add_statement(-effect   => 'allow',
-                        -actions  => 'Describe*','CreateVolume','delete_volume');
- $policy->add_statement(-effect   => 'deny',
-                        -actions  => 'DescribeImages');
+ $policy->allow('Describe*','CreateVolume','delete_volume');
+ $policy->deny('DescribeVolumes');
  print $policy->as_string;
 
 =head1 DESCRIPTION
 
+This is a very simple Identity and Access Management (IAM) policy
+statement generator that works sufficiently well to create policies to
+control access EC2 resources. It is not fully general across all AWS
+services.
+
 =head1 METHODS
+
+This section describes the methods available to
+VM::EC2::Security::Policy. You will create a new, empty, policy using
+new(), grant access to EC2 actions using allow(), and deny access to
+EC2 actions using deny(). When you are done, either call as_string(),
+or just use the policy object in a string context, to get a
+properly-formatted policy string.
+
+
+allow() and deny() return the modified object, allowing you to chain
+methods. For example:
+
+ my $p = VM::EC2::Security::Policy->new
+             ->allow('Describe*')
+             ->deny('DescribeImages','DescribeInstances');
+ print $p;
+
+=head2 $policy = VM::EC2::Security::Policy->new()
+
+This class method creates a new, empty policy object. The default
+policy object denies all access to EC2 resources.
+
+=head2 $policy->allow('action1','action2','action3',...)
+
+Grant access to the listed EC2 actions. You may specify actions using
+Amazon's MixedCase notation (e.g. "DescribeInstances"), or using
+VM::EC2's more Perlish underscore notation
+(e.g. "describe_instances"). You can find the list of actions in
+L<VM::EC2>, or in the Amazon API documentation at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/OperationList-query.html.
+
+The "*" wildcard allows you to indicate a series of matching
+operations. For example, to allow all Describe operations:
+
+ $policy->allow('Describe*')
+
+As described earlier, allow() returns the object, making it easy to
+chain methods.
+
+=head2 $policy->deny('action1','action2','action3',...)
+
+Similar to allow(), but in this case denies access to certain
+actions. Deny statements take precedence over allow statements.
+
+As described earlier, deny() returns the object, making it easy to
+chain methods.
+
+
+=head2 $string = $policy->as_string
+
+Converts the policy into a JSON string that can be passed to
+VM::EC2->get_federation_token(), or other AWS libraries.
 
 =head1 STRING OVERLOADING
 
-When used in a string context, this object will interpolate the
+When used in a string context, this object will interpolate into the
+policy JSON string using as_string().
 
 =head1 SEE ALSO
 
@@ -50,7 +106,7 @@ use overload
 sub new {
     my $class = shift;
     return bless {
-	statements => [],
+	statements => {},
     },ref $class || $class;
 }
 
@@ -74,20 +130,24 @@ sub _add_statement {
     my $actions = $args{-action} || $args{-actions} || [];
     $actions    = [$actions] unless ref $actions && ref $actions eq 'ARRAY';
     $effect     =~ /^allow|deny$/i or croak '-effect must be "allow" or "deny"';
-    push @{$self->{statements}},{effect  => $effect,
-				 actions => $actions};
+    foreach (@$actions) {
+	s/^ec2://i;
+	$self->{statements}{lc $effect}{ucfirst VM::EC2->uncanonicalize($_)}++ ;
+    }
     return $self;
 }
 
 sub as_string {
     my $self = shift;
-    my @statements = @{$self->{statements}};
     my $result =<<END;
 \{
    "Statement": \[
 END
 ;
-    $result .= join ",\n",map {$self->_format_statement($_)} @statements;
+    $result .= join ",\n",map {
+	$self->_format_statement($_,[keys %{$self->{statements}{$_}}])
+    }  sort keys %{$self->{statements}};
+
     $result .= <<END;
 
    ]
@@ -99,15 +159,12 @@ END
 
 sub _format_statement {
     my $self = shift;
-    my $s    = shift;
-    my $action_list = join ',',map {$self->_format_action($_)} @{$s->{actions}};
-    my $effect  = $s->{effect} =~ /allow/i ? 'Allow' 
-                 :$s->{effect} =~ /deny/i  ? 'Deny'
-		 :'Allow';
+    my ($effect,$actions) = @_;
+    my $action_list = join ',',map {$self->_format_action($_)} @$actions;
     my $result =<<END;
       {
 	  "Action":   [ $action_list ],
-          "Effect":   "$effect",
+          "Effect":   "\u$effect\E",
           "Resource": "*"
       }
 END
@@ -118,9 +175,7 @@ END
 sub _format_action {
     my $self = shift;
     my $a    = shift;
-    $a      =~ s/^ec2://;  # temporarily remove leading ec2
-    my $mixed = ucfirst VM::EC2->uncanonicalize($a);
-    return qq("ec2:$mixed");
+    return qq("ec2:$a");
 }
 
 1;

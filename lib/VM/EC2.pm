@@ -440,17 +440,17 @@ sub new {
     my %args = @_;
 
     my ($id,$secret,$token);
-    if (ref $args{-security_token} && $args{-security_token}->can('credentials')) {
-	$id     = $args{-security_token}->credentials->AccessKeyId;
-	$secret = $args{-security_token}->credentials->SecretAccessKey;
-	$token  = $args{-security_token}->credentials->SessionToken;
+    if (ref $args{-security_token} && $args{-security_token}->can('AccessKeyId')) {
+	$id     = $args{-security_token}->AccessKeyId;
+	$secret = $args{-security_token}->SecretAccessKey;
+	$token  = $args{-security_token}->SessionToken;
     }
 
     $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY}
                       or croak "Please provide -access_key parameter or define environment variable EC2_ACCESS_KEY";
     $secret       ||= $args{-secret_key} || $ENV{EC2_SECRET_KEY}
                       or croak "Please provide -secret_key or define environment variable EC2_SECRET_KEY";
-    $token          = $args{-security_token};
+    $token        ||= $args{-security_token};
 
     my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL} || 'http://ec2.amazonaws.com/';
     $endpoint_url   .= '/'                     unless $endpoint_url =~ m!/$!;
@@ -506,7 +506,7 @@ sub secret   {
 
 =head2 $secret = $ec2->security_token(<$new_token>)
 
-Get or set the temporary security token
+Get or set the temporary security token. See L</AWS SECURITY TOKENS>.
 
 =cut
 
@@ -3374,7 +3374,8 @@ Optional parameters:
 
  -filter                     -- Tags and other filters to apply.
 
-There are many filters available, described fully at http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/index.html?ApiReference-ItemType-SpotInstanceRequestSetItemType.html:
+There are many filters available, described fully at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/index.html?ApiReference-ItemType-SpotInstanceRequestSetItemType.html:
 
     availability-zone-group
     create-time
@@ -3419,7 +3420,94 @@ sub describe_spot_instance_requests {
 
 =head1 AWS SECURITY TOKENS
 
+AWS security tokens provide a way to grant temporary access to
+resources in your EC2 space without giving them permanent
+accounts. They also provide the foundation for mobile services and
+multifactor authentication devices (MFA).
 
+Used in conjunction with VM::EC2::Security::Policy and
+VM::EC2::Security::Credentials, you can create a temporary user who is
+authenticated for a limited length of time and pass the credentials to
+him or her via a secure channel. He or she can then create a
+credentials object to access your AWS resources.
+
+Here is an example:
+
+ # on your side of the connection
+ $ec2 = VM::EC2->new(...);  # as usual
+ my $policy = VM::EC2::Security::Policy->new;
+ $policy->allow('DescribeImages','RunInstances');
+ my $token = $ec2->get_federation_token(-name     => 'TemporaryUser',
+                                        -duration => 60*60*3, # 3 hrs, as seconds
+                                        -policy   => $policy);
+ my $serialized = $token->serialize;
+ send_data_to_user_somehow($serialized);
+
+ # on the temporary user's side of the connection
+ my $serialized = get_data_somehow();
+ my $token = VM::EC2::Security::Credentials->new_from_serialized($serialized);
+ my $ec2   = VM::EC2->new(-security_token => $token);
+ print $ec2->describe_images(-owner=>'self');
+
+For temporary users who are not using the Perl VM::EC2 API, you can
+transmit the required fields individually:
+
+ my $access_key_id = $token->access_key_id;
+ my $secret_key    = $token->secret_key;
+ send_data_to_user_somehow($token->session_token,
+                           $token->access_key_id,
+                           $token_secret_key);
+
+See L<VM::EC2::Security::Token>, L<VM::EC2::Security::FederatedUser>,
+L<VM::EC2::Security::Credentials>, and L<VM::EC2::Security::Policy>.
+
+=cut
+
+=head2 $token = $ec2->get_federation_token($username)
+
+=head2 $token = $ec2->get_federation_token(-name=>$username,@args)
+
+This method creates a new temporary user under the provided username
+and returns a VM::EC2::Security::Token object that contains temporary
+credentials for the user, as well as information about the user's
+account. Other options allow you to control the duration for which the
+credentials will be valid, and the policy the controls what resources
+the user is allowed to access.
+
+=over 4
+
+=item Required parameters:
+
+ -name The username
+
+The username must comply with the guidelines described in
+http://docs.amazonwebservices.com/IAM/latest/UserGuide/LimitationsOnEntities.html:
+essentially all alphanumeric plus the characters [+=,.@-].
+
+=item Optional parameters:
+
+ -duration_seconds Length of time the session token will be valid for,
+                    expressed in seconds.
+
+ -duration         Same thing, faster to type.
+
+ -policy           A VM::EC2::Security::Policy object, or a JSON string
+                     complying with the IAM policy syntax.
+
+If no duration is specified, Amazon will default to 12 hours. If no
+policy is provided, then the user will not be able to execute B<any>
+actions.
+
+Note that if the temporary user wishes to create a VM::EC2 object and
+specify a region name at create time
+(e.g. VM::EC2->new(-region=>'us-west-1'), then the user must have
+access to the DescribeRegions action:
+
+ $policy->allow('DescribeRegions')
+
+Otherwise the call to new() will fail.
+
+=back
 
 =cut
 
@@ -3427,9 +3515,47 @@ sub get_federation_token {
     my $self = shift;
     my %args = $self->args('-name',@_);
     $args{-name} or croak "Usage: get_federation_token(-name=>\$name,\@more_args)";
+    $args{-duration_seconds} ||= $args{-duration};
     my @p = map {$self->single_parm($_,\%args)} qw(Name DurationSeconds Policy);
     return $self->sts_call('GetFederationToken',@p);
 }
+
+
+=head2 $token = $ec2->get_session_token(@args)
+
+This method creates a temporary VM::EC2::Security::Token object for an
+anonymous user. The token has no policy associated with it, and can be
+used to run any of the EC2 actions available to the user who created
+the token. Optional arguments allow the session token to be used in
+conjunction with MFA devices.
+
+=over 4
+
+=item Required parameters:
+
+none
+
+=item Optional parameters:
+
+ -duration_seconds Length of time the session token will be valid for,
+                    expressed in seconds.
+
+ -duration         Same thing, faster to type.
+
+ -serial_number    The identification number of the user's MFA device,
+                     if any.
+
+ -token_code       The code provided by the MFA device, if any.
+
+If no duration is specified, Amazon will default to 12 hours.
+
+See
+http://docs.amazonwebservices.com/IAM/latest/UserGuide/Using_ManagingMFA.html
+for information on using AWS in conjunction with MFA devices.
+
+=back
+
+=cut
 
 sub get_session_token {
     my $self = shift;
