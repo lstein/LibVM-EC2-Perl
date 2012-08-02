@@ -1249,8 +1249,9 @@ sub _rsync_put {
     my $ssh_args = $self->_ssh_escaped_args;
     my $rsync_args = $self->manager->_rsync_args;
     $self->info("Beginning rsync @source $host:$dest ...\n");
-    system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest") == 0;
+    my $status = system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest") == 0;
     $self->info("...rsync done\n");
+    return $status;
 }
 
 sub _rsync_get {
@@ -1268,8 +1269,9 @@ sub _rsync_get {
     my $rsync_args = $self->manager->_rsync_args;
     
     $self->info("Beginning rsync @source $host:$dest ...\n");
-    system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
+    my $status = system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
     $self->info("...rsync done\n");
+    return $status;
 }
 
 =head1 Internal Methods

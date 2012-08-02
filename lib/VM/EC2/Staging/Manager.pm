@@ -309,7 +309,7 @@ sub new {
     $args{-volume_class}      ||= $self->default_volume_class;
     $args{-server_class}      ||= $self->default_server_class;
 
-    $args{-quiet}             = !$args{-verbose};
+    $args{-verbose} = 0       if $args{-quiet};
 
     # bring in classes
     foreach ('-server_class','-volume_class') {

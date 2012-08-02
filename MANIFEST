@@ -72,7 +72,6 @@ t/02.keypairs.t
 t/03.securitygroup.t
 t/04.volume.t
 t/05.spot_instance.t
-t/06.instance.t
 t/06.security_token.t
 t/07.instance.t
 t/08.staging.t

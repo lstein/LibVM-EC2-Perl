@@ -31,7 +31,7 @@ skip "; this system does not have ssh, rsh and dd command line tools in PATH", T
 $ec2     = VM::EC2->new;
 $manager = $ec2->staging_manager(-instance_type=> 't1.micro',
 				 -on_exit      => 'run', # don't terminate user's servers!
-				 -quiet        => 1,
+				 -verbose      => 0,
     ) or BAIL_OUT("Can't load VM::EC2::Staging::Manager module");
 
 
