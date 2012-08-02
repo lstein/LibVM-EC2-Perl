@@ -18,7 +18,8 @@ $SIG{TERM} = $SIG{INT} = sub { exit 0 };  # run the termination
 # this script exercises the staging manager, servers and instances
 my($ec2,$manager);
 my $msg =
-'# This test will launch two "micro" instances under your Amazon account
+'
+# This test will launch two "micro" instances under your Amazon account
 # and then terminate them, incurring a one hour runtime charge for each.
 # This will incur a charge of \$0.04 (as of July 2012), which may be covered
 # under the AWS free tier. Also be aware that this test may take several

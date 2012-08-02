@@ -20,12 +20,12 @@ $SIG{TERM} = $SIG{INT} = sub { exit 0 };  # run the termination
 my($ec2, $instance,$key,$address,$deallocate_address,$volume,$image);
 
 my $msg =
-'# The next two tests will launch three "micro" instances under your Amazon account
+'
+# The next two tests will launch three "micro" instances under your Amazon account
 # and then terminate them, incurring a one hour runtime charge each. This will
 # incur a charge of \$0.06 (as of July 2012), which may be covered under 
-# the AWS free tier. Also be aware that this test may take a while
+# the AWS free tier. Also be aware that these tests may take a while
 # (several minutes) due to tests that launch, start, and stop instances.
-# Test 27 creates an image, which also takes a while. Be patient.
 # (this prompt will timeout automatically in 15s)
 ';
 
