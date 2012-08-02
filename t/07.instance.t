@@ -182,7 +182,7 @@ sub confirm_payment {
 
 # This test will launch one "micro" instance under your Amazon account
 # and then terminate it, incurring a one hour runtime charge. This will
-# incur a charge of \$0.02 (as of July 2011), which may be covered under 
+# incur a charge of \$0.02 (as of July 2012), which may be covered under 
 # the AWS free tier. Also be aware that this test may take a while
 # (several minutes) due to tests that launch, start, and stop instances.
 # Test 27 creates an image, which also takes a while. Be patient.
@@ -202,8 +202,6 @@ END
 }
 
 sub cleanup {
-    reset_cache();
-    reset_declined();
     return unless $ec2;
     my $img = $ec2->describe_images({name=>IMG_NAME});
     if ($img) {

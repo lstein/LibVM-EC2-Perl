@@ -18,6 +18,7 @@ $SIG{TERM} = $SIG{INT} = sub { exit 0 };  # run the termination
 # this script exercises the staging manager, servers and instances
 my($ec2,$manager);
 
+setup_environment();
 require_ok('VM::EC2::Staging::Manager');
 
 SKIP: {
@@ -131,6 +132,8 @@ cmp_ok(scalar @volumes,'==',$volume_count + 1,'manager has 1 new registered volu
 exit 0;
 
 sub cleanup {
+    reset_cache();
+    reset_declined();
     if ($ec2) {
 	my @servers = $ec2->describe_instances({'tag:StagingTest' =>1,'instance-state-name'=>['running','stopped']});
 	if (@servers) {

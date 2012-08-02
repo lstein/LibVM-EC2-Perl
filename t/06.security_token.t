@@ -20,7 +20,7 @@ setup_environment();
 require_ok('VM::EC2');
 require_ok('VM::EC2::Security::Policy');
 SKIP: {
-skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
+skip "account information unavailable",TEST_COUNT-2 unless setup_environment();
 
 my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 

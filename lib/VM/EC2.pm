@@ -3350,7 +3350,7 @@ sub request_spot_instances {
     push @launch_spec, map {$self->list_parm($_,\%args)}
          qw(SecurityGroup SecurityGroupId);
     push @launch_spec, $self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
-    push @launch_spec,$self->iam_args;
+    push @launch_spec,$self->iam_parm(\%args);
 
     while (my ($key,$value) = splice(@launch_spec,0,2)) {
 	push @p,("LaunchSpecification.$key" => $value);
