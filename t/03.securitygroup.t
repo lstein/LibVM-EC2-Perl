@@ -26,7 +26,7 @@ SKIP: {
 
 skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
 
-$ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
+$ec2 = VM::EC2->new(-region=>'us-east-1') or BAIL_OUT("Can't load VM::EC2 module");
 
 # in case it was here from a previous invocation
 $ec2->delete_security_group(-name=>GROUP);

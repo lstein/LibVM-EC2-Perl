@@ -19,10 +19,20 @@ $SIG{TERM} = $SIG{INT} = sub { exit 0 };  # run the termination
 # this script exercises instances and volumes
 my($ec2, $instance,$key,$address,$deallocate_address,$volume,$image);
 
+my $msg =
+'# The next two tests will launch three "micro" instances under your Amazon account
+# and then terminate them, incurring a one hour runtime charge each. This will
+# incur a charge of \$0.06 (as of July 2012), which may be covered under 
+# the AWS free tier. Also be aware that this test may take a while
+# (several minutes) due to tests that launch, start, and stop instances.
+# Test 27 creates an image, which also takes a while. Be patient.
+# (this prompt will timeout automatically in 15s)
+';
+
 SKIP: {
 
 skip "account information unavailable",TEST_COUNT unless setup_environment();
-skip "instance tests declined",        TEST_COUNT unless confirm_payment();
+skip "instance tests declined",        TEST_COUNT unless confirm_payment($msg);
 
 require_ok('VM::EC2');
 $ec2 = VM::EC2->new(-print_error=>1,-region=>'us-east-1') or BAIL_OUT("Can't load VM::EC2 module");
@@ -175,30 +185,6 @@ END {
 	$ec2->deregister_image($image);
     }
     cleanup();
-}
-
-sub confirm_payment {
-    print STDERR <<END;
-
-# This test will launch one "micro" instance under your Amazon account
-# and then terminate it, incurring a one hour runtime charge. This will
-# incur a charge of \$0.02 (as of July 2012), which may be covered under 
-# the AWS free tier. Also be aware that this test may take a while
-# (several minutes) due to tests that launch, start, and stop instances.
-# Test 27 creates an image, which also takes a while. Be patient.
-# (this prompt will timeout automatically in 15s)
-END
-;
-    print STDERR "Do you want to proceed? [Y/n] ";
-    my $result = eval {
-	local $SIG{ALRM} = sub {warn "Timeout!\n"; die 'timeout'};
-	alarm(15);
-	chomp(my $input = <>);
-	$input ||= 'y';
-	$input =~ /^[yY]/;
-    };
-    alarm(0);
-    return $result;
 }
 
 sub cleanup {

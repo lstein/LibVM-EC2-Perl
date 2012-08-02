@@ -21,7 +21,7 @@ require_ok('VM::EC2');
 SKIP: {
 skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
 
-my $ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
+my $ec2 = VM::EC2->new(-print_error=>1,-region=>'us-east-1') or BAIL_OUT("Can't load VM::EC2 module");
 
 # make a key
 my $kn      = 'VM-EC2 Test Key';

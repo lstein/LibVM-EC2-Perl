@@ -17,6 +17,15 @@ $SIG{TERM} = $SIG{INT} = sub { exit 0 };  # run the termination
 
 # this script exercises the staging manager, servers and instances
 my($ec2,$manager);
+my $msg =
+'# This test will launch two "micro" instances under your Amazon account
+# and then terminate them, incurring a one hour runtime charge for each.
+# This will incur a charge of \$0.04 (as of July 2012), which may be covered
+# under the AWS free tier. Also be aware that this test may take several
+# minutes to complete due to tests that launch, start, and stop instances.
+#
+# [this prompt will timeout automatically in 15s]
+';
 
 setup_environment();
 require_ok('VM::EC2::Staging::Manager');
@@ -24,11 +33,11 @@ require_ok('VM::EC2::Staging::Manager');
 SKIP: {
 
 skip "; account information unavailable",TEST_COUNT-1 unless setup_environment();
-skip "; instance tests declined",        TEST_COUNT-1 unless confirm_payment();
+skip "; instance tests declined",        TEST_COUNT-1 unless confirm_payment($msg);
 skip "; this system does not have ssh, rsh and dd command line tools in PATH", TEST_COUNT-1
     unless VM::EC2::Staging::Manager->environment_ok();
 
-$ec2     = VM::EC2->new;
+$ec2     = VM::EC2->new();
 $manager = $ec2->staging_manager(-instance_type=> 't1.micro',
 				 -on_exit      => 'run', # don't terminate user's servers!
 				 -verbose      => 0,
@@ -154,26 +163,3 @@ END {
     cleanup();
 }
 
-sub confirm_payment {
-    print STDERR <<END;
-
-# This test will launch two "micro" instance under your Amazon account
-# and then terminate them, incurring a one hour runtime charge for each.
-# This will incur a charge of \$0.04 (as of July 2012), which may be covered
-# under the AWS free tier. Also be aware that this test may take several
-# minutes to complete due to tests that launch, start, and stop instances.
-#
-# [this prompt will timeout automatically in 15s]
-END
-;
-    print STDERR "Do you want to proceed? [Y/n] ";
-    my $result = eval {
-	local $SIG{ALRM} = sub {warn "Timeout!\n"; die 'timeout'};
-	alarm(15);
-	chomp(my $input = <>);
-	$input ||= 'y';
-	$input =~ /^[yY]/;
-    };
-    alarm(0);
-    return $result;
-}
