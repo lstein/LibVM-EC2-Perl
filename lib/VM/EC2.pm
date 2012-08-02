@@ -160,7 +160,25 @@ classes which act as specialized interfaces to AWS:
  VM::EC2::Snapshot                  -- EBS snapshots
  VM::EC2::Tag                       -- Metadata tags
 
-In addition, there are several utility classes:
+In addition, there is a high level interface for interacting with EC2
+servers and volumes, including file transfer and remote shell facilities:
+
+  VM::EC2::Staging::Manager         -- Manage a set of servers and volumes.
+  VM::EC2::Staging::Server          -- A staging server, with remote shell and file transfer
+                                        facilities.
+  VM::EC2::Staging::Volume          -- A staging volume with the ability to copy itself between
+                                        availability zones and regions.
+
+and a few specialty classes:
+
+  VM::EC2::Security::Token          -- Temporary security tokens for granting EC2 access to
+                                        non-AWS account holders.
+  VM::EC2::Security::Credentials    -- Credentials for use by temporary account holders.
+  VM::EC2::Security::Policy         -- Policies that restrict what temporary account holders
+                                        can do with EC2 resources.
+  VM::EC2::Security::FederatedUser  -- Account name information for temporary account holders.
+
+Lastly, there are several utility classes:
 
  VM::EC2::Generic                   -- Base class for all AWS objects
  VM::EC2::Error                     -- Error messages
@@ -168,6 +186,7 @@ In addition, there are several utility classes:
  VM::EC2::ReservationSet            -- Hidden class used for describe_instances() request;
                                         The reservation Ids are copied into the Instance
                                          object.
+
 
 There is also a high-level API called "VM::EC2::Staging::Manager" for
 managing groups of staging servers and volumes which greatly
@@ -391,12 +410,11 @@ Create a new Amazon access object. Required parameters are:
 
  -endpoint     The URL for making API requests
 
- -region       The region to make API requests
+ -region       The region to receive the API requests
 
  -raise_error  If true, throw an exception.
 
  -print_error  If true, print errors to STDERR.
-
 
 One or more of -access_key or -secret_key can be omitted if the
 environment variables EC2_ACCESS_KEY and EC2_SECRET_KEY are
@@ -407,13 +425,19 @@ specifying one of the Amazon regions, such as "us-west-2", with the
 -region argument. The endpoint specified by -region will override
 -endpoint.
 
-You may provide a temporary security token returned by an earlier call
-to the AWS Security Token Service (see
-http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html). The
-access and secret keys provided must be the same ones returned when
-the security token was generated. As a special case, you may pass a
-VM::EC2::Security::FederationToken object to -security_token in lieu of
-the two keys. Also see L</AWS SECURITY TOKENS>.
+-security_token is used in conjunction with temporary security tokens
+returned by $ec2->get_federation_token() and $ec2->get_session_token()
+to grant restricted, time-limited access to some or all your EC2
+resources to users who do not have access to your account. If you pass
+either a VM::EC2::Security::Token object, or the
+VM::EC2::Security::Credentials object contained within the token
+object, then new() does not need the -access_key or -secret_key
+parameters. You may also pass a session token string scalar to
+-security_token, in which case you must also pass the access key ID
+and secret keys generated at the same time the session token was
+created. See
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html
+and L</AWS SECURITY TOKENS>.
 
 To use a Eucalyptus cloud, please provide the appropriate endpoint
 URL.
@@ -440,10 +464,10 @@ sub new {
     my %args = @_;
 
     my ($id,$secret,$token);
-    if (ref $args{-security_token} && $args{-security_token}->can('AccessKeyId')) {
-	$id     = $args{-security_token}->AccessKeyId;
-	$secret = $args{-security_token}->SecretAccessKey;
-	$token  = $args{-security_token}->SessionToken;
+    if (ref $args{-security_token} && $args{-security_token}->can('access_key_id')) {
+	$id     = $args{-security_token}->access_key_id;
+	$secret = $args{-security_token}->secret_access_key;
+	$token  = $args{-security_token}->session_token;
     }
 
     $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY}
@@ -3440,7 +3464,7 @@ Here is an example:
  my $token = $ec2->get_federation_token(-name     => 'TemporaryUser',
                                         -duration => 60*60*3, # 3 hrs, as seconds
                                         -policy   => $policy);
- my $serialized = $token->serialize;
+ my $serialized = $token->credentials->serialize;
  send_data_to_user_somehow($serialized);
 
  # on the temporary user's side of the connection
@@ -3452,11 +3476,21 @@ Here is an example:
 For temporary users who are not using the Perl VM::EC2 API, you can
 transmit the required fields individually:
 
- my $access_key_id = $token->access_key_id;
- my $secret_key    = $token->secret_key;
- send_data_to_user_somehow($token->session_token,
-                           $token->access_key_id,
-                           $token_secret_key);
+ my $credentials   = $token->credentials;
+ my $access_key_id = $credentials->accessKeyId;
+ my $secret_key    = $credentials->secretKey;
+ my $session_token = $credentials->sessionToken;
+ send_data_to_user_somehow($session_token,
+                           $access_key_id,
+                           $secret_key);
+
+Calls to get_federation_token() return a VM::EC2::Security::Token
+object. This object contains two sub-objects, a
+VM::EC2::Security::Credentials object, and a
+VM::EC2::Security::FederatedUser object. The Credentials object
+contains a temporary access key ID, secret access key, and session
+token which together can be used to authenticate to the EC2 API.  The
+FederatedUser object contains the temporary user account name and ID.
 
 See L<VM::EC2::Security::Token>, L<VM::EC2::Security::FederatedUser>,
 L<VM::EC2::Security::Credentials>, and L<VM::EC2::Security::Policy>.
@@ -3487,16 +3521,17 @@ essentially all alphanumeric plus the characters [+=,.@-].
 =item Optional parameters:
 
  -duration_seconds Length of time the session token will be valid for,
-                    expressed in seconds.
+                    expressed in seconds. 
 
  -duration         Same thing, faster to type.
 
  -policy           A VM::EC2::Security::Policy object, or a JSON string
                      complying with the IAM policy syntax.
 
-If no duration is specified, Amazon will default to 12 hours. If no
-policy is provided, then the user will not be able to execute B<any>
-actions.
+The duration must be no shorter than 1 hour (3600 seconds) and no
+longer than 36 hours (129600 seconds). If no duration is specified,
+Amazon will default to 12 hours. If no policy is provided, then the
+user will not be able to execute B<any> actions.
 
 Note that if the temporary user wishes to create a VM::EC2 object and
 specify a region name at create time

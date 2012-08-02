@@ -6,28 +6,63 @@ VM::EC2::Security::Token - Temporary security token object
 
 =head1 SYNOPSIS
 
-  # on your side of the connection
+ use VM::EC2;
+ use VM::EC2::Security::Policy
+
+ # under your account
  $ec2 = VM::EC2->new(...);  # as usual
  my $policy = VM::EC2::Security::Policy->new;
  $policy->allow('DescribeImages','RunInstances');
  my $token = $ec2->get_federation_token(-name     => 'TemporaryUser',
                                         -duration => 60*60*3, # 3 hrs, as seconds
                                         -policy   => $policy);
- print $token->session_token,"\n";
- print $token->access_key_id,"\n";
- print $token->secret_access_key,"\n";
- print $token->federated_user,"\n";
+ print $token->sessionToken,"\n";
+ print $token->accessKeyId,"\n";
+ print $token->secretAccessKey,"\n";
+ print $token->federatedUser,"\n";
 
- my $new_ec2 = VM::EC2->new(-security_token => $token);
+ my $serialized = $token->credentials->serialize;
+
+ # get the serialized token to the temporary user
+ send_data_to_user_somehow($serialized); 
+
+ # under the temporary user's account
+ my $serialized = get_data_somehow();
+
+ # create a copy of the token from its serialized form
+ my $token = VM::EC2::Security::Credentials->new_from_serialized($serialized);
+
+ # open a new EC2 connection with this token. User will be
+ # able to run all the methods specified in the policy.
+ my $ec2   = VM::EC2->new(-security_token => $token);
  print $ec2->describe_images(-owner=>'self');
 
 =head1 DESCRIPTION
 
-VM::EC2::Security::Token objects are returned by calls to
-VM::EC2->get_federation_token() and get_session_token(). The token
-object can then be passed to VM::EC2->new() to gain access to EC2
-resources with temporary credentials, or interrogated to obtain the
-various components of the temporary credentials.
+VM::EC2::Security::Token objects allow you to grant a user access to
+some or all of your EC2 resources for a limited period of time. The
+user does not have to have his own AWS account.
+
+Token objects are returned by calls to VM::EC2->get_federation_token()
+and get_session_token(). The former call is used to create a temporary
+user with privileges restricted to those listed in the accompanying
+policy (a VM::EC2::Security::Policy object). The latter call is used
+in conjunction with multi-factor authentication devices, such as smart
+cards. The tokens returned by get_session_token() are not associated
+with a user account nor a policy, and grant privileges to all EC2
+actions and resources. Both federation and session tokens have an
+expiry time between a few seconds and 36 hours.
+
+A VM::EC2::Security::Credentials object contained within the token
+contains the temporary secret access key, acess key ID, and a session
+token string that unlocks the access key. The credentials object can
+be serialized into a form suitable for sending to a user via a secure
+channel, such as SSL or S/MIME e-mail, and unserialized at the
+receiving end into a copy of the original credentials object. 
+
+Either the token object, or its contained credentials object can be
+used passed to VM::EC2->new() via the B<-security_token> parameter in
+order to gain access to EC2 resources.
 
 =head1 METHODS
 

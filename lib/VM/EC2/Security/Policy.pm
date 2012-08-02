@@ -114,7 +114,7 @@ sub allow {
     my $self = shift;
     my @actions = @_ ? @_ : '*';
     return $self->_add_statement(-effect=>'allow',
-				-actions=>\@actions);
+				 -actions=>\@actions);
 }
 sub deny {
     my $self = shift;
@@ -144,9 +144,14 @@ sub as_string {
    "Statement": \[
 END
 ;
-    $result .= join ",\n",map {
-	$self->_format_statement($_,[keys %{$self->{statements}{$_}}])
-    }  sort keys %{$self->{statements}};
+    if (%{$self->{statements}}) {
+	$result .= join ",\n",$self->_statements;
+    }
+    else {  # no statements, so deny all
+    	local $self->{statements};
+	$self->deny('*');
+	$result .= join ",\n",$self->_statements;
+    }
 
     $result .= <<END;
 
@@ -157,10 +162,17 @@ END
     return $result;
 }
 
+sub _statements {
+    my $self = shift;
+    return  map {
+	$self->_format_statement($_,[keys %{$self->{statements}{$_}}])
+    }  sort keys %{$self->{statements}};
+}
+
 sub _format_statement {
     my $self = shift;
     my ($effect,$actions) = @_;
-    my $action_list = join ',',map {$self->_format_action($_)} @$actions;
+    my $action_list = join ',',map {$self->_format_action($_)} sort @$actions;
     my $result =<<END;
       {
 	  "Action":   [ $action_list ],

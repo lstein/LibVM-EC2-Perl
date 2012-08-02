@@ -1,8 +1,12 @@
-1.11
+1.11 Thu Aug  2 07:03:12 EDT 2012
+    - API supported updated to AWS 2012-06-15
     - Add support for DescribeInstanceStatus call.
     - Add support for DescribeVolumeStatus, DescribeVolumeAttribute and ModifyVolumeAttribute calls.
     - Add support for product codes in Instance, Image and Snapshot.
     - Add support for enabling volume I/O on degraded volumes and auto enabling I/O.
+    - Add support for temporary security tokens (see VM::EC2->get_federation_user())
+    - Add support for IAM security policies for restricting EC2 actions that federation
+          users can perform (see VM::EC2::Security::Policy).
 
 1.10  Sat Jul 28 15:59:41 EDT 2012
      - Add new high level framework for managing servers and volumes (see
