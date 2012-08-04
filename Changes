@@ -1,3 +1,6 @@
+1.12
+    - Tests no longer prompt for input when running under smoker.
+
 1.11 Thu Aug  2 07:03:12 EDT 2012
     - API supported updated to AWS 2012-06-15
     - Add support for DescribeInstanceStatus call.

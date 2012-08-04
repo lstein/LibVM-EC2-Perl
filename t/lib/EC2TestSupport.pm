@@ -13,6 +13,11 @@ sub setup_environment {
     return if -e '.declined';
     unless ($ENV{EC2_ACCESS_KEY} && $ENV{EC2_SECRET_KEY}) {
 	read_from_cache() && return 1;
+	if ($ENV{AUTOMATED_TESTING}) {
+	    open my $f,'>.declined';
+	    close $f;
+	    return;
+	}
 	eval {
 	    local $SIG{INT}  = sub {warn "Interrupted!\n";die "interrupted" };
 	    local $SIG{ALRM} = sub {warn "Timeout!\n"    ;die "timeout"};
@@ -63,6 +68,13 @@ sub confirm_payment {
     my $msg = shift;
     return 1 if -e '.payment_confirmed';
     return 0 if -e '.payment_declined';
+
+    if ($ENV{AUTOMATED_TESTING}) {
+	open my $f,'>.payment_declined';
+	close $f;
+	return;
+    }
+
     print STDERR $msg;
     print STDERR "Do you want to proceed? [Y/n] ";
     my $result = eval {
