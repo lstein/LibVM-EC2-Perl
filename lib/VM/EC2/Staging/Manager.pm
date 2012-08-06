@@ -614,6 +614,9 @@ object.
                 sudo on the instance without providing a password,
                 or functionality of this server will be limited.
 
+In addition, you may use any of the options recognized by
+VM::EC2->run_instances() (e.g. -block_devices).
+
 =cut
 
 sub provision_server {
