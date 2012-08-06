@@ -298,11 +298,11 @@ sub start {
 	local $SIG{ALRM} = sub {die 'timeout'};
 	alarm(VM::EC2::Staging::Manager::SERVER_STARTUP_TIMEOUT());
 	$self->ec2->start_instances($self);
-	$self->manager->wait_for_instances($self);
+	$self->manager->wait_for_servers($self);
     };
     alarm(0);
     if ($@) {
-	$self->manager->info('could not start $self');
+	$self->manager->warn("could not start $self\n");
 	return;
     }
     $self->is_up(1);
@@ -853,7 +853,7 @@ This method will die in case of error.
 sub mount_volume {
     my $self = shift;
     my ($vol,$mtpt)  = @_;
-    $vol->mounted and croak "$vol already mounted";
+    $vol->mounted and return;
     if ($vol->mtdev && $vol->mtpt) {
 	return if $vol->mtpt eq 'none';
 	$self->_mount($vol->mtdev,$vol->mtpt);
@@ -1029,18 +1029,18 @@ sub _find_or_create_mount {
     my ($vol,$mtpt)  = @_;
 
     $vol->refresh;
-    my ($ebs_device,$mt_device);
+    my ($ebs_device,$mt_device,$old_mtpt);
     
     # handle the case of the volme already being attached
     if (my $attachment = $vol->attachment) {
+
 	if ($attachment->status eq 'attached') {
+
 	    $attachment->instanceId eq $self->instanceId or
 		die "$vol is attached to wrong server";
-	    ($mt_device,$mtpt) = $self->_find_mount($attachment->device);
-	    unless ($mtpt) {
-		$mtpt ||= $vol->tags->{StagingMtPt} || $self->default_mtpt($vol);
-		$self->_mount($mt_device,$mtpt);
-	    }
+	    ($mt_device,$old_mtpt) = $self->_find_mount($attachment->device);
+	    $mtpt ||= $old_mtpt || $vol->tags->{StagingMtPt} || $self->default_mtpt($vol);
+	    $self->_mount($mt_device,$mtpt);
 
 	    #oops, device is in a semi-attached state. Let it settle then reattach.
 	} else {

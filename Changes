@@ -1,5 +1,7 @@
-1.13
+1.13 Mon Aug  6 10:31:42 EDT 2012
     - Fix API version in perldoc DESCRIPTION.
+    - Fix bugs that occurred when working with staging volumes that were attached
+      to stopped server instances.
     - No longer assign automatic labels to new staging volumes.
     
 

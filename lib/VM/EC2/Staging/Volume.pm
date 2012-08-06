@@ -288,7 +288,7 @@ sub _spin_up {
 	$self->server($server);
     }
     unless ($self->server->status eq 'running') {
-	$self->manager->info("starting server to mount $self\n");
+	$self->manager->info("Starting server to mount $self\n");
 	$self->server->start;
     }
     $self->server->mount_volume($self) unless $nomount || $self->mounted();
@@ -382,6 +382,7 @@ sub unmount {
     # prior to unmounting it again.
     $self->_spin_up('nomount'); 
     $server->unmount_volume($self);
+    $self->mtpt(undef);
 }
 
 =head2 $vol->detach()

@@ -1187,7 +1187,10 @@ sub rsync {
     }
 
     if ($source_host eq $dest_host) {
-	return $source_host->ssh('sudo','rsync',$rsync_args,@source_paths,$dest_path);
+	$self->info("Beginning rsync @source_paths $dest_path...\n");
+	my $result = $source_host->ssh('sudo','rsync',$rsync_args,@source_paths,$dest_path);
+	$self->info("...rsync done.\n");
+	return $result;
     }
 
     # DataTransferServer1 => DataTransferServer2
@@ -1199,10 +1202,13 @@ sub rsync {
     my $ssh_args = $source_host->_ssh_escaped_args;
     my $keyfile  = $source_host->keyfile;
     $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-    return $source_host->ssh('sudo','rsync',$rsync_args,
-			     '-e',"'ssh $ssh_args'",
-			     "--rsync-path='sudo rsync'",
-			     @source_paths,"$dest_ip:$dest_path");
+    $self->info("Beginning rsync @source_paths $dest_ip:$dest_path...\n");
+    my $result = $source_host->ssh('sudo','rsync',$rsync_args,
+				   '-e',"'ssh $ssh_args'",
+				   "--rsync-path='sudo rsync'",
+				   @source_paths,"$dest_ip:$dest_path");
+    $self->info("...rsync done.\n");
+    return $result;
 }
 
 =head2 $manager->dd($source_vol=>$dest_vol)
@@ -1284,8 +1290,11 @@ sub _resolve_path {
 
 sub _rsync_args {
     my $self  = shift;
-    my $quiet = $self->verbosity < VERBOSE_DEBUG; 
-    return $quiet ? '-aqz' : '-avz';
+    my $verbosity = $self->verbosity;
+    return $verbosity < VERBOSE_WARN  ? '-aqz'
+	  :$verbosity < VERBOSE_INFO  ? '-aqz'
+	  :$verbosity < VERBOSE_DEBUG ? '-az'
+	  : '-avz'
 }
 
 sub _authorize {
@@ -1745,7 +1754,10 @@ sub _scan_volumes {
 	}
 
 	my $vol = $self->volume_class()->new(%args);
-	$vol->mounted(defined $args{-mtpt} && $args{-server});
+	if ($args{-mtpt} && $args{-server}) {
+	    $vol->mounted(1) if $args{-server}->ping && 
+		             $args{-server}->scmd('cat /etc/mtab')=~ $args{-mtpt};
+	}
 	$self->register_volume($vol);
     }
 }
@@ -2036,7 +2048,6 @@ sub _servers {
     return @servers unless $endpoint;
     return grep {$_->ec2->endpoint eq $endpoint} @servers;
 }
-
 
 sub DESTROY {
     my $self = shift;
