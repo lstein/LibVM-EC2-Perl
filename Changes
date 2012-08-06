@@ -1,3 +1,8 @@
+1.13
+    - Fix API version in perldoc DESCRIPTION.
+    - No longer assign automatic labels to new staging volumes.
+    
+
 1.12 Fri Aug  3 23:48:46 EDT 2012
     - Tests no longer prompt for input when running under smoker.
 

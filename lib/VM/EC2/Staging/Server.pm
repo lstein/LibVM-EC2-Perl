@@ -641,8 +641,8 @@ synchronizing a filesystem somewhere to an EBS snapshot:
 
 The B<-label> and B<-uuid> arguments are used to set the volume label
 and UUID during formatting of new filesystems. The default behavior is
-to create a label based on the symbolic name, if any, and to allow the
-server to choose an arbitrary UUID.
+to create no label and to allow the server to choose an arbitrary
+UUID.
 
 =cut
 
@@ -655,7 +655,7 @@ sub provision_volume {
     my $volid  = $args{-volume_id};
     my $snapid = $args{-snapshot_id};
     my $reuse  = $args{-reuse};
-    my $label  = $args{-label} || $args{-name};
+    my $label  = $args{-label};
     my $uuid   = $args{-uuid};
 
     $self->manager->find_volume_by_name($args{-name}) && 
@@ -701,15 +701,16 @@ sub provision_volume {
 	$self->ssh("sudo /sbin/resize2fs $mt_device ${size}G") or croak "Couldn't resize $mt_device";
     } elsif ($needs_mkfs && $fstype ne 'raw') {
 	local $_ = $fstype;
-	my $label = /^ext/     ? "-L '$label'"
-                   :/^xfs/     ? "-L '$label'"
-                   :/^reiser/  ? "-l '$label'"
-                   :/^jfs/     ? "-L '$label'"
-                   :/^vfat/    ? "-n '$label'"
-                   :/^msdos/   ? "-n '$label'"
-                   :/^ntfs/    ? "-L '$label'"
-		   :/^hfs/     ? "-v '$label'"
-                   :'';
+	my $label_cmd =!$label     ? ''
+                       :/^ext/     ? "-L '$label'"
+                       :/^xfs/     ? "-L '$label'"
+                       :/^reiser/  ? "-l '$label'"
+                       :/^jfs/     ? "-L '$label'"
+                       :/^vfat/    ? "-n '$label'"
+                       :/^msdos/   ? "-n '$label'"
+                       :/^ntfs/    ? "-L '$label'"
+		       :/^hfs/     ? "-v '$label'"
+                       :'';
 	my $uu = $uuid ? ( /^ext/     ? "-U $uuid"
 			  :/^xfs/     ? ''
 			  :/^reiser/  ? "-u $uuid"
@@ -728,7 +729,7 @@ sub provision_volume {
 	    $self->ssh("if [ ! -e /sbin/mkfs.$fstype ]; then sudo apt-get update; sudo apt-get -y install $package; fi");
 	}
 	$self->info("Making $fstype filesystem on staging volume...\n");
-	$self->ssh("sudo /sbin/mkfs.$fstype $quiet $label $uu $mt_device") or croak "Couldn't make filesystem on $mt_device";
+	$self->ssh("sudo /sbin/mkfs.$fstype $quiet $label_cmd $uu $mt_device") or croak "Couldn't make filesystem on $mt_device";
 
 	if ($uuid && !$uu) {
 	    $self->info("Setting the UUID for the volume\n");
