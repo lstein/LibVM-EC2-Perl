@@ -3449,12 +3449,28 @@ extending your home/corporate network into the cloud.
 
 =cut
 
+sub create_vpc {
+    my $self = shift;
+    my %args   = $self->args('-cidr_block',@_);
+    $args{-cidr_block} or croak "create_vpc(): must provide a -cidr_block parameter";
+    my @parm   = $self->list_parm('CidrBlock',\%args);
+    push @parm,  $self->single_parm('instanceTenancy',\%args);
+    return $self->call('CreateVpc',@parm);
+}
+
 sub describe_vpcs {
     my $self = shift;
     my %args   = $self->args('-vpc_id',@_);
     my @parm   = $self->list_parm('VpcId',\%args);
     push @parm,  $self->filter_parm(\%args);
     return $self->call('DescribeVpcs',@parm);
+}
+
+sub delete_vpc {
+    my $self = shift;
+    my %args  = $self->args(-vpc_id => @_);
+    my @param = $self->single_parm(VpcId=>\%args);
+    return $self->call('DeleteVpc',@param) or return;
 }
 
 =head1 AWS SECURITY TOKENS
@@ -4040,7 +4056,6 @@ CreatePlacementGroup
 CreateRoute
 CreateRouteTable
 CreateSubnet
-CreateVpc
 CreateVpnConnection
 CreateVpnGateway
 DeleteCustomerGateway
@@ -4053,7 +4068,6 @@ DeletePlacementGroup
 DeleteRoute
 DeleteRouteTable
 DeleteSubnet
-DeleteVpc
 DeleteVpnConnection
 DeleteVpnGateway
 DescribeBundleTasks
@@ -4066,7 +4080,6 @@ DescribeNetworkInterfaceAttribute
 DescribePlacementGroups
 DescribeRouteTables
 DescribeSubnets
-DescribeVpcs
 DescribeVpnConnections
 DescribeVpnGateways
 DetachInternetGateway

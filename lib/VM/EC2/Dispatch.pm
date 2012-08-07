@@ -197,7 +197,9 @@ use constant ObjectRegistration => {
     GetFederationToken                => 'fetch_one,GetFederationTokenResult,VM::EC2::Security::Token',
     GetSessionToken                   => 'fetch_one,GetSessionTokenResult,VM::EC2::Security::Token',
     # vpcs
+    CreateVpc                         => 'fetch_one,vpc,VM::EC2::VPC',
     DescribeVpcs                      => 'fetch_items,vpcSet,VM::EC2::VPC',
+    DeleteVpc                         => 'boolean',
 };
 
 sub new {
