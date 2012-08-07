@@ -3441,6 +3441,21 @@ sub describe_spot_instance_requests {
     return $self->call('DescribeSpotInstanceRequests',@params);
 }
 
+=head1 VIRTUAL PRIVATE CLOUDS
+
+EC2 virtual private clouds (VPCs) provide facilities for creating
+tiered applications combining public and private subnetworks, and for
+extending your home/corporate network into the cloud.
+
+=cut
+
+sub describe_vpcs {
+    my $self = shift;
+    my %args   = $self->args('-vpc_id',@_);
+    my @parm   = $self->list_parm('VpcId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeVpcs',@parm);
+}
 
 =head1 AWS SECURITY TOKENS
 
