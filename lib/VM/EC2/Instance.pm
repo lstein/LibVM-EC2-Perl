@@ -115,9 +115,10 @@ These object methods are supported:
                    with VPC NAT functionality. See the Amazon VPC User
                    Guide for details. CHANGEABLE.
 
- networkInterfaceSet -- Return list of VM::EC2::ElasticNetworkInterface objects.
+ networkInterfaceSet -- Return list of VM::EC2::ElasticNetworkInterface objects
+                   attached to this instance.
 
- iamInstanceProfile -- work in progress
+ iamInstanceProfile -- The IAM instance profile (IIP) associated with this instance.
 
  ebsOptimized       -- True if instance is optimized for EBS I/O.
 
@@ -409,6 +410,7 @@ use VM::EC2::BlockDevice::Mapping;
 use VM::EC2::ElasticNetworkInterface;
 use VM::EC2::Instance::Placement;
 use VM::EC2::ProductCode;
+use VM::EC2::Instance::IamProfile;
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Carp 'croak';
 
@@ -621,6 +623,12 @@ sub networkInterfaceSet {
 }
 
 sub network_interfaces { shift->networkInterfaceSet }
+
+sub iamInstanceProfile {
+    my $self = shift;
+    my $profile = $self->SUPER::iamInstanceProfile or return;
+    return VM::EC2::Instance::IamProfile->new($profile,$self->aws);
+}
 
 sub current_status {
     my $self = shift;
