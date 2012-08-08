@@ -900,6 +900,9 @@ VM::EC2::Instance objects.
   -iam_name          The name of the IAM instance profile (IIP) to associate with the
                        instances.
 
+  -ebs_optimized     Boolean. If true, create an EBS-optimized instance
+                     (valid only for certain instance types.
+
 =item Instance types
 
 The following is the list of instance types currently allowed by
@@ -1093,6 +1096,7 @@ sub run_instances {
     push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-placement_tenancy};
     push @p,('Monitoring.Enabled'   =>'true')                         if $args{-monitoring};
     push @p,('DisableApiTermination'=>'true')                         if $args{-termination_protection};
+    push @p,('EbsOptimized'=>'true')                                  if $args{-ebs_optimized};
     push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
     push @p,$self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
     push @p,$self->network_interface_parm($args{-network_interfaces});
