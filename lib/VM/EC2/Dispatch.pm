@@ -190,7 +190,7 @@ use constant ObjectRegistration => {
     CreateSpotDatafeedSubscription    => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
     DescribeSpotDatafeedSubscription  => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
     DeleteSpotDatafeedSubscription    => 'boolean',
-    DescribeSpotPriceHistory          =>'fetch_items_iterator,spotPriceHistorySet,VM::EC2::Spot::PriceHistory,spot_price_history',
+    DescribeSpotPriceHistory          => 'fetch_items_iterator,spotPriceHistorySet,VM::EC2::Spot::PriceHistory,spot_price_history',
     RequestSpotInstances              => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     CancelSpotInstanceRequests        => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     DescribeSpotInstanceRequests      => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
@@ -200,6 +200,8 @@ use constant ObjectRegistration => {
     CreateVpc                         => 'fetch_one,vpc,VM::EC2::VPC',
     DescribeVpcs                      => 'fetch_items,vpcSet,VM::EC2::VPC',
     DeleteVpc                         => 'boolean',
+    # dhcp options
+    DescribeDhcpOptions               => 'fetch_items,dhcpOptionsSet,VM::EC2::VPC::DhcpOptions,nokey',
 };
 
 sub new {

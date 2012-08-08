@@ -3473,6 +3473,14 @@ sub delete_vpc {
     return $self->call('DeleteVpc',@param) or return;
 }
 
+sub describe_dhcp_options {
+    my $self = shift;
+    my %args  = $self->args(-dhcp_options_id => @_);
+    my @parm   = $self->list_parm('DhcpOptionsId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeDhcpOptions',@parm) or return;
+}
+
 =head1 AWS SECURITY TOKENS
 
 AWS security tokens provide a way to grant temporary access to
