@@ -3470,7 +3470,7 @@ sub delete_vpc {
     my $self = shift;
     my %args  = $self->args(-vpc_id => @_);
     my @param = $self->single_parm(VpcId=>\%args);
-    return $self->call('DeleteVpc',@param) or return;
+    return $self->call('DeleteVpc',@param);
 }
 
 sub describe_dhcp_options {
@@ -3478,7 +3478,29 @@ sub describe_dhcp_options {
     my %args  = $self->args(-dhcp_options_id => @_);
     my @parm   = $self->list_parm('DhcpOptionsId',\%args);
     push @parm,  $self->filter_parm(\%args);
-    return $self->call('DescribeDhcpOptions',@parm) or return;
+    return $self->call('DescribeDhcpOptions',@parm);
+}
+
+# { 'domain-name-servers' => ['192.168.2.1','192.168.2.2'],'domain-name'=>'example.com'}
+sub create_dhcp_options {
+    my $self = shift;
+    my %args;
+    if (@_ == 1 && ref $_[0] eq 'HASH') {
+	%args = %{$_[0]};
+    } else {
+	%args = @_;
+    }
+    my @parm;
+    my $count = 1;
+    for my $key (sort keys %args) {
+	my $value  = $args{$key};
+	my @values = ref $value && ref $value eq 'ARRAY' ? @$value : $value;
+	my $item = 1;
+	push @parm,("DhcpConfiguration.$count.Key"  => $key);
+	push @parm,("DhcpConfiguration.$count.Value.".$item++ => $_) foreach @values;
+	$count++;
+    }
+    return $self->call('CreateDhcpOptions',@parm);
 }
 
 =head1 AWS SECURITY TOKENS
@@ -4081,7 +4103,6 @@ DeleteVpnGateway
 DescribeBundleTasks
 DescribeConversionTasks
 DescribeCustomerGateways
-DescribeDhcpOptions
 DescribeNetworkAcls
 DescribeNetworkInterfaces
 DescribeNetworkInterfaceAttribute

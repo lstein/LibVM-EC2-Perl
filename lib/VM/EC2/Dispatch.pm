@@ -202,6 +202,7 @@ use constant ObjectRegistration => {
     DeleteVpc                         => 'boolean',
     # dhcp options
     DescribeDhcpOptions               => 'fetch_items,dhcpOptionsSet,VM::EC2::VPC::DhcpOptions,nokey',
+    CreateDhcpOptions                 => 'fetch_one,dhcpOptions,VM::EC2::VPC::DhcpOptions,nokey',
 };
 
 sub new {
