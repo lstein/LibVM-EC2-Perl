@@ -1,9 +1,13 @@
+1.14
+    - Added most of the VPC calls.
+    - Added support for elastic network interfaces.
+    - Added support for high-IOPS volumes.
+
 1.13 Mon Aug  6 10:31:42 EDT 2012
     - Fix API version in perldoc DESCRIPTION.
     - Fix bugs that occurred when working with staging volumes that were attached
       to stopped server instances.
     - No longer assign automatic labels to new staging volumes.
-    
 
 1.12 Fri Aug  3 23:48:46 EDT 2012
     - Tests no longer prompt for input when running under smoker.

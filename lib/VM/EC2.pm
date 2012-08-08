@@ -816,56 +816,84 @@ VM::EC2::Instance objects.
 =item Optional parameters:
 
   -min_count         Minimum number of instances to launch [1]
+
   -max_count         Maximum number of instances to launch [1]
+
   -key_name          Name of the keypair to use
+
   -security_group_id Security group ID to use for this instance.
                      Use an arrayref for multiple group IDs
+
   -security_group    Security group name to use for this instance.
                      Use an arrayref for multiple values.
+
   -user_data         User data to pass to the instances. Do NOT base64
                      encode this. It will be done for you.
+
   -instance_type     Type of the instance to use. See below for a
                      list.
+
   -availability_zone The availability zone you want to launch the
                      instance into. Call $ec2->regions for a list.
+
   -zone              Short version of -availability_aone.
+
   -placement_zone    Deprecated version of -availability_zone.
+
   -placement_group   An existing placement group to launch the
                      instance into. Applicable to cluster instances
                      only.
+
   -placement_tenancy Specify 'dedicated' to launch the instance on a
                      dedicated server. Only applicable for VPC
                      instances.
+
   -kernel_id         ID of the kernel to use for the instances,
                      overriding the kernel specified in the image.
+
   -ramdisk_id        ID of the ramdisk to use for the instances,
                      overriding the ramdisk specified in the image.
+
   -block_devices     Specify block devices to map onto the instances,
                      overriding the values specified in the image.
                      See below for the syntax of this argument.
+
   -block_device_mapping  Alias for -block_devices.
+
   -monitoring        Pass a true value to enable detailed monitoring.
+
   -subnet_id         ID of the subnet to launch the instance
                      into. Only applicable for VPC instances.
+
   -termination_protection  Pass true to lock the instance so that it
                      cannot be terminated using the API. Use
                      modify_instance() to unset this if youu wish to
                      terminate the instance later.
+
   -disable_api_termination -- Same as above.
+
   -shutdown_behavior Pass "stop" (the default) to stop the instance
                      and save its disk state when "shutdown" is called
                      from within the instance. Stopped instances can
                      be restarted later. Pass "terminate" to
                      instead terminate the instance and discard its
                      state completely.
+
   -instance_initiated_shutdown_behavior -- Same as above.
+
   -private_ip_address Assign the instance to a specific IP address
                      from a VPC subnet (VPC only).
+
   -client_token      Unique identifier that you can provide to ensure
                      idempotency of the request. You can use
                      $ec2->token() to generate a suitable identifier.
                      See http://docs.amazonwebservices.com/AWSEC2/
                          latest/UserGuide/Run_Instance_Idempotency.html
+
+  -network_interfaces  A single network interface specification string
+                     or a list of them as an array reference (VPC only).
+                     These are described in more detail below.
+                     
   -iam_arn           The Amazon resource name (ARN) of the IAM Instance Profile (IIP)
                        to associate with the instances.
 
@@ -896,9 +924,14 @@ following:
      - 'ephemeral[0-3]': indicates that the Amazon EC2 ephemeral store
        (instance local storage) should be exposed at the specified device.
        For example: '/dev/sdc=ephemeral0'.
+
+     - 'vol-12345678': A volume ID will attempt to attach the given volume to the
+       instance, contingent on volume state and availability zone.
+
+     - 'none': Suppress this block device, even if it is mapped in the AMI.
           
-     - '[<snapshot-id>][:<size>[:<delete-on-termination>]]': indicates
-       that an Amazon EBS volume, created from the specified Amazon EBS
+     - '[<snapshot-id>][:<size>[:<delete-on-termination>[:<volume-type>[:<iops>]]]]': 
+       indicates that an Amazon EBS volume, created from the specified Amazon EBS
        snapshot, should be exposed at the specified device. The following
        combinations are supported:
           
@@ -915,10 +948,17 @@ following:
             volume should be deleted on instance termination. If not
             specified, this will default to 'true' and the volume will be
             deleted.
+
+         - '<volume-type>': The volume type. One of "standard" or "iol".
+
+         - '<iops>': The number of I/O operations per second (IOPS) that
+           the volume suports. A number between 1 to 1000. Only valid
+           for volumes of type "iol".
           
          Examples: -block_devices => '/dev/sdb=snap-7eb96d16'
                    -block_devices => '/dev/sdc=snap-7eb96d16:80:false'
                    -block_devices => '/dev/sdd=:120'
+                   -block_devices => '/dev/sdc=:120:true:iol:500'
 
 To provide multiple mappings, use an array reference. In this example,
 we launch two 'm1.small' instance in which /dev/sdb is mapped to
@@ -929,6 +969,62 @@ ephemeral storage and /dev/sdc is mapped to a new 100 G EBS volume:
                         -block_devices => ['/dev/sdb=ephemeral0',
                                            '/dev/sdc=:100:true']
     )
+
+=item Network interface syntax
+
+Each instance has a single primary network interface and private IP
+address that is ordinarily automatically assigned by Amazon. When you
+are running VPC instances, however, you can add additional elastic
+network interfaces (ENIs) to the instance and add secondary private IP
+addresses to one or more of these ENIs. ENIs can exist independently
+of instances, and be detached and reattached in much the same way as
+EBS volumes. This is explained in detail at
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/using-instance-addressing.html.
+
+The network configuration can be specified using the
+-network_interface parameter:
+
+ -network_interfaces => ['eth0=10.10.0.12:subnet-1234567:sg-1234567:true:My Custom Eth0',
+                         'eth1=10.10.1.12,10.10.1.13:subnet-999999:sg-1234567:true:My Custom Eth1',
+
+The format is '<device>=<specification>'. The device is an ethernet
+interface name such as eth0, eth1, eth2, etc. The specification has up
+to five fields, each separated by the ":" character. All fields are
+optional and can be left blank. If missing, AWS will choose a default.
+
+  10.10.1.12,10.10.1.13:subnet-999999:sg-1234567:true:My Custom Eth1
+
+B<1. IP address(es)>: A single IP address in standard dot form, or a
+list of IP addresses separated by commas. The first address in the
+list will become the primary private IP address for the
+interface. Subsequent addresses will become secondary private
+addresses. You may specify "auto" or leave the field blank to have AWS
+choose an address automatically from within the subnetwork. To
+allocate several secondary IP addresses and have AWS pick the
+addresses automatically, give the count of secondary addresses you
+wish to allocate as an integer following the primary IP address. For
+example, "auto,3" will allocate an automatic primary IP address and
+three automatic secondary addresses, while "10.10.1.12,3" will force
+the primary address to be 10.10.1.12 and create three automatic
+secondary addresses.
+
+B<2. Subnetwork ID>: The ID of the VPC subnetwork in which the ENI
+resides. An instance may have several ENIs associated with it, and
+each ENI may be attached to a different subnetwork.
+
+B<3. Security group IDs>: A comma-delimited list of the security group
+IDs to associate with this ENI.
+
+B<4. DeleteOnTerminate>: True if this ENI should be automatically
+deleted when the instance terminates.
+
+B<5. Description>: A human-readable description of the ENI.
+
+As an alternative syntax, you may specify the ID of an existing ENI in
+lieu of the primary IP address and other fields. The ENI will be
+attached to the instance if its permissions allow:
+
+ -network_interfaces => 'eth0=eni-123456'
 
 =item Return value
 
@@ -999,6 +1095,7 @@ sub run_instances {
     push @p,('DisableApiTermination'=>'true')                         if $args{-termination_protection};
     push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
     push @p,$self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
+    push @p,$self->network_interface_parm($args{-network_interfaces});
     push @p,$self->iam_parm(\%args);
     return $self->call('RunInstances',@p);
 }
@@ -3311,6 +3408,8 @@ objects, one for each instance specified in -instance_count.
 
   -block_device_mapping  Alias for -block_devices.
 
+  -network_interfaces  Same as the -network_interfaces option in run_instances().
+
   -monitoring        Pass a true value to enable detailed monitoring.
 
   -subnet            The ID of the Amazon VPC subnet in which to launch the
@@ -3327,7 +3426,6 @@ objects, one for each instance specified in -instance_count.
   -iam_name          The name of the IAM instance profile (IIP) to associate with the
                        instances.
 
-NOTE: The network interface specification is currently not supported.
 
 =cut
 
@@ -3350,7 +3448,8 @@ sub request_spot_instances {
     push @launch_spec, map {$self->list_parm($_,\%args)}
          qw(SecurityGroup SecurityGroupId);
     push @launch_spec, $self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
-    push @launch_spec,$self->iam_parm(\%args);
+    push @launch_spec, $self->iam_parm(\%args);
+    push @launch_spec, $self->network_interface_parm(\%args);
 
     while (my ($key,$value) = splice(@launch_spec,0,2)) {
 	push @p,("LaunchSpecification.$key" => $value);
@@ -3930,11 +4029,59 @@ sub block_device_parm {
 	} elsif ($blockdevice =~ /^ephemeral\d$/) {
 	    push @p,("BlockDeviceMapping.$c.VirtualName"=>$blockdevice);
 	} else {
-	    my ($snapshot,$size,$delete_on_term) = split ':',$blockdevice;
-	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot)                if $snapshot;
+	    my ($snapshot,$size,$delete_on_term,$vtype,$iops) = split ':',$blockdevice;
+	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot)               if $snapshot;
 	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeSize" =>$size)                   if $size;
 	    push @p,("BlockDeviceMapping.$c.Ebs.DeleteOnTermination"=>$delete_on_term) 
-		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/
+		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/;
+	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeType"=>$vtype)                    if $vtype;
+	    push @p,("BlockDeviceMapping.$c.Ebs.Iops"=>$iops)                           if $iops;
+	}
+	$c++;
+    }
+    return @p;
+}
+
+# ['eth0=eni-123456','eth1=192.168.2.1,192.168.3.1,192.168.4.1:subnet-12345:sg-12345:true:My Weird Network']
+# form 1: ethX=network device id
+# form 2: ethX=primary_address,secondary_address1,secondary_address2...:subnetId:securityGroupId:deleteOnTermination:description
+# form 3: ethX=primary_address,secondary_address_count:subnetId:securityGroupId:deleteOnTermination:description
+sub network_interface_parm {
+    my $self = shift;
+    my $devlist = shift or return;
+    my @dev     = ref $devlist && ref $devlist eq 'ARRAY' ? @$devlist : $devlist;
+
+    my @p;
+    my $c = 0;
+    for my $d (@dev) {
+	$d =~ /^eth(\d+)\s*=\s*([^=]+)$/ or croak "network device mapping must be in format ethX=option-string";
+
+	my ($device_index,$device_options) = ($1,$2);
+	push @p,("NetworkInterface.$c.DeviceIndex" => $device_index);
+	my @options = split ':',$device_options;
+	if (@options == 1) {
+	    push @p,("NetworkInterface.$c.NetworkInterfaceId" => $options[0]);
+	} 
+	else {
+	    my ($ip_addresses,$subnet_id,$security_group_id,$delete_on_termination,$description) = @options;
+	    my @addresses = split /\s*,\s*/,$ip_addresses;
+	    for (my $a = 0; $a < @addresses; $a++) {
+		if ($addresses[$a] =~ /^\d+\.\d+\.\d+\.\d+$/ ) {
+		    push @p,("NetworkInterface.$c.PrivateIpAddresses.$a.PrivateIpAddress" => $addresses[$a]);
+		    push @p,("NetworkInterface.$c.PrivateIpAddresses.$a.Primary"          => $a == 0 ? 'true' : 'false');
+		}
+		elsif ($addresses[$a] =~ /^\d+$/ && $a > 0) {
+		    push @p,("NetworkInterface.$c.SecondaryPrivateIpAddressCount"        => $addresses[$a]);
+		}
+	    }
+	    my @sgs = split ',',$security_group_id;
+	    for (my $i=0;$i<@sgs;$i++) {
+		push @p,("NetworkInterface.$c.SecurityGroupId.$i" => $sgs[$i]);
+	    }
+
+	    push @p,("NetworkInterface.$c.SubnetId"              => $subnet_id)             if length $subnet_id;
+	    push @p,("NetworkInterface.$c.DeleteOnTermination"   => $delete_on_termination) if length $delete_on_termination;
+	    push @p,("NetworkInterface.$c.Description"           => $description)           if length $description;
 	}
 	$c++;
     }
@@ -4102,7 +4249,6 @@ sub args {
 As of 30 July 2012, the following Amazon API calls were NOT
 implemented. Volumteers to implement these calls are most welcome.
 
-AssociateDhcpOptions
 AssociateRouteTable
 AttachInternetGateway
 AttachNetworkInterface
@@ -4111,7 +4257,6 @@ BundleInstance
 CancelBundleTask
 CancelConversionTask
 CreateCustomerGateway
-CreateDhcpOptions
 CreateInternetGateway
 CreateNetworkAcl
 CreateNetworkAclEntry
@@ -4123,7 +4268,6 @@ CreateSubnet
 CreateVpnConnection
 CreateVpnGateway
 DeleteCustomerGateway
-DeleteDhcpOptions
 DeleteInternetGateway
 DeleteNetworkAcl
 DeleteNetworkAclEntry

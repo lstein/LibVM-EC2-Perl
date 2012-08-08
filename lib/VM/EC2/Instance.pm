@@ -115,6 +115,12 @@ These object methods are supported:
                    with VPC NAT functionality. See the Amazon VPC User
                    Guide for details. CHANGEABLE.
 
+ networkInterfaceSet -- Return list of VM::EC2::ElasticNetworkInterface objects.
+
+ iamInstanceProfile -- work in progress
+
+ ebsOptimized       -- True if instance is optimized for EBS I/O.
+
  groupSet       -- List of VM::EC2::Group objects indicating the VPC
                    security groups in which this instance resides. Not to be
                    confused with groups(), which returns the security groups
@@ -400,6 +406,7 @@ use VM::EC2::Group;
 use VM::EC2::Instance::State;
 use VM::EC2::Instance::State::Reason;
 use VM::EC2::BlockDevice::Mapping;
+use VM::EC2::ElasticNetworkInterface;
 use VM::EC2::Instance::Placement;
 use VM::EC2::ProductCode;
 use MIME::Base64 qw(encode_base64 decode_base64);
@@ -466,6 +473,9 @@ sub valid_fields {
               hypervisor
               tagSet
               platform
+              ebsOptimized
+              networkInterfaceSet
+              iamInstanceProfile
              );
 }
 
@@ -489,6 +499,12 @@ sub sourceDestCheck {
 	return $self->aws->modify_instance_attribute($self,-source_dest_check=>$c);
     }
     return $check eq 'true';
+}
+
+sub ebsOptimized {
+    my $self = shift;
+    my $opt  = $self->SUPER::ebsOptimized;
+    return $opt eq 'true';
 }
 
 sub groupSet {
@@ -597,6 +613,14 @@ sub instanceInitiatedShutdownBehavior {
 						-shutdown_behavior=>shift()) if @_;
     return $self->aws->describe_instance_attribute($self,'instanceInitiatedShutdownBehavior');
 }
+
+sub networkInterfaceSet {
+    my $self = shift;
+    my $set  = $self->SUPER::networkInterfaceSet or return;
+    return map {VM::EC2::ElasticNetworkInterface->new($_,$self->aws)} @{$set->{item}};
+}
+
+sub network_interfaces { shift->networkInterfaceSet }
 
 sub current_status {
     my $self = shift;
