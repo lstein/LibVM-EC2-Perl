@@ -27,10 +27,15 @@ These object methods are supported:
 
 In addition, this object supports the following convenience methods:
 
-    dhcp_options()  -- Return a VM::EC2::VPC::DhcpOptions object.
+    dhcp_options()   -- Return a VM::EC2::VPC::DhcpOptions object.
 
-current_state()  -- Refresh the object and then return its state
-current_status() -- Same as above (for module consistency)
+    current_state()  -- Refresh the object and then return its state
+
+    current_status() -- Same as above (for module consistency)
+
+    associate_dhcp_options($options) -- Associate the Dhcp option set with
+          this VPC (DhcpOptionsId string or VM::EC2::VPC::DhcpOptions object).
+          Use "default" or pass no arguments to assign no Dhcp options.
 
 =head1 STRING OVERLOADING
 
@@ -84,6 +89,12 @@ sub primary_id { shift->vpcId }
 sub dhcp_options {
     my $self = shift;
     return $self->aws->describe_dhcp_options($self->dhcpOptionsId);
+}
+
+sub associate_dhcp_options {
+    my $self = shift;
+    my $options = shift || 'default';
+    $self->aws->associate_dhcp_options($self => $options);
 }
 
 1;

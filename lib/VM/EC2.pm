@@ -3503,6 +3503,40 @@ sub create_dhcp_options {
     return $self->call('CreateDhcpOptions',@parm);
 }
 
+sub delete_dhcp_options {
+    my $self = shift;
+    my %args  = $self->args(-dhcp_options_id => @_);
+    my @param = $self->single_parm(DhcpOptionsId=>\%args);
+    return $self->call('DeleteDhcpOptions',@param);
+}
+
+=head2 $success = $ec2->associate_dhcp_options($vpc_id => $dhcp_id)
+
+=head2 $success = $ec2->associate_dhcp_options($vpc_id => 'default')
+
+=head2 $success = $ec2->associate_dhcp_options(-vpc_id => $vpc_id,-dhcp_options_id => $dhcp_id)
+
+Associate a VPC ID with a DHCP option set. Pass 'default' to restore
+the default DHCP options for the VPC.
+
+=cut
+
+sub associate_dhcp_options {
+    my $self = shift;
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 2) {
+	@args{qw(-vpc_id -dhcp_options_id)} = @_;
+    } else {
+	%args = @_;
+    }
+    $args{-vpc_id} && $args{-dhcp_options_id}
+      or croak "-vpc_id and -dhcp_options_id must be specified";
+    my @param    = $self->single_parm(DhcpOptionsId=> \%args);
+    push @param,   $self->single_parm(VpcId        => \%args);
+    return $self->call('AssociateDhcpOptions',@param);
+}
+
+
 =head1 AWS SECURITY TOKENS
 
 AWS security tokens provide a way to grant temporary access to

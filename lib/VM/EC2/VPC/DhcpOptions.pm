@@ -27,6 +27,8 @@ In addition, this object supports the following convenience methods:
  option('option-name')    -- return list of values for the named option. Note
                                that all options correspond to a list; calling in
                                a scalar context will return size of the list
+ associate_vpc($vpc_id)   -- Associate these options with the given VPC.
+ associated_vpcs          -- Return list of VPCs associated with the DHCP option set.
  as_string()              -- returns a string concatenation of all options
 
 =head1 STRING OVERLOADING
@@ -54,6 +56,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 =cut
 
 use strict;
+use Carp 'croak';
 use base 'VM::EC2::Generic';
 
 sub valid_fields {
@@ -83,12 +86,25 @@ sub options {
     return map {$_->{key}} @items;
 }
 
+sub associate_vpc {
+    my $self = shift;
+    my $vpc  = shift or croak "Usage: associate_vpc(\$vpc_id)";
+    $self->aws->associate_dhcp_options($vpc => $self);
+}
+
+sub associated_vpcs {
+    my $self = shift;
+    return $self->aws->describe_vpcs({'dhcp-options-id'=>$self});
+}
+
 sub as_string {
     my $self = shift;
     my @options = $self->options;
     my @results = map {"$_ = ".join(',',$self->option($_))} @options;
     return join '; ',@results;
 }
+
+
 
 1;
 
