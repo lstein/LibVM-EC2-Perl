@@ -3642,6 +3642,132 @@ sub associate_dhcp_options {
     return $self->call('AssociateDhcpOptions',@param);
 }
 
+=head2 $interface = $ec2->create_network_interface($subnet_id)
+
+=head2 $interface = $ec2->create_network_interface(@args)
+
+This method creates an elastic network interface (ENI). The ENI can
+later be attached to instances and/or be associated with a public IP
+address. ENIs can only be used in conjunction with VPC instances.
+
+If only a single argument is provided, it is treated as the ID of the
+VPC subnet to associate with the ENI. If multiple arguments are
+provided, they are treated as -arg=>value parameter pairs.
+
+Parameters:
+
+The -subnet_id argument is mandatory. Others are optional.
+
+ -subnet_id           --  ID of the VPC subnet to associate with the network
+                           interface (mandatory)
+
+ -private_ip_address  --  The primary private IP address of the network interface,
+                           or a reference to an array of private IP addresses. In the
+                           latter case, the first element of the array becomes the
+                           primary address, and the subsequent ones become secondary
+                           addresses. If no private IP address is specified, one will
+                           be chosen for you. See below for more information on this
+                           parameter.
+
+ -private_ip_addresses -- Same as -private_ip_address, for readability.
+
+ -secondary_ip_address_count -- An integer requesting this number of secondary IP
+                          addresses to be allocated automatically. If present, 
+                          cannot provide any secondary addresses explicitly.
+
+ -description          -- Description of this ENI.
+
+ -security_group_id    -- Array reference or scalar containing IDs of the security
+                           group(s) to assign to this interface.
+
+You can assign multiple IP addresses to the interface explicitly, or
+by allowing EC2 to choose addresses within the designated subnet
+automatically. The following examples demonstrate the syntax:
+
+ # one primary address, chosen explicitly
+ -private_ip_address => '192.168.0.12'
+
+ # one primary address and two secondary addresses, chosen explicitly
+ -private_ip_address => ['192.168.0.12','192.168.0.200','192.168.0.201'] 
+
+ # one primary address chosen explicitly, and two secondaries chosen automatically
+ -private_ip_address => ['192.168.0.12','auto','auto']
+
+ # one primary address chosen explicitly, and two secondaries chosen automatically (another syntax)
+ -private_ip_address => ['192.168.0.12',2]
+
+ # one primary address chosen automatically, and two secondaries chosen automatically
+ -private_ip_address => [auto,2]
+
+You cannot assign some secondary addresses explicitly and others
+automatically on the same ENI. If you provide no -private_ip_address
+parameter at all, then a single private IP address will be chosen for
+you (the same as -private_ip_address=>'auto').
+
+The return value is a VM::EC2::NetworkInterface object
+
+=cut
+
+# NOTE: there is code overlap with network_interface_parm()
+sub create_network_interface {
+    my $self = shift;
+    my %args = $self->args(-subnet_id=>@_);
+    $args{-subnet_id} or croak "Usage: create_network_interface(-subnet_id=>\$id,\@more_args)";
+    my   @parm = $self->single_parm('SubnetId',\%args);
+    push @parm,  $self->single_parm('Description',\%args);
+    push @parm,  $self->list_parm('SecurityGroupId',\%args);
+
+    my $address   = $args{-private_ip_address} || $args{-private_ip_addresses};
+    my $auto_count;
+
+    if ($address) {
+	my $c = 0;
+
+	my @addresses = ref $address && ref $address eq 'ARRAY' ? @$address : ($address);
+	my $primary   = shift @addresses;
+	unless ($primary eq 'auto') {
+	    push @parm, ("PrivateIpAddresses.$c.PrivateIpAddress" => $primary);
+	    push @parm, ("PrivateIpAddresses.$c.Primary"          => 'true');
+	}
+
+	# deal with automatic secondary addresses .. this seems needlessly complex
+	if (my @auto = grep {/auto/i} @addresses) {
+	    @auto == @addresses or croak "cannot request both explicit and automatic secondary IP addresses";
+	    $auto_count = @auto;
+	}
+	$auto_count = $addresses[0] if @addresses == 1 && $addresses[0] =~ /^\d+$/;
+	$auto_count ||= $args{-secondary_ip_address_count};
+	
+	unless ($auto_count) {
+	    foreach (@addresses) {
+		$c++;
+		push @parm,("PrivateIpAddresses.$c.PrivateIpAddress" => $_     );
+		push @parm,("PrivateIpAddresses.$c.Primary"          => 'false');
+	    }
+	}
+    }
+    push @parm,('SecondaryPrivateIpAddressCount'=>$auto_count) if $auto_count ||= $args{-secondary_ip_address_count};
+
+    $self->call('CreateNetworkInterface',@parm);
+}
+
+=head2 $result = $ec2->delete_network_interface($network_interface_id);
+
+=head2 $result = $ec2->delete_network_interface(-network_interface_id => $id);
+
+Deletes the specified network interface. Returns a boolean indicating
+success of the delete operation.
+
+=cut
+
+sub delete_network_interface {
+    my $self = shift;
+    my %args  = $self->args(-network_interface_id => @_);
+    my @param = $self->single_parm(NetworkInterfaceId=>\%args);
+    return $self->call('DeleteNetworkInterface',@param) or return;
+}
+
+
 =head2 @ifs = $ec2->describe_network_interfaces(@interface_ids)
 
 =head2 @ifs = $ec2->describe_network_interfaces(-network_interface_id=>\@interface_ids,-filter=>\%filters)
@@ -4353,7 +4479,6 @@ CreateCustomerGateway
 CreateInternetGateway
 CreateNetworkAcl
 CreateNetworkAclEntry
-CreateNetworkInterface
 CreatePlacementGroup
 CreateRoute
 CreateRouteTable
@@ -4364,7 +4489,6 @@ DeleteCustomerGateway
 DeleteInternetGateway
 DeleteNetworkAcl
 DeleteNetworkAclEntry
-DeleteNetworkInterface
 DeletePlacementGroup
 DeleteRoute
 DeleteRouteTable

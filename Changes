@@ -1,5 +1,5 @@
 1.14
-    - Added most of the VPC calls.
+    - Added support for most VPC-related calls (VPCs, subnets, routes, network interfaces).
     - Added support for elastic network interfaces.
     - Added support for high-IOPS volumes.
 

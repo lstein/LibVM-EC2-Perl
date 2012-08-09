@@ -268,6 +268,11 @@ short period of time (up to a few minutes) after disassociation, the
 instance will have no public IP address and will be unreachable from
 the internet.
 
+=head2 @list = $ec2->network_interfaces
+
+Return the network interfaces attached to this instance as a set of
+VM::EC2::NetworkInterface objects (VPC only).
+
 =head2 $instance->refresh
 
 This method will refresh the object from AWS, updating all values to

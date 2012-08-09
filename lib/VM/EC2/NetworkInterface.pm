@@ -2,14 +2,26 @@ package VM::EC2::NetworkInterface;
 
 =head1 NAME
 
-VM::EC2::NetworkInterface
+VM::EC2::NetworkInterface - Object describing an Amazon Elastic Network Interface (ENI)
 
 =head1 SYNOPSIS
 
   use VM::EC2;
- ...
-
+  my $ec2 = VM::EC2->new(...);
+  my $interface = $ec2->describe_network_interfaces('eni-12345');
+  print $interface->subNetId,"\n",
+        $interface->description,"\n",
+        $interface->vpcId,"\n",
+        $interface->status,"\n",
+        $interface->privateIpAddress,"\n",
+        $interface->macAddress,"\n";
+  
 =head1 DESCRIPTION
+
+This object provides access to information about Amazon Elastic
+Network Interface objects, which are used in conjunction with virtual
+private cloud (VPC) instances to create multi-homed web servers,
+routers, firewalls, and so forth.
 
 Please see L<VM::EC2::Generic> for methods shared by all VM::EC2
 objects.
@@ -18,33 +30,44 @@ objects.
 
 These object methods are supported:
 
- networkInterfaceId
- subnetId
- vpcId
- description
- ownerId
- status
- privateIpAddress
- privateDnsName
- sourceDestCheck
- groupSet
- attachment
- association
- privateIpAddressesSet
- availabilityZone
- macAddress
+ networkInterfaceId       -- The ID of this ENI
+ subnetId                 -- The ID of the subnet this ENI belongs to
+ vpcId                    -- The ID of the VPC this ENI belongs to
+ description              -- Description of the ENI
+ ownerId                  -- Owner of the ENI
+ status                   -- ENI status, one of "available" or "in-use"
+ privateIpAddress         -- Primary private IP address of the ENI
+ privateDnsName           -- Primary private DNS name of the ENI
+ sourceDestCheck          -- Boolean value. If true, prevent this ENI from
+                             forwarding packets between subnets.
+ groups                   -- List of security groups this ENI belongs to,
+                             as a set of VM::EC2::Group objects.
+ attachment               -- Information about the attachment of this ENI to
+                             an instance, as a VM::EC2::NetworkInterface::Attachment
+                             object.
+ association              -- Information about the association of this ENI with
+                             an elastic public IP address.
+ privateIpAddresses       -- List of private IP addresses assigned to this ENI,
+                             as a list of VM::EC2::NetworkInterface::PrivateIpAddress
+                             objects.
+ availabilityZone         -- Availability zone for this ENI as a VM::EC2::AvailabilityZone
+                             object.
+ macAddress               -- MAC address for this interface.
 
 In addition, this object supports the following convenience methods:
 
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will be interpolated as the
-VPC ID.
+networkInterfaceId
 
 =head1 SEE ALSO
 
 L<VM::EC2>
 L<VM::EC2::Generic>
+L<VM::EC2::NetworkInterface>
+L<VM::EC2::NetworkInterface::Attachment>
+L<VM::EC2::NetworkInterface::Association>
 
 =head1 AUTHOR
 
@@ -62,8 +85,10 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
+use VM::EC2::Group;
 use VM::EC2::NetworkInterface::PrivateIpAddress;
 use VM::EC2::NetworkInterface::Attachment;
+use VM::EC2::NetworkInterface::Association;
 
 sub valid_fields {
     my $self  = shift;
@@ -87,7 +112,7 @@ sub current_status {
 
 sub primary_id {shift->networkInterfaceId}
 
-sub groupSet {
+sub groups {
     my $self = shift;
     my $groupSet = $self->SUPER::groupSet;
     return map {VM::EC2::Group->new($_,$self->aws,$self->xmlns,$self->requestId)}
@@ -102,8 +127,14 @@ sub privateIpAddresses {
 
 sub attachment {
     my $self = shift;
-    my $a    = $self->SUPER::attachment;
+    my $a    = $self->SUPER::attachment or return;
     return VM::EC2::NetworkInterface::Attachment->new($a,$self->aws);
+}
+
+sub association {
+    my $self = shift;
+    my $a    = $self->SUPER::association or return;
+    return VM::EC2::NetworkInterface::Association->new($a,$self->aws);
 }
 
 sub vpc {
@@ -138,6 +169,12 @@ sub attachment {
     my $d    = $self->aws->describe_network_interface_attribute($self,'attachment');
     $self->aws->modify_network_interface_attribute($self,-attachment=>shift) if @_;
     return VM::EC2::NetworkInterface::Attachment->new($d,$self->aws);
+}
+
+sub availabilityZone {
+    my $self = shift;
+    my $z    = $self->SUPER::availabilityZone or return;
+    return $self->aws->describe_availability_zones($z);
 }
 
 1;

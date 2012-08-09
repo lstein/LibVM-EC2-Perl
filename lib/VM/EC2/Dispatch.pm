@@ -206,6 +206,8 @@ use constant ObjectRegistration => {
     DeleteDhcpOptions                 => 'boolean',
     AssociateDhcpOptions              => 'boolean',
     # network interfaces
+    CreateNetworkInterface            => 'fetch_one,networkInterface,VM::EC2::NetworkInterface',
+    DeleteNetworkInterface            => 'boolean',
     DescribeNetworkInterfaces         => 'fetch_items,networkInterfaceSet,VM::EC2::NetworkInterface',
     ModifyNetworkInterfaceAttribute   => 'boolean',
 };

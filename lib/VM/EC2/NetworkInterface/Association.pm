@@ -2,14 +2,23 @@ package VM::EC2::NetworkInterface::Association;
 
 =head1 NAME
 
-VM::EC2::NetworkInterface::Association;
+VM::EC2::NetworkInterface::Association -- Object representing an association of a network interface with an elastic public IP address
 
 =head1 SYNOPSIS
 
   use VM::EC2;
- ...
+  my $ec2 = VM::EC2->new(...);
+  my $interface   = $ec2->describe_network_interfaces('eni-12345');
+  my $association = $interface->association;
+  my $id          = $association->associationId;
+  my $public_ip   = $association->ipOwnerId;
+  my $address     = $association->address;
 
 =head1 DESCRIPTION
+
+This object provides access to an elastic address association object,
+which reversibly associates an elastic public IP address with an
+elastic network interface (ENI).
 
 Please see L<VM::EC2::Generic> for methods shared by all VM::EC2
 objects.
@@ -22,12 +31,15 @@ These object methods are supported:
  publicIp
  ipOwnerId
 
-In addition, this object supports the following convenience methods:
+In addition, this object supports the following convenience method:
+
+ address() -- Returns the VM::EC2::Address object involved in the
+              association.
 
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will be interpolated as the
-VPC ID.
+public IP address.
 
 =head1 SEE ALSO
 
@@ -54,6 +66,11 @@ use base 'VM::EC2::Generic';
 sub valid_fields {
     my $self  = shift;
     return qw(associationId publicIp ipOwnerId);
+}
+
+sub address {
+    my $self = shift;
+    return $self->aws->describe_addresses($self->publicIp);
 }
 
 sub short_name { shift->publicIp}
