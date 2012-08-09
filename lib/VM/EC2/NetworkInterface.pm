@@ -87,7 +87,7 @@ sub current_status {
 
 sub primary_id {shift->networkInterfaceId}
 
-sub groups {
+sub groupSet {
     my $self = shift;
     my $groupSet = $self->SUPER::groupSet;
     return map {VM::EC2::Group->new($_,$self->aws,$self->xmlns,$self->requestId)}
@@ -109,6 +109,35 @@ sub attachment {
 sub vpc {
     my $self = shift;
     return $self->describe_vpcs($self->vpcId);
+}
+
+# get/set methods
+sub description {
+    my $self = shift;
+    my $d    = $self->aws->describe_network_interface_attribute($self,'description');
+    $self->aws->modify_network_interface_attribute($self,-description=>shift) if @_;
+    return $d;
+}
+
+sub security_groups {
+    my $self = shift;
+    my @d    = $self->aws->describe_network_interface_attribute($self,'groupSet');
+    $self->aws->modify_network_interface_attribute($self,-security_group_id=>\@_) if @_;
+    return map {VM::EC2::Group->new($_,$self->aws)} @d;
+}
+
+sub source_dest_check {
+    my $self = shift;
+    my $d    = $self->aws->describe_network_interface_attribute($self,'sourceDestCheck');
+    $self->aws->modify_network_interface_attribute($self,-source_dest_check=>(shift() ? 'true' : 'false')) if @_;    
+    return $d eq 'true';
+}
+
+sub attachment {
+    my $self = shift;
+    my $d    = $self->aws->describe_network_interface_attribute($self,'attachment');
+    $self->aws->modify_network_interface_attribute($self,-attachment=>shift) if @_;
+    return VM::EC2::NetworkInterface::Attachment->new($d,$self->aws);
 }
 
 1;

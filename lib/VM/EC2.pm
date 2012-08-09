@@ -3673,6 +3673,61 @@ sub describe_network_interfaces {
     return $self->call('DescribeNetworkInterfaces',@params);
 }
 
+=head2 @data = $ec2->describe_network_interface_attribute($network_id,$attribute)
+
+This method returns network interface attributes. Only one attribute
+can be retrieved at a time. The following is the list of attributes
+that can be retrieved:
+
+ description           -- hashref
+ groupSet              -- hashref
+ sourceDestCheck       -- hashref
+ attachment            -- hashref
+
+These values can be retrieved more conveniently from the
+L<VM::EC2::NetworkInterface> object, so there is no attempt to parse
+the results of this call into Perl objects.
+
+=cut
+
+sub describe_network_interface_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_network_interface_attribute(\$interface_id,\$attribute_name)";
+    my ($interface_id,$attribute) = @_;
+    my @param  = (NetworkInterfaceId=>$interface_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeNetworkInterfaceAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+=head2 $boolean = $ec2->modify_network_interface_attribute($interface_id,-$attribute_name=>$value)
+
+This method changes network interface attributes. Only one attribute can be set per call
+The following is the list of attributes that can be set:
+
+ -description             -- interface description
+ -security_group_id       -- single security group ID or arrayref to a list of group ids
+ -source_dest_check       -- boolean; if false enables packets to be forwarded, and is necessary
+                               for NAT and other router tasks
+ -delete_on_termination   -- [$attachment_id=>$delete_on_termination]; Pass this a two-element
+                               array reference consisting of the attachment ID and a boolean 
+                               indicating whether deleteOnTermination should be enabled for
+                               this attachment.
+=cut
+
+sub modify_network_interface_attribute {
+    my $self = shift;
+    my $interface_id = shift or croak "Usage: modify_network_interface_attribute(\$interfaceId,%param)";
+    my %args   = @_;
+    my @param  = (NetworkInterfaceId=>$interface_id);
+    push @param,$self->value_parm($_,\%args) foreach qw(Description SourceDestCheck);
+    push @param,$self->list_parm('SecurityGroupId',\%args);
+    if (my $dot = $args{-delete_on_termination}) {
+	my ($attachment_id,$delete_on_termination) = @$dot;
+	push @param,'Attachment.AttachmentId'=>$attachment_id;
+	push @param,'Attachment.DeleteOnTermination'=>$delete_on_termination ? 'true' : 'false';
+    }
+    return $self->call('ModifyNetworkInterfaceAttribute',@param);
+}
 
 =head1 AWS SECURITY TOKENS
 
@@ -4320,7 +4375,6 @@ DescribeBundleTasks
 DescribeConversionTasks
 DescribeCustomerGateways
 DescribeNetworkAcls
-DescribeNetworkInterfaceAttribute
 DescribePlacementGroups
 DescribeRouteTables
 DescribeSubnets
@@ -4332,7 +4386,6 @@ DetachVpnGateway
 DisassociateRouteTable
 ImportInstance
 ImportVolume
-ModifyNetworkInterfaceAttribute
 ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
 ReplaceRoute
