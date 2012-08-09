@@ -407,7 +407,7 @@ use VM::EC2::Group;
 use VM::EC2::Instance::State;
 use VM::EC2::Instance::State::Reason;
 use VM::EC2::BlockDevice::Mapping;
-use VM::EC2::ElasticNetworkInterface;
+use VM::EC2::NetworkInterface;
 use VM::EC2::Instance::Placement;
 use VM::EC2::ProductCode;
 use VM::EC2::Instance::IamProfile;
@@ -619,7 +619,7 @@ sub instanceInitiatedShutdownBehavior {
 sub networkInterfaceSet {
     my $self = shift;
     my $set  = $self->SUPER::networkInterfaceSet or return;
-    return map {VM::EC2::ElasticNetworkInterface->new($_,$self->aws)} @{$set->{item}};
+    return map {VM::EC2::NetworkInterface->new($_,$self->aws)} @{$set->{item}};
 }
 
 sub network_interfaces { shift->networkInterfaceSet }

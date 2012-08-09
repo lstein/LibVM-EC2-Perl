@@ -205,6 +205,8 @@ use constant ObjectRegistration => {
     CreateDhcpOptions                 => 'fetch_one,dhcpOptions,VM::EC2::VPC::DhcpOptions,nokey',
     DeleteDhcpOptions                 => 'boolean',
     AssociateDhcpOptions              => 'boolean',
+    # network interfaces
+    DescribeNetworkInterfaces         => 'fetch_items,networkInterfaceSet,VM::EC2::NetworkInterface',
 };
 
 sub new {

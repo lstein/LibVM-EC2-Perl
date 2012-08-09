@@ -1,8 +1,8 @@
-package VM::EC2::ElasticNetworkInterface;
+package VM::EC2::NetworkInterface;
 
 =head1 NAME
 
-VM::EC2::ElasticNetworkInterface
+VM::EC2::NetworkInterface
 
 =head1 SYNOPSIS
 
@@ -31,6 +31,8 @@ These object methods are supported:
  attachment
  association
  privateIpAddressesSet
+ availabilityZone
+ macAddress
 
 In addition, this object supports the following convenience methods:
 
@@ -60,12 +62,14 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
-use VM::EC2::ElasticNetworkInterface::PrivateIpAddress;
+use VM::EC2::NetworkInterface::PrivateIpAddress;
+use VM::EC2::NetworkInterface::Attachment;
 
 sub valid_fields {
     my $self  = shift;
     return qw(networkInterfaceId subnetId vpcId description ownerId status privateIpAddress privateDnsName
-              sourceDestCheck groupSet attachment association privateIpAddressesSet);
+              sourceDestCheck groupSet attachment association privateIpAddressesSet macAddress requesterManaged
+              availabilityZone);
 }
 
 sub refresh {
@@ -81,19 +85,30 @@ sub current_status {
     $self->status;
 }
 
-sub short_name { shift->networkInterfaceId }
+sub primary_id {shift->networkInterfaceId}
 
-sub groupSet {
+sub groups {
     my $self = shift;
     my $groupSet = $self->SUPER::groupSet;
     return map {VM::EC2::Group->new($_,$self->aws,$self->xmlns,$self->requestId)}
         @{$groupSet->{item}};
 }
 
-sub privateIpAddressesSet {
+sub privateIpAddresses {
     my $self = shift;
     my $set  = $self->SUPER::privateIpAddressesSet;
-    return map {VM::EC2::ElasticNetworkInterface::PrivateIpAddress->new($_,$self->aws)} @{$set->{item}};
+    return map {VM::EC2::NetworkInterface::PrivateIpAddress->new($_,$self->aws)} @{$set->{item}};
+}
+
+sub attachment {
+    my $self = shift;
+    my $a    = $self->SUPER::attachment;
+    return VM::EC2::NetworkInterface::Attachment->new($a,$self->aws);
+}
+
+sub vpc {
+    my $self = shift;
+    return $self->describe_vpcs($self->vpcId);
 }
 
 1;

@@ -3430,6 +3430,9 @@ objects, one for each instance specified in -instance_count.
   -iam_name          The name of the IAM instance profile (IIP) to associate with the
                        instances.
 
+  -ebs_optimized     If true, request an EBS-optimized instance (certain
+                       instance types only).
+
 
 =cut
 
@@ -3449,8 +3452,8 @@ sub request_spot_instances {
     # oddly enough, the following args need to be prefixed with "LaunchSpecification."
     my @launch_spec = map {$self->single_parm($_,\%args)}
             qw(ImageId KeyName UserData AddressingType InstanceType KernelId RamdiskId SubnetId);
-    push @launch_spec, map {$self->list_parm($_,\%args)}
-         qw(SecurityGroup SecurityGroupId);
+    push @launch_spec, map {$self->list_parm($_,\%args)}  qw(SecurityGroup SecurityGroupId);
+    push @launch_spec, ('EbsOptimized'=>'true')           if $args{-ebs_optimized};
     push @launch_spec, $self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
     push @launch_spec, $self->iam_parm(\%args);
     push @launch_spec, $self->network_interface_parm(\%args);
@@ -3637,6 +3640,37 @@ sub associate_dhcp_options {
     my @param    = $self->single_parm(DhcpOptionsId=> \%args);
     push @param,   $self->single_parm(VpcId        => \%args);
     return $self->call('AssociateDhcpOptions',@param);
+}
+
+=head2 @ifs = $ec2->describe_network_interfaces(@interface_ids)
+
+=head2 @ifs = $ec2->describe_network_interfaces(-network_interface_id=>\@interface_ids,-filter=>\%filters)
+
+=head2 @ifs = $ec2->describe_network_interfaces(\%filters)
+
+Return a list of elastic network interfaces as
+VM::EC2::VPC::NetworkInterface objects. You may restrict the list by
+passing a list of network interface IDs, a hashref of filters or by
+using the full named-parameter form.
+
+Optional parameters:
+
+ -network_interface_id    A single network interface ID or an arrayref to
+                           a list of IDs.
+
+ -filter                  A hashref for filtering on tags and other attributes.
+
+The list of valid filters can be found at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeNetworkInterfaces.html.
+
+=cut
+
+sub describe_network_interfaces {
+    my $self = shift;
+    my %args = $self->args(-network_interface_id=>@_);
+    my @params = $self->list_parm('NetworkInterfaceId',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeNetworkInterfaces',@params);
 }
 
 
@@ -4286,7 +4320,6 @@ DescribeBundleTasks
 DescribeConversionTasks
 DescribeCustomerGateways
 DescribeNetworkAcls
-DescribeNetworkInterfaces
 DescribeNetworkInterfaceAttribute
 DescribePlacementGroups
 DescribeRouteTables

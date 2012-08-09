@@ -1,8 +1,8 @@
-package VM::EC2::ElasticNetworkInterface::PrivateIpAddress;
+package VM::EC2::NetworkInterface::Association;
 
 =head1 NAME
 
-VM::EC2::ElasticNetworkInterface::PrivateIpAddress
+VM::EC2::NetworkInterface::Association;
 
 =head1 SYNOPSIS
 
@@ -18,9 +18,9 @@ objects.
 
 These object methods are supported:
 
- privateIpAddress
- primary
- association
+ associationId
+ publicIp
+ ipOwnerId
 
 In addition, this object supports the following convenience methods:
 
@@ -50,20 +50,13 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
-use VM::EC2::ElasticNetworkInterface::Association;
 
 sub valid_fields {
     my $self  = shift;
-    return qw(privateIpAddress primary association);
+    return qw(associationId publicIp ipOwnerId);
 }
 
-sub short_name { shift->privateIpAddress }
-
-sub association {
-    my $self = shift;
-    my $ass = $self->SUPER::association;
-    return VM::EC2::ElasticNetworkInterface::Association->new($ass,$self->ec2);
-}
+sub short_name { shift->publicIp}
 
 1;
 
