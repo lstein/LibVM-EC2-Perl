@@ -1328,7 +1328,7 @@ sub wait_for_terminal_state {
     return $status;
 }
 
-=head1 $timeout = $ec2->wait_for_timeout([$new_timeout]);
+=head2 $timeout = $ec2->wait_for_timeout([$new_timeout]);
 
 Get or change the timeout for wait_for_instances(), wait_for_attachments(),
 and wait_for_volumes(). The timeout is given in seconds, and defaults to
