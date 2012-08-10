@@ -748,7 +748,7 @@ sub provision_volume {
 
     # make sure the guy is mountable before trying it
     if ($volid || $snapid) {
-	my $isfs = $self->scmd("sudo file -s $mt_device") =~ /filesystem/i;
+	my $isfs = $self->scmd("sudo blkid -p $mt_device") =~ /filesystem/i;
 	$self->mount_volume($volobj) if $isfs;
 	$volobj->mtpt('none')    unless $isfs;
 	$fstype = $volobj->get_fstype;
@@ -927,17 +927,18 @@ $server->provision_volume(-reuse=>1).
 sub create_snapshot {
     my $self = shift;
     my ($vol,$description) = @_;
-    my @snaps;
-    my $device = $vol->mtdev;
-    my $mtpt   = $vol->mtpt;
-    my $volume = $vol->ebs;
-    $self->unmount_volume($vol);
-    my $d = $self->volume_description($vol);
+
+    my $was_mounted = $vol->mounted;
+    $self->unmount_volume($vol) if $was_mounted;
+
     $self->info("snapshotting $vol\n");
+    my $volume = $vol->ebs;
     my $snap = $volume->create_snapshot($description) or croak "Could not snapshot $vol: ",$vol->ec2->error_str;
+
     $snap->add_tag(StagingName => $vol->name                  );
     $snap->add_tag(Name        => "Staging volume ".$vol->name);
-    $self->remount_volume($vol);
+
+    $self->remount_volume($vol) if $was_mounted;
     return $snap;
 }
 
@@ -976,14 +977,14 @@ sub _create_volume {
     if (@vols) {
 	$vol = $vols[0];
 	$size   = $vol->size unless $size > 0;
-	$self->info("Reusing existing volume $vol...\n");
+	$self->info("Using volume $vol...\n");
 	$vol->size == $size or croak "Cannot (yet) resize live volumes. Please snapshot first and restore from the snapshot"
     }
 
     elsif (@snaps) {
 	my $snap = $snaps[0];
 	$size    = $snap->volumeSize unless $size > 0;
-	$self->info("Reusing existing snapshot $snap...\n");
+	$self->info("Using snapshot $snap...\n");
 	$snap->volumeSize <= $size or croak "Cannot (yet) shrink volumes derived from snapshots. Please choose a size >= snapshot size";
 	$vol = $snap->create_volume(-availability_zone=>$zone,
 				    -size             => $size);

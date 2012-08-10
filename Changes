@@ -1,7 +1,13 @@
-1.14
+
+1.15
     - Added support for most VPC-related calls (VPCs, subnets, routes, network interfaces).
     - Added support for elastic network interfaces.
     - Added support for high-IOPS volumes.
+
+1.14 Fri Aug 10 07:19:44 EDT 2012
+    - Fix bug in snapshot creation that was causing migrate-ebs-image.pl to fail on
+      last step.
+    - Make ascertainment of filesystem type more robust.
 
 1.13 Mon Aug  6 10:31:42 EDT 2012
     - Fix API version in perldoc DESCRIPTION.
