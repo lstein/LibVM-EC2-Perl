@@ -131,6 +131,9 @@ my $dest = eval {VM::EC2->new(-region => $To)->staging_manager(-on_exit=>'termin
 
 my $img  = $source->copy_image($ami => $dest);
 
+undef $source;
+undef $dest;
+
 print "New snapshot is now located in $To under $img.\n";
 
 exit 0;

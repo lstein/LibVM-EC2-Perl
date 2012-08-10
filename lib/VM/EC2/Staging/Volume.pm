@@ -273,7 +273,7 @@ sub get_fstype {
 
     $self->_spin_up;
     my $dev    = $self->mtdev;
-    my $blkid  = $self->server->scmd("sudo blkid $dev");
+    my $blkid  = $self->server->scmd("sudo blkid -p $dev");
     my ($type) = $blkid =~ /TYPE="([^"]+)"/;
     $self->fstype($type);
     return $type || 'raw';

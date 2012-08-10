@@ -442,7 +442,7 @@ sub copy_image {
     }
 }
 
-=head2 $new_snapshot_id = $manager->copy_image($source_snapshot,$destination_zone)
+=head2 $new_snapshot_id = $manager->copy_snapshot($source_snapshot,$destination_zone)
 
 This method copies the EBS snapshot indicated by $source_snapshot from
 the zone that $manager belongs to, into the indicated
@@ -484,7 +484,6 @@ sub copy_snapshot {
 	$self->info("Using dd for block level disk copy (will take a while).\n");
 	$source->dd($dest)    or croak "dd failed";
     } else {
-	# this now works?
 	$source->copy($dest) or croak "rsync failed";
     }
     
@@ -564,9 +563,15 @@ sub _copy_ebs_image {
 						  $ramdisk ? (-ramdisk_id  => $ramdisk): ()
 	);
     $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
+
     # copy launch permissions
     $img->make_public(1)                                     if $info->{is_public};
     $img->add_authorized_users(@{$info->{authorized_users}}) if @{$info->{authorized_users}};
+
+    # copy tags
+    my $tags = $image->tags;
+    $img->add_tags($tags);
+
     return $img;
 }
 
@@ -811,9 +816,12 @@ sub _terminate_servers {
     my @servers = @_;
     my $ec2 = $self->ec2 or return;
     
-    $self->info("Terminating servers @servers.\n");
-    $ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
-    $ec2->wait_for_instances(@servers);
+    if (@servers) {
+	$self->info("Terminating servers @servers.\n");
+	$ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
+	$ec2->wait_for_instances(@servers);
+    }
+
     unless ($self->reuse_key) {
 	$ec2->delete_key_pair($_) foreach $ec2->describe_key_pairs(-filter=>{'key-name' => 'staging-key-*'});
     }
