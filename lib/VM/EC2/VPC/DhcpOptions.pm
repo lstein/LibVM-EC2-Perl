@@ -6,8 +6,12 @@ VM::EC2::VPC::DhcpOptions -- DHCP options set for an AWS Virtual Private Cloud
 
 =head1 SYNOPSIS
 
-  use VM::EC2;
- ...
+ use VM::EC2;
+ my $ec2     = VM::EC2->new(...);
+ my $vpc     = $ec2->create_vpc('10.0.0.0/16');
+ my $options = $ec2->create_dhcp_options(-domain_name=>'test.com',
+                                         -domain_name_servers=>['204.16.255.55','216.239.34.10']);
+ $vpc->set_dhcp_options($options);
 
 =head1 DESCRIPTION
 
@@ -28,7 +32,7 @@ In addition, this object supports the following convenience methods:
                                that all options correspond to a list; calling in
                                a scalar context will return size of the list
  associate_vpc($vpc_id)   -- Associate these options with the given VPC.
- associated_vpcs          -- Return list of VPCs associated with the DHCP option set.
+ associated_vpcs()        -- Return list of VPCs associated with the DHCP option set.
  as_string()              -- returns a string concatenation of all options
 
 =head1 STRING OVERLOADING
