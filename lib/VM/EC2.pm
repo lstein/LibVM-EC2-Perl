@@ -187,7 +187,6 @@ Lastly, there are several utility classes:
                                         The reservation Ids are copied into the Instance
                                          object.
 
-
 There is also a high-level API called "VM::EC2::Staging::Manager" for
 managing groups of staging servers and volumes which greatly
 simplifies the task of creating and updating instances that mount
@@ -200,7 +199,7 @@ http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/. The
 following caveats apply:
 
  1) Not all of the Amazon API is currently implemented. Specifically,
-    calls dealing with Virtual Private Clouds (VPC) and cluster
+    some calls dealing with Virtual Private Clouds (VPC) and cluster
     management, are not currently supported.  See L</MISSING METHODS>
     for a list of all the unimplemented API calls.
 
@@ -244,6 +243,8 @@ following caveats apply:
     or a shortcut form: 
 
           $ec2->describe_foo('a','b','c');
+
+    Both forms are listed in the headings in the documentation.
 
  5) When the API calls for a list of arguments named Arg.1, Arg.2,
     then the Perl interface allows you to use an anonymous array for
@@ -311,7 +312,7 @@ following caveats apply:
          }
 
  10) Calls to AWS that have failed for one reason or another (invalid
-    parameters, communications problems, service interruptions) will
+    arguments, communications problems, service interruptions) will
     return undef and set the VM::EC2->is_error() method to true. The
     error message and its code can then be recovered by calling
     VM::EC2->error.
@@ -399,7 +400,7 @@ sub AUTOLOAD {
 
 =head2 $ec2 = VM::EC2->new(-access_key=>$id,-secret_key=>$key,-endpoint=>$url)
 
-Create a new Amazon access object. Required parameters are:
+Create a new Amazon access object. Required arguments are:
 
  -access_key   Access ID for an authorized user
 
@@ -432,7 +433,7 @@ resources to users who do not have access to your account. If you pass
 either a VM::EC2::Security::Token object, or the
 VM::EC2::Security::Credentials object contained within the token
 object, then new() does not need the -access_key or -secret_key
-parameters. You may also pass a session token string scalar to
+arguments. You may also pass a session token string scalar to
 -security_token, in which case you must also pass the access key ID
 and secret keys generated at the same time the session token was
 created. See
@@ -500,9 +501,19 @@ sub new {
     return $obj;
 }
 
-=head2 $access_key = $ec2->access_key(<$new_access_key>)
+=head2 $access_key = $ec2->access_key([$new_access_key])
 
-Get or set the ACCESS KEY
+Get or set the ACCESS KEY. In this and all similar get/set methods,
+call the method with no arguments to get the current value, and with a
+single argument to change the value:
+
+ $current_key = $ec2->access_key;
+ $ec2->access_key('XYZZY');
+
+In the case of setting the value, these methods will return the old
+value as their result:
+
+ $old_key = $ec2->access_key($new_key);
 
 =cut
 
@@ -515,7 +526,7 @@ sub id       {
     $d;
 }
 
-=head2 $secret = $ec2->secret(<$new_secret>)
+=head2 $secret = $ec2->secret([$new_secret])
 
 Get or set the SECRET KEY
 
@@ -528,7 +539,7 @@ sub secret   {
     $d;
 }
 
-=head2 $secret = $ec2->security_token(<$new_token>)
+=head2 $secret = $ec2->security_token([$new_token])
 
 Get or set the temporary security token. See L</AWS SECURITY TOKENS>.
 
@@ -541,7 +552,7 @@ sub security_token   {
     $d;
 }
 
-=head2 $endpoint = $ec2->endpoint(<$new_endpoint>)
+=head2 $endpoint = $ec2->endpoint([$new_endpoint])
 
 Get or set the ENDPOINT URL.
 
@@ -559,7 +570,7 @@ sub endpoint {
     $d;
  }
 
-=head2 $region = $ec2->region(<$new_region>)
+=head2 $region = $ec2->region([$new_region])
 
 Get or set the EC2 region manipulated by this module. This has the side effect
 of changing the endpoint.
@@ -669,15 +680,38 @@ sub error_str {
     return "$e";
 }
 
+=head2 $account_id = $ec2->account_id
+
+Looks up the account ID corresponding to the credentials provided when
+the VM::EC2 instance was created. The way this is done is to fetch the
+"default" security group, which is guaranteed to exist, and then
+return its groupId field. The result is cached so that subsequent
+accesses are fast.
+
+=head2 $account_id = $ec2->userId
+
+Same as above, for convenience.
+
+=cut
+
+sub account_id {
+    my $self = shift;
+    return $self->{account_id} if exists $self->{account_id};
+    my $sg   = $self->describe_security_groups(-group_name=>'default') or return;
+    return $self->{account_id} ||= $sg->ownerId;
+}
+
+sub userId { shift->account_id }
+
 =head1 EC2 REGIONS AND AVAILABILITY ZONES
 
 This section describes methods that allow you to fetch information on
 EC2 regions and availability zones. These methods return objects of
 type L<VM::EC2::Region> and L<VM::EC2::AvailabilityZone>.
 
-=head2 @regions = $ec2->describe_regions(-region_name=>\@list)
+=head2 @regions = $ec2->describe_regions(@list)
 
-=head2 @regionss = $ec2->describe_regions(@list)
+=head2 @regions = $ec2->describe_regions(-region_name=>\@list)
 
 Describe regions and return a list of VM::EC2::Region objects. Call
 with no arguments to return all regions. You may provide a list of
@@ -694,9 +728,9 @@ sub describe_regions {
     return $self->call('DescribeRegions',@params);
 }
 
-=head2 @zones = $ec2->describe_availability_zones(-zone_name=>\@names,-filter=>\%filters)
-
 =head2 @zones = $ec2->describe_availability_zones(@names)
+
+=head2 @zones = $ec2->describe_availability_zones(-zone_name=>\@names,-filter=>\%filters)
 
 Describe availability zones and return a list of
 VM::EC2::AvailabilityZone objects. Call with no arguments to return
@@ -738,13 +772,13 @@ L<VM::EC2::Instance>. Please see the L<VM::EC2::Instance> manual page
 for additional methods that allow you to attach and detach volumes,
 modify an instance's attributes, and convert instances into images.
 
-=head2 @instances = $ec2->describe_instances(-instance_id=>\@ids,-filter=>\%filters)
-
 =head2 @instances = $ec2->describe_instances(@instance_ids)
 
 =head2 @instances = $ec2->describe_instances(\%filters)
 
-Return a series of VM::EC2::Instance objects. Optional parameters are:
+=head2 @instances = $ec2->describe_instances(-instance_id=>\@ids,-filter=>\%filters)
+
+Return a series of VM::EC2::Instance objects. Optional arguments are:
 
  -instance_id     ID of the instance(s) to return information on. 
                   This can be a string scalar, or an arrayref.
@@ -801,19 +835,26 @@ sub describe_instances {
     return $self->call('DescribeInstances',@params);
 }
 
-=head2 @i = $ec2->run_instances(%param)
+=head2 @i = $ec2->run_instances($ami_id)
+
+=head2 @i = $ec2->run_instances(-image_id=>$id,%other_args)
 
 This method will provision and launch one or more instances given an
 AMI ID. If successful, the method returns a series of
 VM::EC2::Instance objects.
 
+If called with a single argument this will be interpreted as the AMI
+to launch, and all other arguments will take their
+defaults. Otherwise, the arguments will be taken as a
+-parameter=>$argument list.
+
 =over 4
 
-=item Required parameters:
+=item Required arguments:
 
   -image_id       ID of an AMI to launch
  
-=item Optional parameters:
+=item Optional arguments:
 
   -min_count         Minimum number of instances to launch [1]
 
@@ -1079,7 +1120,7 @@ reservationId(), ownerId(), requesterId() and groups() methods.
 
 sub run_instances {
     my $self = shift;
-    my %args = @_;
+    my %args = $self->args('-image_id',@_);
     $args{-image_id}  or croak "run_instances(): -image_id argument missing";
     $args{-min_count} ||= 1;
     $args{-max_count} ||= $args{-min_count};
@@ -1099,14 +1140,14 @@ sub run_instances {
     push @p,('EbsOptimized'=>'true')                                  if $args{-ebs_optimized};
     push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
     push @p,$self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
-    push @p,$self->network_interface_parm($args{-network_interfaces});
+    push @p,$self->network_interface_parm(\%args);
     push @p,$self->iam_parm(\%args);
     return $self->call('RunInstances',@p);
 }
 
-=head2 @s = $ec2->start_instances(-instance_id=>\@instance_ids)
-
 =head2 @s = $ec2->start_instances(@instance_ids)
+
+=head2 @s = $ec2->start_instances(-instance_id=>\@instance_ids)
 
 Start the instances named by @instance_ids and return one or more
 VM::EC2::Instance::State::Change objects.
@@ -1150,9 +1191,9 @@ sub start_instances {
     return $self->call('StartInstances',@params) or return;
 }
 
-=head2 @s = $ec2->stop_instances(-instance_id=>\@instance_ids,-force=>1)
-
 =head2 @s = $ec2->stop_instances(@instance_ids)
+
+=head2 @s = $ec2->stop_instances(-instance_id=>\@instance_ids,-force=>1)
 
 Stop the instances named by @instance_ids and return one or more
 VM::EC2::Instance::State::Change objects. In the named parameter
@@ -1200,9 +1241,9 @@ sub stop_instances {
     return $self->call('StopInstances',@params) or return;
 }
 
-=head2 @s = $ec2->terminate_instances(-instance_id=>\@instance_ids)
-
 =head2 @s = $ec2->terminate_instances(@instance_ids)
+
+=head2 @s = $ec2->terminate_instances(-instance_id=>\@instance_ids)
 
 Terminate the instances named by @instance_ids and return one or more
 VM::EC2::Instance::State::Change objects. This method will fail
@@ -1234,9 +1275,9 @@ sub terminate_instances {
     return $self->call('TerminateInstances',@params) or return;
 }
 
-=head2 @s = $ec2->reboot_instances(-instance_id=>\@instance_ids)
-
 =head2 @s = $ec2->reboot_instances(@instance_ids)
+
+=head2 @s = $ec2->reboot_instances(-instance_id=>\@instance_ids)
 
 Reboot the instances named by @instance_ids and return one or more
 VM::EC2::Instance::State::Change objects.
@@ -1275,6 +1316,294 @@ sub confirm_product_instance {
     return $self->call('ConfirmProductInstance',@params);
 }
 
+=head2 $password_data = $ec2->get_password_data($instance_id);
+
+=head2 $password_data = $ec2->get_password_data(-instance_id=>$id);
+
+For Windows instances, get the administrator's password as a
+L<VM::EC2::Instance::PasswordData> object.
+
+=cut
+
+sub get_password_data {
+    my $self = shift;
+    my %args = $self->args(-instance_id=>@_);
+    $args{-instance_id} or croak "Usage: get_password_data(-instance_id=>\$id)";
+    my @params = $self->single_parm('InstanceId',\%args);
+    return $self->call('GetPasswordData',@params);
+}
+
+=head2 $output = $ec2->get_console_output(-instance_id=>'i-12345')
+
+=head2 $output = $ec2->get_console_output('i-12345');
+
+Return the console output of the indicated instance. The output is
+actually a VM::EC2::ConsoleOutput object, but it is
+overloaded so that when treated as a string it will appear as a
+large text string containing the  console output. When treated like an
+object it provides instanceId() and timestamp() methods.
+
+=cut
+
+sub get_console_output {
+    my $self = shift;
+    my %args = $self->args(-instance_id=>@_);
+    $args{-instance_id} or croak "Usage: get_console_output(-instance_id=>\$id)";
+    my @params = $self->single_parm('InstanceId',\%args);
+    return $self->call('GetConsoleOutput',@params);
+}
+
+=head2 @monitoring_state = $ec2->monitor_instances(@list_of_instanceIds)
+
+=head2 @monitoring_state = $ec2->monitor_instances(-instance_id=>\@instanceIds)
+
+This method enables monitoring for the listed instances and returns a
+list of VM::EC2::Instance::MonitoringState objects. You can
+later use these objects to activate and inactivate monitoring.
+
+=cut
+
+sub monitor_instances {
+    my $self = shift;
+    my %args = $self->args('-instance_id',@_);
+    my @params = $self->list_parm('InstanceId',\%args);
+    return $self->call('MonitorInstances',@params);
+}
+
+=head2 @monitoring_state = $ec2->unmonitor_instances(@list_of_instanceIds)
+
+=head2 @monitoring_state = $ec2->unmonitor_instances(-instance_id=>\@instanceIds)
+
+This method disables monitoring for the listed instances and returns a
+list of VM::EC2::Instance::MonitoringState objects. You can
+later use these objects to activate and inactivate monitoring.
+
+=cut
+
+sub unmonitor_instances {
+    my $self = shift;
+    my %args = $self->args('-instance_id',@_);
+    my @params = $self->list_parm('InstanceId',\%args);
+    return $self->call('UnmonitorInstances',@params);
+}
+
+=head2 $meta = VM::EC2->instance_metadata
+
+=head2 $meta = $ec2->instance_metadata
+
+B<For use on running EC2 instances only:> This method returns a
+VM::EC2::Instance::Metadata object that will return information about
+the currently running instance using the HTTP:// metadata fields
+described at
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?instancedata-data-categories.html. This
+is usually fastest way to get runtime information on the current
+instance.
+
+Note that this method can be called as either an instance or a class
+method.
+
+=cut
+
+sub instance_metadata {
+    VM::EC2::Dispatch::load_module('VM::EC2::Instance::Metadata');
+    return VM::EC2::Instance::Metadata->new();
+}
+
+=head2 @data = $ec2->describe_instance_attribute($instance_id,$attribute)
+
+This method returns instance attributes. Only one attribute can be
+retrieved at a time. The following is the list of attributes that can be
+retrieved:
+
+ instanceType                      -- scalar
+ kernel                            -- scalar
+ ramdisk                           -- scalar
+ userData                          -- scalar
+ disableApiTermination             -- scalar
+ instanceInitiatedShutdownBehavior -- scalar
+ rootDeviceName                    -- scalar
+ blockDeviceMapping                -- list of hashref
+ sourceDestCheck                   -- scalar
+ groupSet                          -- list of scalar
+
+All of these values can be retrieved more conveniently from the
+L<VM::EC2::Instance> object returned from describe_instances(), so
+there is no attempt to parse the results of this call into Perl
+objects. Therefore, some of the attributes, in particular
+'blockDeviceMapping' will be returned as raw hashrefs.
+
+=cut
+
+sub describe_instance_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_instance_attribute(\$instance_id,\$attribute_name)";
+    my ($instance_id,$attribute) = @_;
+    my @param  = (InstanceId=>$instance_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeInstanceAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+=head2 $boolean = $ec2->modify_instance_attribute($instance_id,-$attribute_name=>$value)
+
+This method changes instance attributes. It can only be applied to stopped instances.
+The following is the list of attributes that can be set:
+
+ -instance_type           -- type of instance, e.g. "m1.small"
+ -kernel                  -- kernel id
+ -ramdisk                 -- ramdisk id
+ -user_data               -- user data
+ -termination_protection  -- true to prevent termination from the console
+ -disable_api_termination -- same as the above
+ -shutdown_behavior       -- "stop" or "terminate"
+ -instance_initiated_shutdown_behavior -- same as above
+ -root_device_name        -- root device name
+ -source_dest_check       -- enable NAT (VPC only)
+ -group_id                -- VPC security group
+ -block_devices           -- Specify block devices to change 
+                             deleteOnTermination flag
+ -block_device_mapping    -- Alias for -block_devices
+
+Only one attribute can be changed in a single request. For example:
+
+  $ec2->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2');
+
+The result code is true if the attribute was successfully modified,
+false otherwise. In the latter case, $ec2->error() will provide the
+error message.
+
+The ability to change the deleteOnTermination flag for attached block devices
+is not documented in the official Amazon API documentation, but appears to work.
+The syntax is:
+
+# turn on deleteOnTermination
+ $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
+# turn off deleteOnTermination
+ $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
+
+The syntax is slightly different from what is used by -block_devices
+in run_instances(), and is "device=volumeId:boolean". Multiple block
+devices can be specified using an arrayref.
+
+=cut
+
+sub modify_instance_attribute {
+    my $self = shift;
+    my $instance_id = shift or croak "Usage: modify_instance_attribute(\$instanceId,%param)";
+    my %args   = @_;
+
+    my @param  = (InstanceId=>$instance_id);
+    push @param,$self->value_parm($_,\%args) foreach 
+	qw(InstanceType Kernel Ramdisk UserData DisableApiTermination
+           InstanceInitiatedShutdownBehavior SourceDestCheck);
+    push @param,$self->list_parm('GroupId',\%args);
+    push @param,('DisableApiTermination.Value'=>'true') if $args{-termination_protection};
+    push @param,('InstanceInitiatedShutdownBehavior.Value'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
+    my $block_devices = $args{-block_devices} || $args{-block_device_mapping};
+    push @param,$self->block_device_parm($block_devices);
+
+    return $self->call('ModifyInstanceAttribute',@param);
+}
+
+=head2 $boolean = $ec2->reset_instance_attribute($instance_id,$attribute)
+
+This method resets an attribute of the given instance to its default
+value. Valid attributes are "kernel", "ramdisk" and
+"sourceDestCheck". The result code is true if the reset was
+successful.
+
+=cut
+
+sub reset_instance_attribute {
+    my $self = shift;
+    @_      == 2 or croak "Usage: reset_instance_attribute(\$instanceId,\$attribute_name)";
+    my ($instance_id,$attribute) = @_;
+    my %valid = map {$_=>1} qw(kernel ramdisk sourceDestCheck);
+    $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
+    return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
+}
+
+=head2 @status_list = $ec2->describe_instance_status(@instance_ids);
+
+=head2 @status_list = $ec2->describe_instance_status(-instance_id=>\@ids,-filter=>\%filters,%other_args);
+
+=head2 @status_list = $ec2->describe_instance_status(\%filters);
+
+This method returns a list of VM::EC2::Instance::Status objects
+corresponding to status checks and scheduled maintenance events on the
+instances of interest. You may provide a list of instances to return
+information on, a set of filters, or both.
+
+The filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInstanceStatus.html. The
+brief list is:
+
+availability-zone, event.code, event.description, event.not-after,
+event.not-before, instance-state-name, instance-state-code,
+system-status.status, system-status.reachability,
+instance-status.status, instance-status.reachability.
+
+Request arguments are:
+
+  -instance_id            Scalar or array ref containing the instance ID(s) to return
+                           information about (optional).
+
+  -filter                 Filters to apply (optional).
+
+  -include_all_instances  If true, include all instances, including those that are 
+                           stopped, pending and shutting down. Otherwise, returns
+                           the status of running instances only.
+
+ -max_results             An integer corresponding to the number of instance items
+                           per response (must be greater than 5).
+
+If -max_results is specified, then the call will return at most the
+number of instances you requested. You may see whether there are additional
+results by calling more_instance_status(), and then retrieve the next set of
+results with additional call(s) to describe_instance_status():
+
+ my @results = $ec2->describe_instance_status(-max_results => 10);
+ do_something(\@results);
+ while ($ec2->more_instance_status) {
+    @results = $ec2->describe_instance_status;
+    do_something(\@results);
+ }
+
+NOTE: As of 29 July 2012, passing -include_all_instances causes an EC2
+"unknown parameter" error, indicating some mismatch between the
+documented API and the actual one.
+
+=cut
+
+sub more_instance_status {
+    my $self = shift;
+    return $self->{instance_status_token} &&
+           !$self->{instance_status_stop};
+}
+
+sub describe_instance_status {
+    my $self = shift;
+    my @parms;
+
+    if (!@_ && $self->{instance_status_token} && $self->{instance_status_args}) {
+	@parms = (@{$self->{instance_status_args}},NextToken=>$self->{instance_status_token});
+    }
+    
+    else {
+	my %args = $self->args('-instance_id',@_);
+	push @parms,$self->list_parm('InstanceId',\%args);
+	push @parms,$self->filter_parm(\%args);
+	push @parms,$self->boolean_parm('IncludeAllInstances',\%args);
+	push @parms,$self->single_parm('MaxResults',\%args);
+	
+	if ($args{-max_results}) {
+	    $self->{instance_status_token} = 'xyzzy'; # dummy value
+	    $self->{instance_status_args} = \@parms;
+	}
+
+    }
+    return $self->call('DescribeInstanceStatus',@parms);
+}
+
 =head2 $t = $ec2->token
 
 Return a client token for use with start_instances().
@@ -1288,6 +1617,12 @@ sub token {
     $seed =~ s/(.{6})/$1-/g;
     return $seed;
 }
+
+=head1 Waiting for State Changes
+
+The methods in this section allow your script to wait in an efficient
+manner for desired state changes in instances, volumes and other
+objects.
 
 =head2 $ec2->wait_for_instances(@instances)
 
@@ -1446,308 +1781,18 @@ sub wait_for_timeout {
     return $d;
 }
 
-=head2 $password_data = $ec2->get_password_data(-instance_id=>'i-12345');
-
-=head2 $password_data = $ec2->get_password_data('i-12345');
-
-For Windows instances, get the administrator's password as a
-L<VM::EC2::Instance::PasswordData> object.
-
-=cut
-
-sub get_password_data {
-    my $self = shift;
-    my %args = $self->args(-instance_id=>@_);
-    $args{-instance_id} or croak "Usage: get_password_data(-instance_id=>\$id)";
-    my @params = $self->single_parm('InstanceId',\%args);
-    return $self->call('GetPasswordData',@params);
-}
-
-=head2 $output = $ec2->get_console_output(-instance_id=>'i-12345')
-
-=head2 $output = $ec2->get_console_output('i-12345');
-
-Return the console output of the indicated instance. The output is
-actually a VM::EC2::ConsoleOutput object, but it is
-overloaded so that when treated as a string it will appear as a
-large text string containing the  console output. When treated like an
-object it provides instanceId() and timestamp() methods.
-
-=cut
-
-sub get_console_output {
-    my $self = shift;
-    my %args = $self->args(-instance_id=>@_);
-    $args{-instance_id} or croak "Usage: get_console_output(-instance_id=>\$id)";
-    my @params = $self->single_parm('InstanceId',\%args);
-    return $self->call('GetConsoleOutput',@params);
-}
-
-=head2 @monitoring_state = $ec2->monitor_instances(@list_of_instanceIds)
-
-=head2 @monitoring_state = $ec2->monitor_instances(-instance_id=>\@instanceIds)
-
-This method enables monitoring for the listed instances and returns a
-list of VM::EC2::Instance::MonitoringState objects. You can
-later use these objects to activate and inactivate monitoring.
-
-=cut
-
-sub monitor_instances {
-    my $self = shift;
-    my %args = $self->args('-instance_id',@_);
-    my @params = $self->list_parm('InstanceId',\%args);
-    return $self->call('MonitorInstances',@params);
-}
-
-=head2 @monitoring_state = $ec2->unmonitor_instances(@list_of_instanceIds)
-
-=head2 @monitoring_state = $ec2->unmonitor_instances(-instance_id=>\@instanceIds)
-
-This method disables monitoring for the listed instances and returns a
-list of VM::EC2::Instance::MonitoringState objects. You can
-later use these objects to activate and inactivate monitoring.
-
-=cut
-
-sub unmonitor_instances {
-    my $self = shift;
-    my %args = $self->args('-instance_id',@_);
-    my @params = $self->list_parm('InstanceId',\%args);
-    return $self->call('UnmonitorInstances',@params);
-}
-
-=head2 $meta = $ec2->instance_metadata
-
-=head2 $meta = VM::EC2->instance_metadata
-
-B<For use on running EC2 instances only:> This method returns a
-VM::EC2::Instance::Metadata object that will return information about
-the currently running instance using the HTTP:// metadata fields
-described at
-http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?instancedata-data-categories.html. This
-is usually fastest way to get runtime information on the current
-instance.
-
-Note that this method can be called as either an instance or a class
-method.
-
-=cut
-
-sub instance_metadata {
-    VM::EC2::Dispatch::load_module('VM::EC2::Instance::Metadata');
-    return VM::EC2::Instance::Metadata->new();
-}
-
-=head2 @data = $ec2->describe_instance_attribute($instance_id,$attribute)
-
-This method returns instance attributes. Only one attribute can be
-retrieved at a time. The following is the list of attributes that can be
-retrieved:
-
- instanceType                      -- scalar
- kernel                            -- scalar
- ramdisk                           -- scalar
- userData                          -- scalar
- disableApiTermination             -- scalar
- instanceInitiatedShutdownBehavior -- scalar
- rootDeviceName                    -- scalar
- blockDeviceMapping                -- list of hashref
- sourceDestCheck                   -- scalar
- groupSet                          -- list of scalar
-
-All of these values can be retrieved more conveniently from the
-L<VM::EC2::Instance> object returned from describe_instances(), so
-there is no attempt to parse the results of this call into Perl
-objects. Therefore, some of the attributes, in particular
-'blockDeviceMapping' will be returned as raw hashrefs.
-
-=cut
-
-sub describe_instance_attribute {
-    my $self = shift;
-    @_ == 2 or croak "Usage: describe_instance_attribute(\$instance_id,\$attribute_name)";
-    my ($instance_id,$attribute) = @_;
-    my @param  = (InstanceId=>$instance_id,Attribute=>$attribute);
-    my $result = $self->call('DescribeInstanceAttribute',@param);
-    return $result && $result->attribute($attribute);
-}
-
-=head2 $boolean = $ec2->modify_instance_attribute($instance_id,-$attribute_name=>$value)
-
-This method changes instance attributes. It can only be applied to stopped instances.
-The following is the list of attributes that can be set:
-
- -instance_type           -- type of instance, e.g. "m1.small"
- -kernel                  -- kernel id
- -ramdisk                 -- ramdisk id
- -user_data               -- user data
- -termination_protection  -- true to prevent termination from the console
- -disable_api_termination -- same as the above
- -shutdown_behavior       -- "stop" or "terminate"
- -instance_initiated_shutdown_behavior -- same as above
- -root_device_name        -- root device name
- -source_dest_check       -- enable NAT (VPC only)
- -group_id                -- VPC security group
- -block_devices           -- Specify block devices to change 
-                             deleteOnTermination flag
- -block_device_mapping    -- Alias for -block_devices
-
-Only one attribute can be changed in a single request. For example:
-
-  $ec2->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2');
-
-The result code is true if the attribute was successfully modified,
-false otherwise. In the latter case, $ec2->error() will provide the
-error message.
-
-The ability to change the deleteOnTermination flag for attached block devices
-is not documented in the official Amazon API documentation, but appears to work.
-The syntax is:
-
-# turn on deleteOnTermination
- $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
-# turn off deleteOnTermination
- $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
-
-The syntax is slightly different from what is used by -block_devices
-in run_instances(), and is "device=volumeId:boolean". Multiple block
-devices can be specified using an arrayref.
-
-=cut
-
-sub modify_instance_attribute {
-    my $self = shift;
-    my $instance_id = shift or croak "Usage: modify_instance_attribute(\$instanceId,%param)";
-    my %args   = @_;
-
-    my @param  = (InstanceId=>$instance_id);
-    push @param,$self->value_parm($_,\%args) foreach 
-	qw(InstanceType Kernel Ramdisk UserData DisableApiTermination
-           InstanceInitiatedShutdownBehavior SourceDestCheck);
-    push @param,$self->list_parm('GroupId',\%args);
-    push @param,('DisableApiTermination.Value'=>'true') if $args{-termination_protection};
-    push @param,('InstanceInitiatedShutdownBehavior.Value'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
-    my $block_devices = $args{-block_devices} || $args{-block_device_mapping};
-    push @param,$self->block_device_parm($block_devices);
-
-    return $self->call('ModifyInstanceAttribute',@param);
-}
-
-=head2 $boolean = $ec2->reset_instance_attribute($instance_id,$attribute)
-
-This method resets an attribute of the given instance to its default
-value. Valid attributes are "kernel", "ramdisk" and
-"sourceDestCheck". The result code is true if the reset was
-successful.
-
-=cut
-
-sub reset_instance_attribute {
-    my $self = shift;
-    @_      == 2 or croak "Usage: reset_instance_attribute(\$instanceId,\$attribute_name)";
-    my ($instance_id,$attribute) = @_;
-    my %valid = map {$_=>1} qw(kernel ramdisk sourceDestCheck);
-    $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
-    return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
-}
-
-=head2 @status_list = $ec2->describe_instance_status(-instance_id=>\@ids,-filter=>\%filters,@other_args);
-
-=head2 @status_list = $ec2->describe_instance_status(@instance_ids);
-
-=head2 @status_list = $ec2->describe_instance_status(\%filters);
-
-This method returns a list of VM::EC2::Instance::Status objects
-corresponding to status checks and scheduled maintenance events on the
-instances of interest. You may provide a list of instances to return
-information on, a set of filters, or both.
-
-The filters are described at
-http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInstanceStatus.html. The
-brief list is:
-
-availability-zone, event.code, event.description, event.not-after,
-event.not-before, instance-state-name, instance-state-code,
-system-status.status, system-status.reachability,
-instance-status.status, instance-status.reachability.
-
-Request arguments are:
-
-  -instance_id            Scalar or array ref containing the instance ID(s) to return
-                           information about (optional).
-
-  -filter                 Filters to apply (optional).
-
-  -include_all_instances  If true, include all instances, including those that are 
-                           stopped, pending and shutting down. Otherwise, returns
-                           the status of running instances only.
-
- -max_results             An integer corresponding to the number of instance items
-                           per response (must be greater than 5).
-
-If -max_results is specified, then the call will return at most the
-number of instances you requested. You may see whether there are additional
-results by calling more_instance_status(), and then retrieve the next set of
-results with additional call(s) to describe_instance_status():
-
- my @results = $ec2->describe_instance_status(-max_results => 10);
- do_something(\@results);
- while ($ec2->more_instance_status) {
-    @results = $ec2->describe_instance_status;
-    do_something(\@results);
- }
-
-NOTE: As of 29 July 2012, passing -include_all_instances causes an EC2
-"unknown parameter" error, indicating some mismatch between the
-documented API and the actual one.
-
-=cut
-
-sub more_instance_status {
-    my $self = shift;
-    return $self->{instance_status_token} &&
-           !$self->{instance_status_stop};
-}
-
-sub describe_instance_status {
-    my $self = shift;
-    my @parms;
-
-    if (!@_ && $self->{instance_status_token} && $self->{instance_status_args}) {
-	@parms = (@{$self->{instance_status_args}},NextToken=>$self->{instance_status_token});
-    }
-    
-    else {
-	my %args = $self->args('-instance_id',@_);
-	push @parms,$self->list_parm('InstanceId',\%args);
-	push @parms,$self->filter_parm(\%args);
-	push @parms,$self->boolean_parm('IncludeAllInstances',\%args);
-	push @parms,$self->single_parm('MaxResults',\%args);
-	
-	if ($args{-max_results}) {
-	    $self->{instance_status_token} = 'xyzzy'; # dummy value
-	    $self->{instance_status_args} = \@parms;
-	}
-
-    }
-    return $self->call('DescribeInstanceStatus',@parms);
-}
-
-
-
 =head1 EC2 AMAZON MACHINE IMAGES
 
 The methods in this section allow you to query and manipulate Amazon
 machine images (AMIs). See L<VM::EC2::Image>.
 
+=head2 @i = $ec2->describe_images(@image_ids)
+
 =head2 @i = $ec2->describe_images(-image_id=>\@id,-executable_by=>$id,
                                   -owner=>$id, -filter=>\%filters)
 
-=head2 @i = $ec2->describe_images(@image_ids)
-
 Return a series of VM::EC2::Image objects, each describing an
-AMI. Optional parameters:
+AMI. Optional arguments:
 
  -image_id        The id of the image, either a string scalar or an
                   arrayref.
@@ -1777,7 +1822,7 @@ sub describe_images {
     return $self->call('DescribeImages',@params) or return;
 }
 
-=head2 $image = $ec2->create_image(%args)
+=head2 $image = $ec2->create_image(-instance_id=>$id,-name=>$name,%other_args)
 
 Create an image from an EBS-backed instance and return a
 VM::EC2::Image object. The instance must be in the "stopped" or
@@ -1806,7 +1851,7 @@ sub create_image {
     return $self->call('CreateImage',@param);
 }
 
-=head2 $image = $ec2->register_image(%args)
+=head2 $image = $ec2->register_image(-name=>$name,%other_args)
 
 Register an image, creating an AMI. This can be used to create an AMI
 from a S3-backed instance-store bundle, or to create an AMI from a
@@ -2006,7 +2051,7 @@ for additional functionality provided through the object interface.
 
 =head2 @v = $ec2->describe_volumes(@volume_ids)
 
-Return a series of VM::EC2::Volume objects. Optional parameters:
+Return a series of VM::EC2::Volume objects. Optional arguments:
 
  -volume_id    The id of the volume to fetch, either a string
                scalar or an arrayref.
@@ -2168,13 +2213,13 @@ sub detach_volume {
     return $self->call('DetachVolume',@param) or return;
 }
 
-=head2 @v = $ec2->describe_volume_status(-volume_id=>\@ids,-filter=>\%filters)
-
 =head2 @v = $ec2->describe_volume_status(@volume_ids)
 
 =head2 @v = $ec2->describe_volume_status(\%filters)
 
-Return a series of VM::EC2::Volume::StatusItem objects. Optional parameters:
+=head2 @v = $ec2->describe_volume_status(-volume_id=>\@ids,-filter=>\%filters)
+
+Return a series of VM::EC2::Volume::StatusItem objects. Optional arguments:
 
  -volume_id    The id of the volume to fetch, either a string
                scalar or an arrayref.
@@ -2269,9 +2314,9 @@ sub modify_volume_attribute {
     return $self->call('ModifyVolumeAttribute',@param);
 }
 
-=head2 $boolean = $ec2->enable_volume_io(-volume_id=>$volume_id)
-
 =head2 $boolean = $ec2->enable_volume_io($volume_id)
+
+=head2 $boolean = $ec2->enable_volume_io(-volume_id=>$volume_id)
 
 Given the ID of a volume whose I/O has been disabled (e.g. due to
 hardware degradation), this method will reenable the I/O and return
@@ -2287,11 +2332,11 @@ sub enable_volume_io {
     return $self->call('EnableVolumeIO',@param);
 }
 
-=head2 @snaps = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_param)
-
 =head2 @snaps = $ec2->describe_snapshots(@snapshot_ids)
 
-Returns a series of VM::EC2::Snapshot objects. All parameters
+=head2 @snaps = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_args)
+
+Returns a series of VM::EC2::Snapshot objects. All arguments
 are optional:
 
  -snapshot_id     ID of the snapshot
@@ -2467,16 +2512,17 @@ groups (firewall rules) and SSH key pairs. See
 L<VM::EC2::SecurityGroup> and L<VM::EC2::KeyPair> for functionality
 that is available through these objects.
 
-=head2 @sg = $ec2->describe_security_groups(-group_id  => \@ids,
-                                            -group_name=> \@names,
-                                            -filter    => \%filters);
-
 =head2 @sg = $ec2->describe_security_groups(@group_ids)
+
+=head2 @sg = $ec2->describe_security_groups(%args);
+
+=head2 @sg = $ec2->describe_security_groups(\%filters);
 
 Searches for security groups (firewall rules) matching the provided
 filters and return a series of VM::EC2::SecurityGroup objects.
 
-Optional parameters:
+In the named-argument form you can provide the following optional
+arguments:
 
  -group_name      A single group name or an arrayref containing a list
                    of names
@@ -2541,8 +2587,8 @@ sub create_security_group {
 
 =head2 $boolean = $ec2->delete_security_group($group_id)
 
-=head2 $boolean = $ec2->delete_security_group(-group_id=>$group_id,
-                                              -group_name=>$name);
+=head2 $boolean = $ec2->delete_security_group(-group_id   => $group_id,
+                                              -group_name => $name);
 
 Delete a security group. Arguments are:
 
@@ -2657,40 +2703,21 @@ sub _security_group_parm {
     return @param;
 }
 
-=head2 $account_id = $ec2->account_id
+=head2 @keys = $ec2->describe_key_pairs(@names);
 
-Looks up the account ID corresponding to the credentials provided when
-the VM::EC2 instance was created. The way this is done is to fetch the
-"default" security group, which is guaranteed to exist, and then
-return its groupId field. The result is cached so that subsequent
-accesses are fast.
-
-=head2 $account_id = $ec2->userId
-
-Same as above, for convenience.
-
-=cut
-
-sub account_id {
-    my $self = shift;
-    return $self->{account_id} if exists $self->{account_id};
-    my $sg   = $self->describe_security_groups(-group_name=>'default') or return;
-    return $self->{account_id} ||= $sg->ownerId;
-}
-
-sub userId { shift->account_id }
+=head2 @keys = $ec2->describe_key_pairs(\%filters);
 
 =head2 @keys = $ec2->describe_key_pairs(-key_name => \@names,
-                                   -filter    => \%filters);
-=head2 @keys = $ec2->describe_key_pairs(@names);
+                                        -filter    => \%filters);
 
 Searches for ssh key pairs matching the provided filters and return
 a series of VM::EC2::KeyPair objects.
 
-Optional parameters:
+Optional arguments:
 
  -key_name      A single key name or an arrayref containing a list
                    of names
+
  -filter          Filter on tags and other attributes.
 
 The full list of key filters can be found at:
@@ -2730,10 +2757,10 @@ sub create_key_pair {
     $self->call('CreateKeyPair',@params);
 }
 
-=head2 $key = $ec2->import_key_pair(-key_name=>$name,
-                                    -public_key_material=>$public_key)
-
 =head2 $key = $ec2->import_key_pair($name,$public_key)
+
+=head2 $key = $ec2->import_key_pair(-key_name            => $name,
+                                    -public_key_material => $public_key)
 
 Imports a preexisting public key into AWS under the specified name.
 If successful, returns a VM::EC2::KeyPair. The public key must be an
@@ -2922,12 +2949,12 @@ The methods in this section allow you to allocate elastic IP
 addresses, attach them to instances, and delete them. See
 L<VM::EC2::ElasticAddress>.
 
-=head2 @addr = $ec2->describe_addresses(-public_ip=>\@addr,-allocation_id=>\@id,-filter->\%filters)
-
 =head2 @addr = $ec2->describe_addresses(@public_ips)
 
+=head2 @addr = $ec2->describe_addresses(-public_ip=>\@addr,-allocation_id=>\@id,-filter->\%filters)
+
 Queries AWS for a list of elastic IP addresses already allocated to
-you. All parameters are optional:
+you. All arguments are optional:
 
  -public_ip     -- An IP address (in dotted format) or an arrayref of
                    addresses to return information about.
@@ -3244,7 +3271,7 @@ returns a list of instances, timestamps and their price at the
 indicated time. Each spot price history point is represented as a
 VM::EC2::Spot::PriceHistory object.
 
-Option parameters are:
+Option arguments are:
 
  -start_time      Start date and time of the desired history
                   data, in the form yyyy-mm-ddThh:mm:ss (GMT).
@@ -3335,7 +3362,7 @@ sub describe_spot_price_history {
     return $self->call('DescribeSpotPriceHistory',@parms);
 }
 
-=head2 @requests = $ec2->request_spot_instances(%param)
+=head2 @requests = $ec2->request_spot_instances(%args)
 
 This method will request one or more spot instances to be launched
 when the current spot instance run-hour price drops below a preset
@@ -3347,7 +3374,7 @@ objects, one for each instance specified in -instance_count.
 
 =over 4
 
-=item Required parameters:
+=item Required arguments:
 
   -spot_price        The desired spot price, in USD.
 
@@ -3355,7 +3382,7 @@ objects, one for each instance specified in -instance_count.
 
   -instance_type     Type of the instance(s) to launch, such as "m1.small"
  
-=item Optional parameters:
+=item Optional arguments:
 
   -instance_count    Maximum number of instances to launch (default 1)
 
@@ -3489,16 +3516,16 @@ sub cancel_spot_instance_requests {
 }
 
 
-=head2 @requests = $ec2->describe_spot_instance_requests(-spot_instance_request_id=>\@ids,-filter=>\%filters)
-
 =head2 @requests = $ec2->describe_spot_instance_requests(@spot_instance_request_ids)
 
 =head2 @requests = $ec2->describe_spot_instance_requests(\%filters)
 
+=head2 @requests = $ec2->describe_spot_instance_requests(-spot_instance_request_id=>\@ids,-filter=>\%filters)
+
 This method will return information about current spot instance
 requests as a list of VM::EC2::Spot::InstanceRequest objects.
 
-Optional parameters:
+Optional arguments:
 
  -spot_instance_request_id   -- Scalar or arrayref of request Ids.
 
@@ -3552,6 +3579,33 @@ sub describe_spot_instance_requests {
 EC2 virtual private clouds (VPCs) provide facilities for creating
 tiered applications combining public and private subnetworks, and for
 extending your home/corporate network into the cloud.
+
+=cut
+
+=head2 $vpc = $ec2->create_vpc(-cidr_block=>$cidr,-instance_tenancy=>$tenancy)
+
+Create a new VPC. This can be called with a single argument, in which
+case it is interpreted as the desired CIDR block, or 
+
+ $vpc = $ec2->$ec2->create_vpc('10.0.0.0/16') or die $ec2->error_str;
+
+Or it can be called with named arguments.
+
+Required arguments:
+
+ -cidr_block      The Classless Internet Domain Routing address, in the
+                  form xx.xx.xx.xx/xx. One or more subnets will be allocated
+                  from within this block.
+
+Optional arguments:
+
+ -instance_tenancy "default" or "dedicated". The latter requests AWS to
+                  launch all your instances in the VPC on single-tenant
+                  hardware (at additional cost).
+
+See
+http://docs.amazonwebservices.com/AmazonVPC/latest/UserGuide/VPC_Subnets.html
+for a description of the valid CIDRs that can be used with EC2.
 
 =cut
 
@@ -3618,12 +3672,10 @@ sub delete_dhcp_options {
 
 =head2 $success = $ec2->associate_dhcp_options($vpc_id => $dhcp_id)
 
-=head2 $success = $ec2->associate_dhcp_options($vpc_id => 'default')
-
 =head2 $success = $ec2->associate_dhcp_options(-vpc_id => $vpc_id,-dhcp_options_id => $dhcp_id)
 
-Associate a VPC ID with a DHCP option set. Pass 'default' to restore
-the default DHCP options for the VPC.
+Associate a VPC ID with a DHCP option set. Pass an ID of 'default' to
+restore the default DHCP options for the VPC.
 
 =cut
 
@@ -3644,7 +3696,7 @@ sub associate_dhcp_options {
 
 =head2 $interface = $ec2->create_network_interface($subnet_id)
 
-=head2 $interface = $ec2->create_network_interface(@args)
+=head2 $interface = $ec2->create_network_interface(%args)
 
 This method creates an elastic network interface (ENI). The ENI can
 later be attached to instances and/or be associated with a public IP
@@ -3654,7 +3706,7 @@ If only a single argument is provided, it is treated as the ID of the
 VPC subnet to associate with the ENI. If multiple arguments are
 provided, they are treated as -arg=>value parameter pairs.
 
-Parameters:
+Arguments:
 
 The -subnet_id argument is mandatory. Others are optional.
 
@@ -3770,16 +3822,16 @@ sub delete_network_interface {
 
 =head2 @ifs = $ec2->describe_network_interfaces(@interface_ids)
 
-=head2 @ifs = $ec2->describe_network_interfaces(-network_interface_id=>\@interface_ids,-filter=>\%filters)
-
 =head2 @ifs = $ec2->describe_network_interfaces(\%filters)
+
+=head2 @ifs = $ec2->describe_network_interfaces(-network_interface_id=>\@interface_ids,-filter=>\%filters)
 
 Return a list of elastic network interfaces as
 VM::EC2::VPC::NetworkInterface objects. You may restrict the list by
 passing a list of network interface IDs, a hashref of filters or by
 using the full named-parameter form.
 
-Optional parameters:
+Optional arguments:
 
  -network_interface_id    A single network interface ID or an arrayref to
                            a list of IDs.
@@ -3923,7 +3975,7 @@ the user is allowed to access.
 
 =over 4
 
-=item Required parameters:
+=item Required arguments:
 
  -name The username
 
@@ -3931,7 +3983,7 @@ The username must comply with the guidelines described in
 http://docs.amazonwebservices.com/IAM/latest/UserGuide/LimitationsOnEntities.html:
 essentially all alphanumeric plus the characters [+=,.@-].
 
-=item Optional parameters:
+=item Optional arguments:
 
  -duration_seconds Length of time the session token will be valid for,
                     expressed in seconds. 
@@ -3969,7 +4021,7 @@ sub get_federation_token {
 }
 
 
-=head2 $token = $ec2->get_session_token(@args)
+=head2 $token = $ec2->get_session_token(%args)
 
 This method creates a temporary VM::EC2::Security::Token object for an
 anonymous user. The token has no policy associated with it, and can be
@@ -3979,11 +4031,11 @@ conjunction with MFA devices.
 
 =over 4
 
-=item Required parameters:
+=item Required arguments:
 
 none
 
-=item Optional parameters:
+=item Optional arguments:
 
  -duration_seconds Length of time the session token will be valid for,
                     expressed in seconds.
@@ -4057,7 +4109,7 @@ sub instance_parm {
     return ref $id && ref $id eq 'ARRAY' ? @$id : $id;
 }
 
-=head2 @parameters = $ec2->value_parm(ParameterName => \%args)
+=head2 @arguments = $ec2->value_parm(ParameterName => \%args)
 
 =cut
 
@@ -4070,7 +4122,7 @@ sub value_parm {
     return ("$argname.Value"=>$val);
 }
 
-=head2 @parameters = $ec2->single_parm(ParameterName => \%args)
+=head2 @arguments = $ec2->single_parm(ParameterName => \%args)
 
 =cut
 
@@ -4084,7 +4136,7 @@ sub single_parm {
     return ($argname=>$v);
 }
 
-=head2 @parameters = $ec2->list_parm(ParameterName => \%args)
+=head2 @arguments = $ec2->list_parm(ParameterName => \%args)
 
 =cut
 
@@ -4104,7 +4156,7 @@ sub list_parm {
     return @params;
 }
 
-=head2 @parameters = $ec2->filter_parm(\%args)
+=head2 @arguments = $ec2->filter_parm(\%args)
 
 =cut
 
@@ -4114,7 +4166,7 @@ sub filter_parm {
     return $self->key_value_parameters('Filter','Name','Value',$args);
 }
 
-=head2 @parameters = $ec2->tagcreate_parm(\%args)
+=head2 @arguments = $ec2->tagcreate_parm(\%args)
 
 =cut
 
@@ -4124,7 +4176,7 @@ sub tagcreate_parm {
     return $self->key_value_parameters('Tag','Key','Value',$args);
 }
 
-=head2 @parameters = $ec2->tagdelete_parm(\%args)
+=head2 @arguments = $ec2->tagdelete_parm(\%args)
 
 =cut
 
@@ -4134,7 +4186,7 @@ sub tagdelete_parm {
     return $self->key_value_parameters('Tag','Key','Value',$args,1);
 }
 
-=head2 @parameters = $ec2->key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
+=head2 @arguments = $ec2->key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
 
 =cut
 
@@ -4174,7 +4226,7 @@ sub key_value_parameters {
     return @params;
 }
 
-=head2 @parameters = $ec2->launch_perm_parm($prefix,$suffix,$value)
+=head2 @arguments = $ec2->launch_perm_parm($prefix,$suffix,$value)
 
 =cut
 
@@ -4206,7 +4258,7 @@ sub _perm_parm {
     return @param;
 }
 
-=head2 @parameters = $ec2->iam_parm($args)
+=head2 @arguments = $ec2->iam_parm($args)
 
 =cut
 
@@ -4219,7 +4271,7 @@ sub iam_parm {
     return @p;
 }
 
-=head2 @parameters = $ec2->block_device_parm($block_device_mapping_string)
+=head2 @arguments = $ec2->block_device_parm($block_device_mapping_string)
 
 =cut
 
@@ -4267,7 +4319,8 @@ sub block_device_parm {
 # form 3: ethX=primary_address,secondary_address_count:subnetId:securityGroupId:deleteOnTermination:description
 sub network_interface_parm {
     my $self = shift;
-    my $devlist = shift or return;
+    my $args    = shift;
+    my $devlist = $args->{-network_interfaces} or return;
     my @dev     = ref $devlist && ref $devlist eq 'ARRAY' ? @$devlist : $devlist;
 
     my @p;
@@ -4350,7 +4403,7 @@ sub ua {
 
 =head2 @obj = $ec2->call($action,@param);
 
-Make a call to Amazon using $action and the passed parameters, and
+Make a call to Amazon using $action and the passed arguments, and
 return a list of objects.
 
 =cut
@@ -4552,7 +4605,7 @@ create objects from the parsed XML. There are three possible syntaxes:
     content of the response, and the VM::EC2 object used to generate the
     request.
 
- 2) A VM::EC2::Dispatch method name, optionally followed by its parameters
+ 2) A VM::EC2::Dispatch method name, optionally followed by its arguments
     delimited by commas. Example:
 
            "fetch_items,securityGroupInfo,VM::EC2::SecurityGroup"
