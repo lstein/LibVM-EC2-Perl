@@ -3607,6 +3607,14 @@ See
 http://docs.amazonwebservices.com/AmazonVPC/latest/UserGuide/VPC_Subnets.html
 for a description of the valid CIDRs that can be used with EC2.
 
+On success, this method will return a new VM::EC2::VPC object. You can
+then use this object to create new subnets within the VPC:
+
+ $vpc     = $ec2->$ec2->create_vpc('10.0.0.0/16') or die $ec2->error_str;
+ $subnet1 = $vpc->create_subnet('10.0.0.0/24')    or die $vpc->error_str;
+ $subnet2 = $vpc->create_subnet('10.0.1.0/24')    or die $vpc->error_str;
+ $subnet3 = $vpc->create_subnet('10.0.2.0/24')    or die $vpc->error_str;
+
 =cut
 
 sub create_vpc {
@@ -3618,6 +3626,29 @@ sub create_vpc {
     return $self->call('CreateVpc',@parm);
 }
 
+=head2 @vpc = $ec2->describe_vpcs(@vpc_ids)
+
+=head2 @vpc = $ec2->describe_vpcs(\%filter)
+
+=head2 @vpc = $ec2->describe_vpcs(-vpc_id=>\@list,-filter=>\%filter)
+
+Describe VPCs that you own and return a list of VM::EC2::VPC
+objects. Call with no arguments to return all VPCs, or provide a list
+of VPC IDs to return information on those only. You may also provide a
+filter list, or named argument forms.
+
+Optional arguments:
+
+ -vpc_id      A scalar or array ref containing the VPC IDs you want
+              information on.
+
+ -filter      A hashref of filters to apply to the query.
+
+The filters you can use are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVpcs.html
+
+=cut
+
 sub describe_vpcs {
     my $self = shift;
     my %args   = $self->args('-vpc_id',@_);
@@ -3626,6 +3657,14 @@ sub describe_vpcs {
     return $self->call('DescribeVpcs',@parm);
 }
 
+=head2 $success = $ec2->delete_vpc($vpc_id)
+
+=head2 $success = $ec2->delete_vpc(-vpc_id=>$vpc_id)
+
+Delete the indicated VPC, returning true if successful.
+
+=cut
+
 sub delete_vpc {
     my $self = shift;
     my %args  = $self->args(-vpc_id => @_);
@@ -3633,13 +3672,37 @@ sub delete_vpc {
     return $self->call('DeleteVpc',@param);
 }
 
-sub describe_dhcp_options {
-    my $self = shift;
-    my %args  = $self->args(-dhcp_options_id => @_);
-    my @parm   = $self->list_parm('DhcpOptionsId',\%args);
-    push @parm,  $self->filter_parm(\%args);
-    return $self->call('DescribeDhcpOptions',@parm);
-}
+=head2 $options = $ec2->create_dhcp_options(\%configuration_list)
+
+This method creates a DhcpOption object, which can then be applied to
+a VPC to configure its DHCP server. The single required argument is a
+configuration list hash (which can be passed either as a hashref or a
+flattened hash) with one or more of the following keys:
+
+ -domain_name            Domain name for instances running in this VPC.
+
+ -domain_name_servers    Scalar or arrayref containing up to 4 IP addresses of
+                         domain name servers for this VPC.
+
+ -ntp_servers            Scalar or arrayref containing up to 4 IP addresses
+                         of network time protocol servers
+
+ -netbios_name_servers   Scalar or arrayref containing up to 4 IP addresses for
+                         NetBIOS name servers.
+
+ -netbios_node_type      The NetBios node type (1,2,4 or 8). Amazon recommends
+                         using "2" at this time.
+
+On successful completion, a VM::EC2::VPC::DhcpOptions object will be
+returned. This can be associated with a VPC using the VPC object's
+set_dhcp_options() method:
+
+ $vpc     = $ec2->create_vpc(...);
+ $options = $ec2->create_dhcp_options(-domain_name=>'test.com',
+                                      -domain_name_servers=>['204.16.255.55','216.239.34.10']);
+ $vpc->set_dhcp_options($options);
+
+=cut
 
 # { 'domain-name-servers' => ['192.168.2.1','192.168.2.2'],'domain-name'=>'example.com'}
 sub create_dhcp_options {
@@ -3655,6 +3718,8 @@ sub create_dhcp_options {
     for my $key (sort keys %args) {
 	my $value  = $args{$key};
 	my @values = ref $value && ref $value eq 'ARRAY' ? @$value : $value;
+	$key =~ s/^-//;
+	$key =~ s/_/-/g;
 	my $item = 1;
 	push @parm,("DhcpConfiguration.$count.Key"  => $key);
 	push @parm,("DhcpConfiguration.$count.Value.".$item++ => $_) foreach @values;
@@ -3663,11 +3728,48 @@ sub create_dhcp_options {
     return $self->call('CreateDhcpOptions',@parm);
 }
 
+=head2 $success = $ec2->delete_dhcp_options($dhcp_id)
+
+Delete the indicated DHCPOptions, returning true if successful. You
+may also use the named argument -dhcp_options_id..
+
+=cut
+
 sub delete_dhcp_options {
     my $self = shift;
     my %args  = $self->args(-dhcp_options_id => @_);
     my @param = $self->single_parm(DhcpOptionsId=>\%args);
     return $self->call('DeleteDhcpOptions',@param);
+}
+
+=head2 @options = $ec2->describe_dhcp_options(@option_ids)
+
+=head2 @options = $ec2->describe_dhcp_options(\%filters)
+
+=head2 @options = $ec2->describe_dhcp_options(-dhcp_options_id=>$id,
+                                              -filter         => \%filters)
+
+This method returns a list of VM::EC2::VPC::DhcpOptions objects, which
+describe a set of DHCP options that can be assigned to a VPC. Called
+with no arguments, it returns all DhcpOptions. Pass a list of option
+IDs or a filter hashref in order to restrict the search.
+
+Optional arguments:
+
+ -dhcp_options_id     Scalar or arrayref of DhcpOption IDs.
+ -filter              Hashref of filters.
+
+Available filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeDhcpOptions.html.
+
+=cut
+
+sub describe_dhcp_options {
+    my $self = shift;
+    my %args  = $self->args(-dhcp_options_id => @_);
+    my @parm   = $self->list_parm('DhcpOptionsId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeDhcpOptions',@parm);
 }
 
 =head2 $success = $ec2->associate_dhcp_options($vpc_id => $dhcp_id)

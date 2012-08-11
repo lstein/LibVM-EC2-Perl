@@ -33,7 +33,7 @@ In addition, this object supports the following convenience methods:
 
     current_status() -- Same as above (for module consistency)
 
-    associate_dhcp_options($options) -- Associate the Dhcp option set with
+    set_dhcp_options($options) -- Associate the Dhcp option set with
           this VPC (DhcpOptionsId string or VM::EC2::VPC::DhcpOptions object).
           Use "default" or pass no arguments to assign no Dhcp options.
 
@@ -91,10 +91,10 @@ sub dhcp_options {
     return $self->aws->describe_dhcp_options($self->dhcpOptionsId);
 }
 
-sub associate_dhcp_options {
+sub set_dhcp_options {
     my $self = shift;
     my $options = shift || 'default';
-    $self->aws->associate_dhcp_options($self => $options);
+    return $self->aws->associate_dhcp_options($self => $options);
 }
 
 1;
