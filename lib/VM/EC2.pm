@@ -3610,10 +3610,10 @@ for a description of the valid CIDRs that can be used with EC2.
 On success, this method will return a new VM::EC2::VPC object. You can
 then use this object to create new subnets within the VPC:
 
- $vpc     = $ec2->$ec2->create_vpc('10.0.0.0/16') or die $ec2->error_str;
- $subnet1 = $vpc->create_subnet('10.0.0.0/24')    or die $vpc->error_str;
- $subnet2 = $vpc->create_subnet('10.0.1.0/24')    or die $vpc->error_str;
- $subnet3 = $vpc->create_subnet('10.0.2.0/24')    or die $vpc->error_str;
+ $vpc     = $ec2->create_vpc('10.0.0.0/16')    or die $ec2->error_str;
+ $subnet1 = $vpc->create_subnet('10.0.0.0/24') or die $vpc->error_str;
+ $subnet2 = $vpc->create_subnet('10.0.1.0/24') or die $vpc->error_str;
+ $subnet3 = $vpc->create_subnet('10.0.2.0/24') or die $vpc->error_str;
 
 =cut
 
@@ -3672,10 +3672,44 @@ sub delete_vpc {
     return $self->call('DeleteVpc',@param);
 }
 
+=head1 VPC Subnets and Routing
+
+These methods manage subnet objects and the routing among them. A VPC
+may have a single subnet or many, and routing rules determine whether
+the subnet has access to the internet ("public"), is entirely private,
+or is connected to a customer gateway device to form a Virtual Private
+Network (VPN) in which your home network's address space is extended
+into the Amazon VPC. 
+
+All instances in a VPC are located in one subnet or another. Subnets
+may be public or private, and are organized in a star topology with a
+logical router in the middle.
+
+Although all these methods can be called from VM::EC2 objects, many
+are more conveniently called from the VM::EC2::VPC object family. This
+allows for steps that typically follow each other, such as creating a
+route table and associating it with a subnet, happen
+automatically. For example, this series of calls creates a VPC with a
+single subnet, creates an Internet gateway attached to the VPC,
+associates a new route table with the subnet and then creates a
+default route from the subnet to the Internet gateway.
+
+ $vpc       = $ec2->create_vpc('10.0.0.0/16')     or die $ec2->error_str;
+ $subnet1   = $vpc->create_subnet('10.0.0.0/24')  or die $vpc->error_str;
+ $gateway   = $vpc->create_internet_gateway       or die $vpc->error_str;
+ $routeTbl  = $subnet->create_route_table         or die $vpc->error_str;
+ $routeTbl->create_route('0.0.0.0/0' => $gateway) or die $vpc->error_str;
+
+=head2 
+
+=head1 DHCP Options
+
+These methods manage DHCP Option objects, which can then be applied to
+a VPC to configure the DHCP options applied to running instances.
+
 =head2 $options = $ec2->create_dhcp_options(\%configuration_list)
 
-This method creates a DhcpOption object, which can then be applied to
-a VPC to configure its DHCP server. The single required argument is a
+This method creates a DhcpOption object, The single required argument is a
 configuration list hash (which can be passed either as a hashref or a
 flattened hash) with one or more of the following keys:
 
@@ -3796,17 +3830,21 @@ sub associate_dhcp_options {
     return $self->call('AssociateDhcpOptions',@param);
 }
 
+=head1 Elastic Network Interfaces
+
+These methods create and manage Elastic Network Interfaces (ENI). Once
+created, an ENI can be attached to instances and/or be associated with
+a public IP address. ENIs can only be used in conjunction with VPC
+instances.
+
 =head2 $interface = $ec2->create_network_interface($subnet_id)
 
 =head2 $interface = $ec2->create_network_interface(%args)
 
-This method creates an elastic network interface (ENI). The ENI can
-later be attached to instances and/or be associated with a public IP
-address. ENIs can only be used in conjunction with VPC instances.
-
-If only a single argument is provided, it is treated as the ID of the
-VPC subnet to associate with the ENI. If multiple arguments are
-provided, they are treated as -arg=>value parameter pairs.
+This method creates an elastic network interface (ENI). If only a
+single argument is provided, it is treated as the ID of the VPC subnet
+to associate with the ENI. If multiple arguments are provided, they
+are treated as -arg=>value parameter pairs.
 
 Arguments:
 
