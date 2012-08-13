@@ -210,6 +210,10 @@ use constant ObjectRegistration => {
     DeleteNetworkInterface            => 'boolean',
     DescribeNetworkInterfaces         => 'fetch_items,networkInterfaceSet,VM::EC2::NetworkInterface',
     ModifyNetworkInterfaceAttribute   => 'boolean',
+    # subnets
+    CreateSubnet                      => 'fetch_one,subnet,VM::EC2::VPC::Subnet',
+    DeleteSubnet                      => 'boolean',
+    DescribeSubnets                   => 'fetch_items,subnetSet,VM::EC2::VPC::Subnet',
 };
 
 sub new {
