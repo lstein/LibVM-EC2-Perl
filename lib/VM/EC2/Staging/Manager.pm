@@ -531,7 +531,7 @@ sub _copy_ebs_image {
 
     $self->info("Copying EBS volumes attached to this image (this may take a long time).\n");
     my @bd              = @$block_devices;
-    my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @bd;
+    my @dest_snapshots  = map {$_->snapshotId ? $self->copy_snapshot($_->snapshotId,$dest_manager) : $_->virtualName} @bd;
     
     $self->info("Waiting for all snapshots to complete. This may take a long time.\n");
     my $state = $dest_manager->ec2->wait_for_snapshots(@dest_snapshots);
