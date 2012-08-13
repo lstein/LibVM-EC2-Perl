@@ -3781,6 +3781,54 @@ sub describe_subnets {
     return $self->call('DescribeSubnets',@parm);
 }
 
+=head2 $table = $ec2->create_route_table($vpc_id)
+
+=head2 $table = $ec2->create_route_table(-vpc_id=>$id)
+
+This method creates a new route table within the given VPC and returns
+a VM::EC2::VPC::RouteTable object. By default, every route table
+includes a local route that enables traffic to flow within the
+VPC. You may add additional routes using create_route().
+
+This method can be called using a single argument corresponding to VPC
+ID for the new route table, or with the named argument form.
+
+Required arguments:
+
+ -vpc_id     A VPC ID or previously-created VM::EC2::VPC object.
+
+=cut
+
+sub create_route_table {
+    my $self = shift;
+    my %args = $self->args(-vpc_id => @_);
+    $args{-vpc_id} 
+      or croak "Usage: create_subnet(-vpc_id=>\$id)";
+    my @parm = $self->single_parm(VpcId => \%args);
+    return $self->call('CreateRouteTable',@parm);
+}
+
+=head2 $success = $ec2->delete_route_table($route_table_id)
+
+=head2 $success = $ec2->delete_route_table(-route_table_id=>$id)
+
+This method deletes the indicated route table and all the route
+entries within it. It may not be called on the main route table, or if
+the route table is currently associated with a subnet.
+
+The method can be called with a single argument corresponding to the
+route table's ID, or using the named form with argument -route_table_id.
+
+=cut
+
+sub delete_route_table {
+    my $self = shift;
+    my %args  = $self->args(-route_table_id=>@_);
+    my @parm = $self->single_parm(RouteTableId=>\%args);
+    return $self->call('DeleteRouteTable',@parm);
+}
+
+
 =head1 DHCP Options
 
 These methods manage DHCP Option objects, which can then be applied to
@@ -4754,7 +4802,6 @@ CreateNetworkAclEntry
 CreatePlacementGroup
 CreateRoute
 CreateRouteTable
-CreateSubnet
 CreateVpnConnection
 CreateVpnGateway
 DeleteCustomerGateway
@@ -4764,7 +4811,6 @@ DeleteNetworkAclEntry
 DeletePlacementGroup
 DeleteRoute
 DeleteRouteTable
-DeleteSubnet
 DeleteVpnConnection
 DeleteVpnGateway
 DescribeBundleTasks
@@ -4773,7 +4819,6 @@ DescribeCustomerGateways
 DescribeNetworkAcls
 DescribePlacementGroups
 DescribeRouteTables
-DescribeSubnets
 DescribeVpnConnections
 DescribeVpnGateways
 DetachInternetGateway
