@@ -1,3 +1,6 @@
+1.15
+    - Add -block_device_mapping option to create_image().
+
 1.14 Fri Aug 10 07:19:44 EDT 2012
     - Fix bug in snapshot creation that was causing migrate-ebs-image.pl to fail on
       last step.
