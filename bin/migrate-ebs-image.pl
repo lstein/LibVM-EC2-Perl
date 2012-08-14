@@ -21,15 +21,30 @@ option is required.
 
 =head1 COMMAND-LINE OPTIONS
 
-Options can be abbreviated.  For example, you can use -l for --list-regions
+Options can be abbreviated.  For example, you can use -l for
+--list-regions and -b for --block-device-mapping:
 
       --from         Region in which the AMI is currently located (e.g. "us-east-1")
       --to           Region to which the AMI is to be copied (e.g. "us-west-1") REQUIRED
       --access_key   EC2 access key
       --secret_key   EC2 secret key
+      --block-device-mapping 
+                     Add additional block devices to the image.
       --endpoint     EC2 URL (defaults to http://ec2.amazonaws.com/)
       --quiet        Quench status messages
       --list-regions List the EC2 regions
+
+The --block-device-mapping (-b) option is used to add ephemeral
+storage to the destination image. Amazon's API doesn't describe
+ephemeral volumes that are associated with images, and so this
+information is not copied from the source to the destination image,
+requiring you to add it back manually. The value of the argument is a
+block device mapping string in the same format as described for the
+command line program ec2-register:
+
+ migrate-ebs-image.pl -f us-east-1 -t ap-southeast-1 \
+                      -b /dev/sdy=ephemeral0 \
+                      ami-123456
 
 =head1 ENVIRONMENT VARIABLES
 
@@ -84,11 +99,13 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 =cut
 
 use strict;
+use lib '../lib';
+
 use VM::EC2::Staging::Manager;
 use File::Basename 'basename';
 use Getopt::Long;
 
-my($From,$To,$Access_key,$Secret_key,$Endpoint,$Quiet,$List);
+my($From,$To,$Access_key,$Secret_key,$Endpoint,$Quiet,$List,@Block_devices);
 my $Program_name = basename($0);
 
 GetOptions('from=s'        => \$From,
@@ -98,6 +115,7 @@ GetOptions('from=s'        => \$From,
 	   'endpoint=s'    => \$Endpoint,
 	   'quiet'         => \$Quiet,
 	   'list_regions'  => \$List,
+	   'block-device-mapping=s' => \@Block_devices,
     ) or exec 'perldoc',$0;
 
 #setup defaults
@@ -129,7 +147,9 @@ my $dest = eval {VM::EC2->new(-region => $To)->staging_manager(-on_exit=>'termin
 							       -quiet  => $Quiet)}
    or die VM::EC2->error_str;
 
-my $img  = $source->copy_image($ami => $dest);
+my @extra = @Block_devices ? (-block_devices=>\@Block_devices) : ();
+
+my $img  = $source->copy_image($ami => $dest,@extra);
 
 undef $source;
 undef $dest;
