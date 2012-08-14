@@ -43,6 +43,10 @@ The following object methods are supported:
  status           -- Volume state, one of "creating", "available",
                      "in-use", "deleting", "deleted", "error"
  createTime       -- Timestamp for when volume was created.
+ volumeType       -- The volume type, one of "standard" or "iol"
+ iops             -- The number of I/O operations per second that the volume
+                     supports, an integer between 1 and 1000. Only valid for
+                     volumes of type "iol".
  tags             -- Hashref containing tags associated with this group.
                      See L<VM::EC2::Generic>.
 
@@ -188,7 +192,7 @@ use Carp 'croak';
 sub valid_fields {
     my $self = shift;
     return qw(volumeId size snapshotId availabilityZone status 
-              createTime attachmentSet tagSet);
+              createTime attachmentSet volumeType iops tagSet);
 }
 
 sub primary_id {shift->volumeId}

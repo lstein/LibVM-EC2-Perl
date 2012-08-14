@@ -372,7 +372,7 @@ supported. Only EBS-backed images can be copied in this way.
 See also the command-line script migrate-ebs-image.pl that comes with
 this package.
 
-=head2 $new_image_id = $manager->copy_image($source_image,$destination_zone)
+=head2 $new_image_id = $manager->copy_image($source_image,$destination_zone,@register_options)
 
 This method copies the AMI indicated by $source_image from the zone
 that $manager belongs to, into the indicated $destination_zone, and
@@ -396,6 +396,15 @@ destination reasons, you would proceed like this:
                                                   -on_exit      =>'terminate');
  my $new_image   = $source->copy_image('ami-123456' => $destination);
 
+If present, the named argument list @register_options will be passed
+to register_image() and used to override options in the destination
+image. This can be used to set ephemeral device mappings, which cannot
+currently be detected and transferred automatically by copy_image():
+
+ $new_image =$source->copy_image('ami-123456'   => 'us-west-2',
+                                 -description   => 'My AMI western style',
+                                 -block_devices => '/dev/sde=ephemeral0');
+
 =cut
 
 #############################################
@@ -403,15 +412,15 @@ destination reasons, you would proceed like this:
 #############################################
 sub copy_image {
     my $self = shift;
-    my ($imageId,$destination) = @_;
+    my ($imageId,$destination,@options) = @_;
     my $ec2 = $self->ec2;
 
     my $image = ref $imageId && $imageId->isa('VM::EC2::Image') ? $imageId 
   	                                                        : $ec2->describe_images($imageId);
     $image       
-	or croak "Invalid image '$imageId'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+	or croak "Unknown image '$imageId'";
     $image->imageType eq 'machine' 
-	or croak "$image is not an AMI: usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+	or croak "$image is not an AMI";
     
     my $dest_manager;
     if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
@@ -436,9 +445,9 @@ sub copy_image {
 
     my $root_type = $image->rootDeviceType;
     if ($root_type eq 'ebs') {
-	return $self->_copy_ebs_image($image,$dest_manager);
+	return $self->_copy_ebs_image($image,$dest_manager,\@options);
     } else {
-	return $self->_copy_instance_image($image,$dest_manager);
+	return $self->_copy_instance_image($image,$dest_manager,\@options);
     }
 }
 
@@ -508,7 +517,7 @@ sub _copy_instance_image {
 
 sub _copy_ebs_image {
     my $self = shift;
-    my ($image,$dest_manager) = @_;
+    my ($image,$dest_manager,$options) = @_;
 
     # hashref with keys 'name', 'description','architecture','kernel','ramdisk','block_devices','root_device'
     # 'is_public','authorized_users'
@@ -531,20 +540,23 @@ sub _copy_ebs_image {
 
     $self->info("Copying EBS volumes attached to this image (this may take a long time).\n");
     my @bd              = @$block_devices;
-    my @dest_snapshots  = map {$self->copy_snapshot($_->snapshotId,$dest_manager)} @bd;
+    my %dest_snapshots  = map {
+	$_->snapshotId
+	    ? ($_->snapshotId => $self->copy_snapshot($_->snapshotId,$dest_manager))
+	    : ()
+    } @bd;
     
     $self->info("Waiting for all snapshots to complete. This may take a long time.\n");
-    my $state = $dest_manager->ec2->wait_for_snapshots(@dest_snapshots);
-    my @errored = grep {$state->{$_} eq 'error'} @dest_snapshots;
+    my $state = $dest_manager->ec2->wait_for_snapshots(values %dest_snapshots);
+    my @errored = grep {$state->{$_} eq 'error'} values %dest_snapshots;
     croak ("Snapshot(s) @errored could not be completed due to an error")
 	if @errored;
 
     # create the new block device mapping
     my @mappings;
     for my $source_ebs (@$block_devices) {
-	my $snapshot    = shift @dest_snapshots;
 	my $dest        = "$source_ebs";  # interpolates into correct format
-	$dest          =~ s/=[\w-]+/=$snapshot/;  # replace source snap with dest snap
+	$dest          =~ s/=([\w-]+)/'='.$dest_snapshots{$1}||$1/e;  # replace source snap with dest snap
 	push @mappings,$dest;
     }
 
@@ -554,6 +566,22 @@ sub _copy_ebs_image {
 	$name = $self->_token($name);
 	print STDERR "Renamed to '$name'\n";
     }
+
+    # apply overrides
+    my %overrides = @$options if $options;
+
+    # merge block device mappings if present
+    if (my $m = $overrides{-block_device_mapping}||$overrides{-block_devices}) {
+	push @mappings,(ref $m ? @$m : $m);
+	delete $overrides{-block_device_mapping};
+	delete $overrides{-block_devices};
+    }
+
+    # helpful for recovering failed process
+    my $block_device_info_args = join ' ',map {"-b $_"} @mappings;
+    $self->info("Registering snapshot in destination with the equivalent of:\n");
+    $self->info("ec2-register -n '$name' -d '$description' -a $architecture --kernel $kernel --ramdisk '$ramdisk' --root-device-name $root_device $block_device_info_args\n");
+
     my $img =  $dest_manager->ec2->register_image(-name                 => $name,
 						  -root_device_name     => $root_device,
 						  -block_device_mapping => \@mappings,

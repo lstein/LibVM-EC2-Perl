@@ -374,7 +374,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.14';
+our $VERSION = '1.15';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -1836,6 +1836,10 @@ Arguments:
  -name           Name for the image that will be created. (required)
  -description    Description of the new image.
  -no_reboot      If true, don't reboot the instance.
+ -block_device_mapping
+                 Block device mapping as a scalar or array ref. See 
+                  run_instances() for the syntax.
+ -block_devices  Alias of the above
 
 =cut
 
@@ -1844,10 +1848,12 @@ sub create_image {
     my %args = @_;
     $args{-instance_id} && $args{-name}
       or croak "Usage: create_image(-instance_id=>\$id,-name=>\$name)";
+    $args{-block_device_mapping} ||= $args{-block_devices};
     my @param = $self->single_parm('InstanceId',\%args);
     push @param,$self->single_parm('Name',\%args);
     push @param,$self->single_parm('Description',\%args);
     push @param,$self->boolean_parm('NoReboot',\%args);
+    push @param,$self->block_device_parm($args{-block_device_mapping});
     return $self->call('CreateImage',@param);
 }
 

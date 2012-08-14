@@ -35,7 +35,7 @@ ok($natty,'describe image by id');
 is($natty->imageLocation,'755060610258/ebs/ubuntu-images/ubuntu-natty-11.04-i386-server-20110426-nano','$image->imageLocation');
 like($natty->description,'/http:\/\/nolar\.info\/nano-ami/','$image->description');
 is($natty->architecture,'i386','$image->architecture');
-is(($natty->blockDeviceMapping)[0],'/dev/sda1=snap-90ed13fe:1:true','$image->blockDeviceMapping');
+is(($natty->blockDeviceMapping)[0],'/dev/sda1=snap-90ed13fe:1:true:standard','$image->blockDeviceMapping');
 is($natty->imageState,'available','$image->imageState');
 
 my $owner = $natty->imageOwnerId();
