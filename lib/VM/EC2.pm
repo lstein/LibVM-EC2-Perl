@@ -3834,6 +3834,135 @@ sub delete_route_table {
     return $self->call('DeleteRouteTable',@parm);
 }
 
+=head2 @tables = $ec2->describe_route_tables(@route_table_ids)
+
+=head2 @tables = $ec2->describe_route_tables(\%filters)
+
+=head2 @tables = $ec2->describe_route_tables(-route_table_id=> \@ids,
+                                             -filter        => \%filters);
+
+This method describes all or some of the route tables available to
+you. You may use the filter to restrict the search to a particular
+type of route table using one of the filters described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeRouteTables.html.
+
+Some of the commonly used filters are:
+
+ vpc-id                  ID of the VPC the route table is in.
+ association.subnet-id   ID of the subnet the route table is
+                          associated with.
+ route.state             State of the route, either 'active' or 'blackhole'
+ tag:<key>               Value of a tag
+
+=cut
+
+sub describe_route_tables {
+    my $self = shift;
+    my %args  = $self->args(-route_table_id => @_);
+    my @parm   = $self->list_parm('RouteTableId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeRouteTables',@parm);
+}
+
+=head2 $associationId = $ec2->associate_route_table($subnet_id => $route_table_id)
+
+=head2 $associationId = $ec2->associate_route_table(-subnet_id      => $id,
+                                                    -route_table_id => $id)
+
+This method associates a route table with a subnet. Both objects must
+be in the same VPC. You may use either string IDs, or
+VM::EC2::VPC::RouteTable and VM::EC2::VPC::Subnet objects.
+
+On success, an associationID is returned, which you may use to
+disassociate the route table from the subnet later. The association ID
+can also be found by searching through the VM::EC2::VPC::RouteTable
+object.
+
+Required arguments:
+
+ -subnet_id      The subnet ID or a VM::EC2::VPC::Subnet object.
+
+ -route_table_id The route table ID or a M::EC2::VPC::RouteTable object.
+
+It may be more convenient to call the
+VM::EC2::VPC::Subnet->associate_route_table() or
+VM::EC2::VPC::RouteTable->associate_subnet() methods, which are front
+ends to this method.
+
+=cut
+
+sub associate_route_table {
+    my $self = shift;
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 2) {
+	@args{qw(-subnet_id -route_table_id)} = @_;
+    } else {
+	%args = @_;
+    }
+    $args{-subnet_id} && $args{-route_table_id}
+       or croak "-subnet_id, and -route_table_id arguments required";
+    my @param = $self->single_parm(SubnetId=>\%args),
+                $self->single_parm(RouteTableId=>\%args);
+    return $self->call('AssociateRouteTable',@param) or return;
+}
+
+=head2 $success = $ec2->dissociate_route_table($association_id)
+
+=head2 $success = $ec2->dissociate_route_table(-association_id => $id)
+
+This method disassociates a route table from a subnet. You must
+provide the association ID (either returned from
+associate_route_table() or found among the associations() of a
+RouteTable object). You may use the short single-argument form, or the
+longer named argument form with the required argument -association_id.
+
+The method returns true on success.
+
+=cut
+
+sub disassociate_route_table {
+    my $self = shift;
+    my %args   = $self->args('-association_id',@_);
+    my @params = $self->single_parm('AssociationId',\%args);
+    return $self->call('DisassociateRouteTable',@params);
+}
+
+=head2 $new_association = $ec2->replace_route_table_association($association_id=>$route_table_id)
+
+=head2 $new_association = $ec2->replace_route_table_association(-association_id => $id,
+                                                                -route_table_id => $id)
+
+This method changes the route table associated with a given
+subnet. You must pass the replacement route table ID and the
+association ID. To replace the main route table, use its association
+ID and the ID of the route table you wish to replace it with.
+
+On success, a new associationID is returned.
+
+Required arguments:
+
+ -association_id  The association ID
+
+ -route_table_id   The route table ID or a M::EC2::VPC::RouteTable object.
+
+=cut
+
+sub replace_route_table_association {
+    my $self = shift;
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 2) {
+	@args{qw(-association_id -route_table_id)} = @_;
+    } else {
+	%args = @_;
+    }
+    $args{-association_id} && $args{-route_table_id}
+       or croak "-association_id, and -route_table_id arguments required";
+    my @param = $self->single_parm(AssociationId => \%args),
+                $self->single_parm(RouteTableId  => \%args);
+    return $self->call('ReplaceRouteTableAssociation',@param) or return;
+}
+
+
 
 =head1 DHCP Options
 
@@ -4794,7 +4923,6 @@ sub args {
 As of 30 July 2012, the following Amazon API calls were NOT
 implemented. Volumteers to implement these calls are most welcome.
 
-AssociateRouteTable
 AttachInternetGateway
 AttachNetworkInterface
 AttachVpnGateway
@@ -4807,7 +4935,6 @@ CreateNetworkAcl
 CreateNetworkAclEntry
 CreatePlacementGroup
 CreateRoute
-CreateRouteTable
 CreateVpnConnection
 CreateVpnGateway
 DeleteCustomerGateway
@@ -4816,7 +4943,6 @@ DeleteNetworkAcl
 DeleteNetworkAclEntry
 DeletePlacementGroup
 DeleteRoute
-DeleteRouteTable
 DeleteVpnConnection
 DeleteVpnGateway
 DescribeBundleTasks
@@ -4830,13 +4956,11 @@ DescribeVpnGateways
 DetachInternetGateway
 DetachNetworkInterface
 DetachVpnGateway
-DisassociateRouteTable
 ImportInstance
 ImportVolume
 ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
 ReplaceRoute
-ReplaceRouteTableAssociation
 ResetNetworkInterfaceAttribute
 
 =head1 OTHER INFORMATION
