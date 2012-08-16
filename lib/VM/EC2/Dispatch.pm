@@ -214,12 +214,18 @@ use constant ObjectRegistration => {
     CreateSubnet                      => 'fetch_one,subnet,VM::EC2::VPC::Subnet',
     DeleteSubnet                      => 'boolean',
     DescribeSubnets                   => 'fetch_items,subnetSet,VM::EC2::VPC::Subnet',
+    # internet gateways
+    DescribeInternetGateways          => 'fetch_items,internetGatewaySet,VM::EC2::VPC::InternetGateway',
     # route tables
     CreateRouteTable                  => 'fetch_one,routeTable,VM::EC2::VPC::RouteTable',
     DeleteRouteTable                  => 'boolean',
     DescribeRouteTables               => 'fetch_items,routeTableSet,VM::EC2::VPC::RouteTable',
     AssociateRouteTable               => sub { shift->{associationId}    },
     ReplaceRouteTableAssociation      => sub { shift->{newAssociationId} },
+    # route rules
+    CreateRoute                       => 'boolean',
+    DeleteRoute                       => 'boolean',
+    ReplaceRoute                      => 'boolean',
 };
 
 sub new {

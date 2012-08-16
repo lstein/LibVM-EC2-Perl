@@ -3771,7 +3771,7 @@ restrict the search.
 
 Optional arguments:
 
- -subnet_id     Scalar or arrayref of DhcpOption IDs.
+ -subnet_id     Scalar or arrayref of subnet IDs.
  -filter        Hashref of filters.
 
 Available filters are described at
@@ -3785,6 +3785,38 @@ sub describe_subnets {
     my @parm   = $self->list_parm('SubnetId',\%args);
     push @parm,  $self->filter_parm(\%args);
     return $self->call('DescribeSubnets',@parm);
+}
+
+=head2 @gateways = $ec2->describe_internet_gateways (@gateway_ids)
+
+=head2 @gateways = $ec2->describe_internet_gateways (\%filters)
+
+=head2 @gateways = $ec2->describe_internet_gateways (-internet_gateway_id => $id,
+                                                     -filter              => \$filters)
+
+This method returns a list of VM::EC2::VPC::InternetGateway objects.
+These can be attached to a VPC to allow instances within the VPC
+communicate with the outside world.
+
+Called with no arguments, it returns all gateways.  Pass a list of
+gateway IDs or a filter hashref in order to restrict the search.
+
+Optional arguments:
+
+ -internet_gateway_id     Scalar or arrayref of gateway IDs.
+ -filter                  Hashref of filters.
+
+Available filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInternetGateways.html
+
+=cut
+
+sub describe_internet_gateways {
+    my $self = shift;
+    my %args  = $self->args(-internet_gateway_id => @_);
+    my @parm  = $self->list_parm('InternetGatewayId',\%args);
+    push @parm, $self->filter_parm(\%args);
+    return $self->call('DescribeInternetGateways',@parm);
 }
 
 =head2 $table = $ec2->create_route_table($vpc_id)
@@ -3962,6 +3994,151 @@ sub replace_route_table_association {
     return $self->call('ReplaceRouteTableAssociation',@param) or return;
 }
 
+=head2 $success = $ec2->create_route($route_table_id,$destination,$target)
+
+=head2 $success = $ec2->create_route(-route_table_id => $id,
+                                     -destination_cidr_block => $block,
+                                     -target=>$target)
+
+This method creates a routing rule in a route table within a VPC. It
+takes three mandatory arguments consisting of the route table, the
+CIDR address block to match packet destinations against, and a target
+to route matching packets to. The target may be an internet gateway, a
+NAT instance, or a network interface ID.
+
+Network packets are routed by matching their destination addresses
+against a CIDR block. For example, 0.0.0.0/0 matches all addresses,
+while 10.0.1.0/24 matches 10.0.1.* addresses. When a packet matches
+more than one rule, the most specific matching routing rule is chosen.
+
+In the named argument form, the following arguments are recognized:
+
+ -route_table_id    The ID of a route table, or a VM::EC2::VPC::RouteTable
+                    object.
+
+ -destination_cidr_block
+                    The CIDR address block to match against packet destinations.
+
+ -destination       A shorthand version of -destination_cidr_block.
+
+ -target            The destination of matching packets. See below for valid
+                    targets.
+
+The -target value can be any one of the following:
+
+ 1. A VM::EC2::VPC::InternetGateway object, or an internet gateway ID matching
+    the regex /^igw-[0-9a-f]{8}$/
+
+ 2. A VM::EC2::Instance object, or an instance ID matching the regex
+ /^i-[0-9a-f]{8}$/.
+
+ 3. A VM::EC2::NetworkInterface object, or a network interface ID
+    matching the regex /^eni-[0-9a-f]{8}$/.
+
+On success, this method returns true.
+
+=cut
+
+sub create_route {
+    my $self = shift;
+    return $self->_manipulate_route('CreateRoute',@_);
+}
+
+=head2 $success = $ec2->delete_route($route_table_id,$destination_block)
+
+This method deletes a route in the specified routing table. The
+destination CIDR block is used to indicate which route to delete. On
+success, the method returns true.
+
+=cut
+
+sub delete_route {
+    my $self = shift;
+    @_ == 2 or croak "Usage: delete_route(\$route_table_id,\$destination_block)";
+    my %args;
+    @args{qw(-route_table_id -destination_cidr_block)} = @_;
+    my @parm = map {$self->single_parm($_,\%args)} qw(RouteTableId DestinationCidrBlock);
+    return $self->call('DeleteRoute',@parm);
+}
+
+=head2 $success = $ec2->replace_route($route_table_id,$destination,$target)
+
+=head2 $success = $ec2->replace_route(-route_table_id => $id,
+                                     -destination_cidr_block => $block,
+                                     -target=>$target)
+
+This method replaces an existing routing rule in a route table within
+a VPC. It takes three mandatory arguments consisting of the route
+table, the CIDR address block to match packet destinations against,
+and a target to route matching packets to. The target may be an
+internet gateway, a NAT instance, or a network interface ID.
+
+Network packets are routed by matching their destination addresses
+against a CIDR block. For example, 0.0.0.0/0 matches all addresses,
+while 10.0.1.0/24 matches 10.0.1.* addresses. When a packet matches
+more than one rule, the most specific matching routing rule is chosen.
+
+In the named argument form, the following arguments are recognized:
+
+ -route_table_id    The ID of a route table, or a VM::EC2::VPC::RouteTable
+                    object.
+
+ -destination_cidr_block
+                    The CIDR address block to match against packet destinations.
+
+ -destination       A shorthand version of -destination_cidr_block.
+
+ -target            The destination of matching packets. See below for valid
+                    targets.
+
+The -target value can be any one of the following:
+
+ 1. A VM::EC2::VPC::InternetGateway object, or an internet gateway ID matching
+    the regex /^igw-[0-9a-f]{8}$/
+
+ 2. A VM::EC2::Instance object, or an instance ID matching the regex
+ /^i-[0-9a-f]{8}$/.
+
+ 3. A VM::EC2::NetworkInterface object, or a network interface ID
+    matching the regex /^eni-[0-9a-f]{8}$/.
+
+On success, this method returns true.
+
+=cut
+
+sub replace_route {
+    my $self = shift;
+    return $self->_manipulate_route('ReplaceRoute',@_);
+}
+
+sub _manipulate_route {
+    my $self = shift;
+    my $api_call = shift;
+
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 3) {
+	@args{qw(-route_table_id -destination -target)} = @_;
+    } else {
+	%args = @_;
+    }
+
+    $args{-destination_cidr_block} ||= $args{-destination};
+    $args{-destination_cidr_block} && $args{-route_table_id} && $args{-target}
+       or croak "-route_table_id, -destination_cidr_block, and -target arguments required";
+
+    # figure out what the target is.
+    $args{-gateway_id}  = $args{-target} if eval{$args{-target}->isa('VM::EC2::VPC::InternetGateway')}
+                                             || $args{-target} =~ /^igw-[0-9a-f]{8}$/;
+    $args{-instance_id} = $args{-target} if eval{$args{-target}->isa('VM::EC2::Instance')}
+                                             || $args{-target} =~ /^i-[0-9a-f]{8}$/;
+    $args{-network_interface_id} = $args{-target} if eval{$args{-target}->isa('VM::EC2::NetworkInterface')}
+                                             || $args{-target} =~ /^eni-[0-9a-f]{8}$/;
+
+    my @parm = map {$self->single_parm($_,\%args)} 
+               qw(RouteTableId DestinationCidrBlock GatewayId InstanceId NetworkInterfaceId);
+
+    return $self->call($api_call,@parm);
+}
 
 
 =head1 DHCP Options
@@ -4934,7 +5111,6 @@ CreateInternetGateway
 CreateNetworkAcl
 CreateNetworkAclEntry
 CreatePlacementGroup
-CreateRoute
 CreateVpnConnection
 CreateVpnGateway
 DeleteCustomerGateway
@@ -4942,7 +5118,6 @@ DeleteInternetGateway
 DeleteNetworkAcl
 DeleteNetworkAclEntry
 DeletePlacementGroup
-DeleteRoute
 DeleteVpnConnection
 DeleteVpnGateway
 DescribeBundleTasks
@@ -4950,7 +5125,6 @@ DescribeConversionTasks
 DescribeCustomerGateways
 DescribeNetworkAcls
 DescribePlacementGroups
-DescribeRouteTables
 DescribeVpnConnections
 DescribeVpnGateways
 DetachInternetGateway
@@ -4960,7 +5134,6 @@ ImportInstance
 ImportVolume
 ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
-ReplaceRoute
 ResetNetworkInterfaceAttribute
 
 =head1 OTHER INFORMATION
