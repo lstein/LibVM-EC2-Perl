@@ -1188,7 +1188,7 @@ sub start_instances {
 	or croak "usage: start_instances(\@instance_ids)";
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
-    return $self->call('StartInstances',@params) or return;
+    return $self->call('StartInstances',@params);
 }
 
 =head2 @s = $ec2->stop_instances(@instance_ids)
@@ -1238,7 +1238,7 @@ sub stop_instances {
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
     push @params,Force=>1 if $force;
-    return $self->call('StopInstances',@params) or return;
+    return $self->call('StopInstances',@params);
 }
 
 =head2 @s = $ec2->terminate_instances(@instance_ids)
@@ -1272,7 +1272,7 @@ sub terminate_instances {
 	or croak "usage: start_instances(\@instance_ids)";
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
-    return $self->call('TerminateInstances',@params) or return;
+    return $self->call('TerminateInstances',@params);
 }
 
 =head2 @s = $ec2->reboot_instances(@instance_ids)
@@ -1297,7 +1297,7 @@ sub reboot_instances {
 	or croak "Usage: reboot_instances(\@instance_ids)";
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
-    return $self->call('RebootInstances',@params) or return;
+    return $self->call('RebootInstances',@params);
 }
 
 =head2 $boolean = $ec2->confirm_product_instance($instance_id,$product_code)
@@ -1819,7 +1819,7 @@ sub describe_images {
     my @params;
     push @params,$self->list_parm($_,\%args) foreach qw(ExecutableBy ImageId Owner);
     push @params,$self->filter_parm(\%args);
-    return $self->call('DescribeImages',@params) or return;
+    return $self->call('DescribeImages',@params);
 }
 
 =head2 $image = $ec2->create_image(-instance_id=>$id,-name=>$name,%other_args)
@@ -1928,7 +1928,7 @@ sub deregister_image {
     my $self = shift;
     my %args  = $self->args(-image_id => @_);
     my @param = $self->single_parm(ImageId=>\%args);
-    return $self->call('DeregisterImage',@param) or return;
+    return $self->call('DeregisterImage',@param);
 }
 
 =head2 @data = $ec2->describe_image_attribute($image_id,$attribute)
@@ -2078,7 +2078,7 @@ sub describe_volumes {
     my @params;
     push @params,$self->list_parm('VolumeId',\%args);
     push @params,$self->filter_parm(\%args);
-    return $self->call('DescribeVolumes',@params) or return;
+    return $self->call('DescribeVolumes',@params);
 }
 
 =head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size)
@@ -2113,7 +2113,7 @@ sub create_volume {
     my @params = (AvailabilityZone => $zone);
     push @params,(SnapshotId   => $snap) if $snap;
     push @params,(Size => $size)         if $size;
-    return $self->call('CreateVolume',@params) or return;
+    return $self->call('CreateVolume',@params);
 }
 
 =head2 $result = $ec2->delete_volume($volume_id);
@@ -2128,7 +2128,7 @@ sub delete_volume {
     my $self = shift;
     my %args  = $self->args(-volume_id => @_);
     my @param = $self->single_parm(VolumeId=>\%args);
-    return $self->call('DeleteVolume',@param) or return;
+    return $self->call('DeleteVolume',@param);
 }
 
 =head2 $attachment = $ec2->attach_volume($volume_id,$instance_id,$device);
@@ -2163,18 +2163,18 @@ or more simply
 
 sub attach_volume {
     my $self = shift;
-    my %args;
-    if ($_[0] !~ /^-/ && @_ == 3) {
-	@args{qw(-volume_id -instance_id -device)} = @_;
-    } else {
-	%args = @_;
+    my %args; 
+    if ($_[0] !~ /^-/ && @_ == 3) { 
+	@args{qw(-volume_id -instance_id -device)} = @_; 
+    } else { 
+	%args = @_; 
     }
-    $args{-volume_id} && $args{-instance_id} && $args{-device}
-      or croak "-volume_id, -instance_id and -device arguments must all be specified";
+    $args{-volume_id} && $args{-instance_id} && $args{-device} or
+	croak "-volume_id, -instance_id and -device arguments must all be specified";
     my @param = $self->single_parm(VolumeId=>\%args);
     push @param,$self->single_parm(InstanceId=>\%args);
     push @param,$self->single_parm(Device=>\%args);
-    return $self->call('AttachVolume',@param) or return;
+    return $self->call('AttachVolume',@param);
 }
 
 =head2 $attachment = $ec2->detach_volume($volume_id)
@@ -2216,7 +2216,7 @@ sub detach_volume {
     push @param,$self->single_parm(InstanceId=>\%args);
     push @param,$self->single_parm(Device=>\%args);
     push @param,$self->single_parm(Force=>\%args);
-    return $self->call('DetachVolume',@param) or return;
+    return $self->call('DetachVolume',@param);
 }
 
 =head2 @v = $ec2->describe_volume_status(@volume_ids)
@@ -3935,7 +3935,7 @@ sub associate_route_table {
        or croak "-subnet_id, and -route_table_id arguments required";
     my @param = $self->single_parm(SubnetId=>\%args),
                 $self->single_parm(RouteTableId=>\%args);
-    return $self->call('AssociateRouteTable',@param) or return;
+    return $self->call('AssociateRouteTable',@param);
 }
 
 =head2 $success = $ec2->dissociate_route_table($association_id)
@@ -3991,7 +3991,7 @@ sub replace_route_table_association {
        or croak "-association_id, and -route_table_id arguments required";
     my @param = $self->single_parm(AssociationId => \%args),
                 $self->single_parm(RouteTableId  => \%args);
-    return $self->call('ReplaceRouteTableAssociation',@param) or return;
+    return $self->call('ReplaceRouteTableAssociation',@param);
 }
 
 =head2 $success = $ec2->create_route($route_table_id,$destination,$target)
@@ -4395,7 +4395,7 @@ sub delete_network_interface {
     my $self = shift;
     my %args  = $self->args(-network_interface_id => @_);
     my @param = $self->single_parm(NetworkInterfaceId=>\%args);
-    return $self->call('DeleteNetworkInterface',@param) or return;
+    return $self->call('DeleteNetworkInterface',@param);
 }
 
 
@@ -4484,6 +4484,97 @@ sub modify_network_interface_attribute {
 	push @param,'Attachment.DeleteOnTermination'=>$delete_on_termination ? 'true' : 'false';
     }
     return $self->call('ModifyNetworkInterfaceAttribute',@param);
+}
+
+=head2 $boolean = $ec2->reset_network_interface_attribute($interface_id => $attribute_name)
+
+This method resets the named network interface attribute to its
+default value. Only one attribute can be reset per call. The AWS
+documentation is not completely clear on this point, but it appears
+that the only attribute that can be reset using this method is:
+
+ source_dest_check       -- Turns on source destination checking 
+
+For consistency with modify_network_interface_attribute, you may
+specify attribute names with or without a leading dash, and using
+either under_score or mixedCase naming:
+
+ $ec2->reset_network_interface_atribute('eni-12345678' => 'source_dest_check');
+ $ec2->reset_network_interface_atribute('eni-12345678' => '-source_dest_check');
+ $ec2->reset_network_interface_atribute('eni-12345678' => sourceDestCheck);
+
+=cut
+
+sub reset_network_interface_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: reset_network_interface_attribute(\$interfaceId,\$attribute)";
+    my ($interface_id,$attribute) = @_;
+
+    $attribute = s/^-//;
+    $attribute = $self->uncanonicalize($attribute);
+    my @param = (NetworkInterfaceId=> $interface_id,
+		 Attribute         => $attribute
+	);
+    return $self->call('ResetNetworkInterfaceAttribute',@param);
+}
+
+=head2 $attachmentId = $ec2->attach_network_interface($network_interface_id,$instance_id,$device_index)
+
+=head2 $attachmentId = $ec2->attach_network_interface(-network_interface_id => $id,
+                                                      -instance_id          => $id,
+                                                      -device_index         => $index)
+
+This method attaches a network interface to an instance using the
+indicated device index. You can use instance and network interface
+IDs, or VM::EC2::Instance and VM::EC2::NetworkInterface objects. You
+may use an integer for -device_index, or use the strings "eth0",
+"eth1" etc.
+
+Required arguments:
+
+ -network_interface_id ID of the network interface to attach.
+ -instance_id          ID of the instance to attach the interface to.
+ -device_index         Network device number to use (e.g. 0 for eth0).
+
+On success, this method returns the attachmentId of the new attachment.
+
+=cut
+
+sub attach_network_interface {
+    my $self = shift;
+    my %args; 
+    if ($_[0] !~ /^-/ && @_ == 3) { 
+	@args{qw(-network_interface_id -instance_id -device_index)} = @_; 
+    } else { 
+	%args = @_;
+    }
+    $args{-network_interface_id} && $args{-instance_id} && defined $args{-device_index} or
+	croak "-network_interface_id, -instance_id and -device_index arguments must all be specified";
+
+    $args{-device_index} =~ s/^eth//;
+    
+    my @param = $self->single_parm(NetworkInterfaceId=>\%args);
+    push @param,$self->single_parm(InstanceId=>\%args);
+    push @param,$self->single_parm(DeviceIndex=>\%args);
+    return $self->call('AttachNetworkInterface',@param);
+}
+
+=head2 $boolean = $ec2->detach_network_interface($attachment_id [,$force])
+
+This method detaches a network interface from an instance. Both the
+network interface and instance are specified using their
+attachmentId. If the $force flag is present, and true, then the
+detachment will be forced even if the interface is in use.
+
+=cut
+
+sub detach_network_interface {
+    my $self = shift;
+    my ($attachment_id,$force) = @_;
+    $attachment_id or croak "Usage: detach_network_interface(\$attachment_id [,\$force])";
+    my @param = (AttachmentId => $attachment_id);
+    push @param,(Force => 'true') if defined $force && $force;
+    return $self->call('DetachNetworkInterface',@param);
 }
 
 =head1 AWS SECURITY TOKENS
@@ -5101,7 +5192,6 @@ As of 30 July 2012, the following Amazon API calls were NOT
 implemented. Volumteers to implement these calls are most welcome.
 
 AttachInternetGateway
-AttachNetworkInterface
 AttachVpnGateway
 BundleInstance
 CancelBundleTask
@@ -5128,13 +5218,11 @@ DescribePlacementGroups
 DescribeVpnConnections
 DescribeVpnGateways
 DetachInternetGateway
-DetachNetworkInterface
 DetachVpnGateway
 ImportInstance
 ImportVolume
 ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
-ResetNetworkInterfaceAttribute
 
 =head1 OTHER INFORMATION
 

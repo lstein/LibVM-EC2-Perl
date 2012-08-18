@@ -33,14 +33,10 @@ These object methods are supported:
  networkInterfaceId       -- The ID of this ENI
  subnetId                 -- The ID of the subnet this ENI belongs to
  vpcId                    -- The ID of the VPC this ENI belongs to
- description              -- Description of the ENI
  ownerId                  -- Owner of the ENI
  status                   -- ENI status, one of "available" or "in-use"
  privateIpAddress         -- Primary private IP address of the ENI
  privateDnsName           -- Primary private DNS name of the ENI
- sourceDestCheck          -- Boolean value. If true, prevent this ENI from
-                             forwarding packets between subnets.
- groups                   -- List of security groups this ENI belongs to,
                              as a set of VM::EC2::Group objects.
  attachment               -- Information about the attachment of this ENI to
                              an instance, as a VM::EC2::NetworkInterface::Attachment
@@ -55,6 +51,24 @@ These object methods are supported:
  macAddress               -- MAC address for this interface.
 
 In addition, this object supports the following convenience methods:
+
+ resetAttributes()          -- Return attributes to their default states. Currently only
+                               sets the SourceDestCheck value to true.
+
+ description([$new_value])  -- Description of the ENI. Pass a single argument to set a new
+                               description
+
+ sourceDestCheck([$boolean])-- Boolean value. If true, prevent this ENI from
+                               forwarding packets between subnets. Value can optionally
+                               be set
+
+ security_groups([@new_groups]) -- List of security groups this ENI belongs to. Pass a
+                               list of new security groups to change this value.
+
+ delete_on_termination([$boolean])
+                            -- Whether the deleteOnTermination flag is set for the current
+                               attachment. Pass a boolean value to change the value.
+
 
 =head1 STRING OVERLOADING
 
@@ -164,11 +178,17 @@ sub source_dest_check {
     return $d eq 'true';
 }
 
-sub attachment {
+sub reset_attributes {
     my $self = shift;
-    my $d    = $self->aws->describe_network_interface_attribute($self,'attachment');
-    $self->aws->modify_network_interface_attribute($self,-attachment=>shift) if @_;
-    return VM::EC2::NetworkInterface::Attachment->new($d,$self->aws);
+    return $self->aws->reset_network_interface_attribute($self=>'sourceDestCheck');
+}
+
+sub delete_on_termination {
+    my $self = shift;
+    my $d    = $self->aws->describe_network_interface_attribute($self,'attachment') or return;
+    my $att  = VM::EC2::NetworkInterface::Attachment->new($d,$self->aws);
+    $self->aws->modify_network_interface_attribute($self,-delete_on_termination=>[$att=>shift]) if @_;
+    return $att;
 }
 
 sub availabilityZone {

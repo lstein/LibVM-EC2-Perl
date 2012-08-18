@@ -210,6 +210,9 @@ use constant ObjectRegistration => {
     DeleteNetworkInterface            => 'boolean',
     DescribeNetworkInterfaces         => 'fetch_items,networkInterfaceSet,VM::EC2::NetworkInterface',
     ModifyNetworkInterfaceAttribute   => 'boolean',
+    ResetNetworkInterfaceAttribute    => 'boolean',
+    AttachNetworkInterface            => sub { shift->{attachmentId}    },
+    DetachNetworkInterface            => 'boolean',
     # subnets
     CreateSubnet                      => 'fetch_one,subnet,VM::EC2::VPC::Subnet',
     DeleteSubnet                      => 'boolean',
