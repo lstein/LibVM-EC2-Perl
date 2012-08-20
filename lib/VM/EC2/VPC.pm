@@ -37,6 +37,15 @@ In addition, this object supports the following convenience methods:
           this VPC (DhcpOptionsId string or VM::EC2::VPC::DhcpOptions object).
           Use "default" or pass no arguments to assign no Dhcp options.
 
+    internet_gateways() -- Return the list of internet gateways attached to
+                           this VPC as a list of VM::EC2::VPC::InternetGateway.
+
+    subnets()           -- Return the list of subnets attached to this VPC
+                           as a list of VM::EC2::VPC::Subnet.
+
+    route_tables()      -- Return the list of route tables attached to this VPC
+                           as a list of VM::EC2::VPC::RouteTable.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will be interpolated as the
@@ -95,6 +104,33 @@ sub set_dhcp_options {
     my $self = shift;
     my $options = shift || 'default';
     return $self->aws->associate_dhcp_options($self => $options);
+}
+
+sub internet_gateways {
+    my $self = shift;
+    return $self->aws->describe_internet_gateways({'attachment.vpc-id'=>$self->vpcId});
+}
+
+sub subnets {
+    my $self = shift;
+    return $self->aws->describe_subnets({'vpc-id'=>$self->vpcId});
+}
+
+sub route_tables {
+    my $self = shift;
+    return $self->aws->describe_route_tables({'vpc-id'=>$self->vpcId});
+}
+
+sub attach_internet_gateway {
+    my $self = shift;
+    my $gw   = shift;
+    return $self->aws->attach_internet_gateway($gw => $self->vpcId);
+}
+
+sub detach_internet_gateway {
+    my $self = shift;
+    my $gw   = shift;
+    return $self->aws->detach_internet_gateway($gw=>$self->vpcId);
 }
 
 1;

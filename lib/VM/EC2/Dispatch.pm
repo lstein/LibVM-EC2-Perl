@@ -229,6 +229,12 @@ use constant ObjectRegistration => {
     CreateRoute                       => 'boolean',
     DeleteRoute                       => 'boolean',
     ReplaceRoute                      => 'boolean',
+    # internet gateways
+    CreateInternetGateway             => 'fetch_one,internetGateway,VM::EC2::VPC::InternetGateway',
+    DescribeInternetGateways          => 'fetch_items,internetGatewaySet,VM::EC2::VPC::InternetGateway',
+    DeleteInternetGateway             => 'boolean',
+    AttachInternetGateway             => 'boolean',
+    DetachInternetGateway             => 'boolean',
 };
 
 sub new {

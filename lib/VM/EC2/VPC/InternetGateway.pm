@@ -87,19 +87,23 @@ sub attachments {
 sub attach {
     my $self = shift;
     my $vpc  = shift or croak "Usage: attach(\$vpc)";
-    $self->aws->attach_internet_gateway($vpc => $self);
+    my $result = $self->aws->attach_internet_gateway($self=>$vpc);
+    $self->refresh if $result;
+    return $result;
 }
 
 sub detach {
     my $self = shift;
     my $vpc  = shift or croak "Usage: detach(\$vpc)";
-    $self->aws->detach_internet_gateway($vpc => $self);
+    my $result = $self->aws->detach_internet_gateway($self => $vpc);
+    $self->refresh if $result;
+    return $result;
 }
 
 sub refresh {
     my $self = shift;
     my $i   = shift;
-    ($i) = $self->aws->describe_subnets($self->subnetId) unless $i;
+    ($i) = $self->aws->describe_internet_gateways($self->internetGatewayId) unless $i;
     %$self  = %$i;
 }
 
