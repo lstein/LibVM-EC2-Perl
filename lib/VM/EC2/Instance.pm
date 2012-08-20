@@ -316,6 +316,10 @@ Arguments:
 In the unnamed argument version you can provide the name and
 optionally the description of the resulting image.
 
+=head2 $boolean = $instance->confirm_product_code($product_code)
+
+Return true if this instance is associated with the given product code.
+
 =head1 VOLUME MANAGEMENT
 
 =head2 $attachment = $instance->attach_volume($volume_id,$device)
@@ -360,9 +364,34 @@ you can monitor by calling current_status():
     }
     print "volume is ready to go\n";
 
-=head2 $boolean = $instance->confirm_product_code($product_code)
+=head1 NETWORK INTERFACE MANAGEMENT
 
-Return true if this instance is associated with the given product code.
+=head2 $attachment_id = $instance->attach_network_interface($interface_id => $device)
+
+=head2 $attachment_id = $instance->attach_network_interface(-network_interface_id=>$id,
+                                                            -device_index   => $device)
+
+This method attaches a network interface to the current instance using
+the indicated device index. You can use either an elastic network
+interface ID, or a VM::EC2::NetworkInterface object. You may use an
+integer for -device_index, or use the strings "eth0", "eth1" etc.
+
+Required arguments:
+
+ -network_interface_id ID of the network interface to attach.
+ -device_index         Network device number to use (e.g. 0 for eth0).
+
+On success, this method returns the attachmentId of the new attachment
+(not a VM::EC2::NetworkInterface::Attachment object, due to an AWS API
+inconsistency).
+
+=head2 $boolean = $instance->detach_network_interface($interface_id [,$force])
+
+This method detaches a network interface from the current instance. If
+a true second argument is provided, then the detachment will be
+forced, even if the interface is in use.
+
+On success, this method returns a true value.
 
 =head1 ACCESSING INSTANCE METADATA
 
@@ -768,7 +797,9 @@ sub attach_volume {
     $args{-volume_id} && $args{-device}
        or croak "usage: \$vol->attach(\$instance_id,\$device)";
     $args{-instance_id} = $self->instanceId;
-    return $self->aws->attach_volume(%args);
+    my $result = $self->aws->attach_volume(%args);
+    $self->refresh if $result;
+    return $result;
 }
 
 sub detach_volume {
@@ -790,7 +821,39 @@ sub detach_volume {
 	%args = @_;
     }
     $args{-instance_id} = $self->instanceId;
-    return $self->aws->detach_volume(%args);
+    my $result = $self->aws->detach_volume(%args);
+    $self->refresh if $result;
+    return $result;
+}
+
+sub attach_network_interface {
+    my $self = shift;
+    my %args;
+    if (@_==2 && $_[0] !~ /^-/) {
+	@args{qw(-network_interface_id -device_index)} = @_; 
+    } else {
+	%args = @_;
+    }
+    $args{-network_interface_id} && $args{-device_index}
+       or croak "usage: \$instance->attach_network_interface(\$network_interface_id,\$device_index)";
+
+    $args{-instance_id} = $self->instanceId;
+    my $result = $self->aws->attach_network_interface(%args);
+    $self->refresh if $result;
+    eval {$args{-network_interface_id}->refresh} if $result;
+    return $result;
+}
+
+sub detach_network_interface {
+    my $self = shift;
+    my ($nid,$force) = @_;
+    $nid or croak "usage: \$instance=>detach_network_interface(\$network_interface_id [,\$force])";
+    my ($attachment) = map {$_->attachment} grep { $_->networkInterfaceId eq $nid } $self->network_interfaces;
+    $attachment or croak "$self is not attached to $nid";
+    my $result = $self->aws->detach_network_interface($attachment,$force);
+    $self->refresh if $result;
+    eval {$nid->refresh} if $result;
+    return $result;
 }
 
 sub metadata {

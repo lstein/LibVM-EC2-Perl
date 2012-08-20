@@ -4536,7 +4536,16 @@ Required arguments:
  -instance_id          ID of the instance to attach the interface to.
  -device_index         Network device number to use (e.g. 0 for eth0).
 
-On success, this method returns the attachmentId of the new attachment.
+On success, this method returns the attachmentId of the new attachment
+(not a VM::EC2::NetworkInterface::Attachment object, due to an AWS API
+inconsistency).
+
+Note that it may be more convenient to attach and detach network
+interfaces via methods in the VM::EC2::Instance and
+VM::EC2::NetworkInterface objects:
+
+ $instance->attach_network_interface($interface=>'eth0');
+ $interface->attach($instance=>'eth0');
 
 =cut
 
@@ -4565,6 +4574,13 @@ This method detaches a network interface from an instance. Both the
 network interface and instance are specified using their
 attachmentId. If the $force flag is present, and true, then the
 detachment will be forced even if the interface is in use.
+
+Note that it may be more convenient to attach and detach network
+interfaces via methods in the VM::EC2::Instance and
+VM::EC2::NetworkInterface objects:
+
+ $instance->detach_network_interface($interface);
+ $interface->detach();
 
 =cut
 

@@ -69,6 +69,37 @@ In addition, this object supports the following convenience methods:
                             -- Whether the deleteOnTermination flag is set for the current
                                attachment. Pass a boolean value to change the value.
 
+=head1 Attaching to an instance
+
+The following methods allow the interface to be attached to, and
+detached from, instances.
+
+=head2 $attachment_id = $interface->attach($instance_id => $device)
+
+=head2 $attachment_id = $interfacee->attach(-instance_id    => $id,
+                                            -device_index   => $device)
+
+This method attaches the network interface an instance using the the
+indicated device index. You can provide either an instance ID, or a
+VM::EC2::Instance object. You may use an integer for -device_index, or
+use the strings "eth0", "eth1" etc.
+
+Required arguments:
+
+ -instance_id          ID of the instance to attach to.
+ -device_index         Network device number to use (e.g. 0 for eth0).
+
+On success, this method returns the attachmentId of the new attachment
+(not a VM::EC2::NetworkInterface::Attachment object, due to an AWS API
+inconsistency).
+
+=head2 $boolean = $interface->detach([$force])
+
+This method detaches the network interface from whatever instance it
+is currently attached to. If a true argument is provided, then the
+detachment will be forced, even if the interface is in use.
+
+On success, this method returns a true value.
 
 =head1 STRING OVERLOADING
 
@@ -99,6 +130,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
+use Carp 'croak';
 use VM::EC2::Group;
 use VM::EC2::NetworkInterface::PrivateIpAddress;
 use VM::EC2::NetworkInterface::Attachment;
@@ -188,13 +220,40 @@ sub delete_on_termination {
     my $d    = $self->aws->describe_network_interface_attribute($self,'attachment') or return;
     my $att  = VM::EC2::NetworkInterface::Attachment->new($d,$self->aws);
     $self->aws->modify_network_interface_attribute($self,-delete_on_termination=>[$att=>shift]) if @_;
-    return $att;
+    return $att->delete_on_termination;
 }
 
 sub availabilityZone {
     my $self = shift;
     my $z    = $self->SUPER::availabilityZone or return;
     return $self->aws->describe_availability_zones($z);
+}
+
+sub attach { 
+    my $self = shift;
+    my %args;
+    if (@_==2 && $_[0] !~ /^-/) {
+	@args{qw(-instance_id -device_index)} = @_; 
+    } else {
+	%args = @_;
+    }
+    $args{-instance_id} && $args{-device_index}
+       or croak "usage: \$interface->attach(\$instance_id,\$device_index)";
+    $args{-network_interface_id} = $self->networkInterfaceId;
+    my $result = $self->aws->attach_network_interface(%args);
+    $self->refresh if $result;
+    eval {$args{-instance_id}->refresh} if $result;
+    return $result;
+}
+
+sub detach {
+    my $self = shift;
+    my $force = shift;
+    my $attachment = $self->attachment;
+    $attachment or croak "$self is not attached";
+    my $result =  $self->aws->detach_network_interface($attachment,$force);
+    $self->refresh if $result;
+    return $result;
 }
 
 1;
