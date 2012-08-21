@@ -1,4 +1,4 @@
-1.16
+1.16 Tue Aug 21 07:34:35 EDT 2012
     - Added support for most VPC-related calls (VPCs, subnets, routes, network interfaces).
     - Added support for elastic network interfaces.
     - Added support for high-IOPS volumes.

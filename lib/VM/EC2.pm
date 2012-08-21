@@ -200,8 +200,8 @@ following caveats apply:
 
  1) Not all of the Amazon API is currently implemented. Specifically,
     some calls dealing with Virtual Private Clouds (VPC) and cluster
-    management, are not currently supported.  See L</MISSING METHODS>
-    for a list of all the unimplemented API calls.
+    management are missing.  See L</MISSING METHODS> for a list of 
+    all the unimplemented API calls.
 
  2) For consistency with common Perl coding practices, method calls
     are lowercase and words in long method names are separated by
@@ -374,7 +374,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.15';
+our $VERSION = '1.16';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
