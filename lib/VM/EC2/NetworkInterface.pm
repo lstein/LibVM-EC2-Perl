@@ -101,6 +101,65 @@ detachment will be forced, even if the interface is in use.
 
 On success, this method returns a true value.
 
+=head1 Adding IP addresses
+
+=head2 $result = $interface->assign_private_ip_addresses(@addresses)
+
+=head2 $result = $interface->assign_private_ip_addresses(%args)
+
+Assign one or more secondary private IP addresses to the network
+interface. You can either set the addresses explicitly, or provide a
+count of secondary addresses, and let Amazon select them for you.
+
+In the list argument form, pass a list of desired IP addresses, or a
+count of the number of addresses to select for you:
+
+ $interface->assign_private_ip_addresses(3);  # three automatic addresses
+ $interface->assign_private_ip_addresses('192.168.0.10','192.168.0.11');
+
+Required arguments:
+
+ -private_ip_address      One or more secondary IP addresses, as a scalar string
+ -private_ip_addresses    or array reference. (The two arguments are equivalent).
+
+Optional arguments:
+
+ -allow_reassignment      If true, allow assignment of an IP address is already in
+                          use by another network interface or instance.
+
+The following are valid arguments to -private_ip_address:
+
+ -private_ip_address => '192.168.0.12'                    # single address
+ -private_ip_address => ['192.168.0.12','192.168.0.13]    # multiple addresses
+ -private_ip_address => 3                                 # autoselect three addresses
+
+The mixed form of address, such as ['192.168.0.12','auto'] is not allowed in this call.
+
+On success, this method returns true.
+
+=head2 $result = $interface->unassign_private_ip_addresses(@addresses)
+
+=head2 $result = $interface->unassign_private_ip_addresses(-private_ip_address => \@addresses)
+
+Unassign one or more secondary private IP addresses from the network
+interface.
+
+In the list argument form, pass a list of desired IP addresses to unassign.
+
+ $interface->assign_private_ip_addresses('192.168.0.10','192.168.0.11');
+
+In the named argument form, use:
+
+ -private_ip_address      One or more secondary IP addresses, as a scalar string
+ -private_ip_addresses    or array reference. (The two arguments are equivalent).
+
+The following are valid arguments to -private_ip_address:
+
+ -private_ip_address => '192.168.0.12'                    # single address
+ -private_ip_address => ['192.168.0.12','192.168.0.13]    # multiple addresses
+
+On success, this method returns true.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will be interpolated as the
@@ -252,6 +311,32 @@ sub detach {
     my $attachment = $self->attachment;
     $attachment or croak "$self is not attached";
     my $result =  $self->aws->detach_network_interface($attachment,$force);
+    $self->refresh if $result;
+    return $result;
+}
+
+sub assign_private_ip_addresses {
+    my $self = shift;
+    my %args;
+    if (@_ && $_[0] !~ /^-/) {
+	%args = (-private_ip_address => @_==1 ? $_[0] : \@_);
+    } else {
+	%args = @_;
+    }
+    my $result = $self->aws->assign_private_ip_addresses(-network_interface_id=>$self,%args);
+    $self->refresh if $result;
+    return $result;
+}
+
+sub unassign_private_ip_addresses {
+    my $self = shift;
+    my %args;
+    if (@_ && $_[0] !~ /^-/) {
+	%args = (-private_ip_address => \@_);
+    } else {
+	%args = @_;
+    }
+    my $result = $self->aws->unassign_private_ip_addresses(-network_interface_id=>$self,%args);
     $self->refresh if $result;
     return $result;
 }

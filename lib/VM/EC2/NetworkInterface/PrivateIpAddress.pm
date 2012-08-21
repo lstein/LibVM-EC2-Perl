@@ -57,6 +57,12 @@ sub valid_fields {
     return qw(privateIpAddress primary association);
 }
 
+sub primary {
+    my $self = shift;
+    my $p    = $self->SUPER::primary;
+    return $p eq 'true';
+}
+
 sub short_name { shift->privateIpAddress }
 
 sub association {

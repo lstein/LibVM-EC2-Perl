@@ -213,6 +213,8 @@ use constant ObjectRegistration => {
     ResetNetworkInterfaceAttribute    => 'boolean',
     AttachNetworkInterface            => sub { shift->{attachmentId}    },
     DetachNetworkInterface            => 'boolean',
+    AssignPrivateIpAddresses          => 'boolean',
+    UnassignPrivateIpAddresses        => 'boolean',
     # subnets
     CreateSubnet                      => 'fetch_one,subnet,VM::EC2::VPC::Subnet',
     DeleteSubnet                      => 'boolean',
