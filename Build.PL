@@ -16,6 +16,7 @@ my $build = Module::Build->new(
       'Digest::SHA'  => '5.47',
       'URI::URL'     => '5.03',
       'XML::Simple'  => '2.18',
+      'File::Path'   => '2.08',
     },
     recommends        => {
     },

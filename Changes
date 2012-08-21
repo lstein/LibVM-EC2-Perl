@@ -1,3 +1,6 @@
+1.16
+   - Update requirements to indicate that File::Path 2.08 is needed.
+
 1.15 Tue Aug 14 07:18:04 EDT 2012
     - Allow ephemeral storage to be specified in migrate-ebs-image.pl using the -b argument.
     - Add -block_device_mapping option to create_image().
