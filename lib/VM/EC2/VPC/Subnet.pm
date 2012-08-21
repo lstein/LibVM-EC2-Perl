@@ -47,6 +47,16 @@ In addition, this object supports the following convenience methods:
  zone()               -- Return the associated VM::EC2::AvailabilityZone object.
  refresh()            -- Refreshes the object from its current state in EC2.
  current_state()      -- Refreshes the object and returns its current state.
+ create_route_table() -- Create a new route table, associates it with this subnet, and
+                         returns the corresponding VM::EC2::VPC::RouteTable
+                         object.
+ associate_route_table($table)
+                      -- Associates a route table with this subnet, returning true if
+                         sucessful.
+ disassociate_route_table($table)
+                      -- Removes the association of a route table with this subnet. Produces
+                         a fatal error if $table is not associated with the subnet. Returns true
+                         on success.
 
 =head1 STRING OVERLOADING
 
@@ -105,6 +115,29 @@ sub current_state {
     my $self = shift;
     $self->refresh;
     $self->state;
+}
+
+sub associate_route_table {
+    my $self = shift;
+    my $rt   = shift or croak "usage: associate_route_table(\$route_table_id)";
+    return $self->aws->associate_route_table(-subnet_id      => $self->subnetId,
+					     -route_table_id => $rt);
+}
+
+sub disassociate_route_table {
+    my $self = shift;
+    my $rt   = shift or croak "usage: disassociate_route_table(\$route_table_id)";
+    $rt      = $self->aws->describe_route_tables($rt) unless ref $rt;
+    my ($association) = grep {$_->subnetId eq $self->subnetId} $rt->associations;
+    $association or croak "$rt is not associated with this subnet"
+    return $self->aws->disassociate_route_table($association);
+}
+
+sub create_route_table {
+    my $self = shift;
+    my $vpc  = $self->vpcId;
+    my $rt   = $self->aws->create_route_table($vpc) or return;
+    return $self->associate_route_table($rt);
 }
 
 1;

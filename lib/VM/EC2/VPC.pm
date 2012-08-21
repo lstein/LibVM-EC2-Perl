@@ -6,8 +6,14 @@ VM::EC2::VPC
 
 =head1 SYNOPSIS
 
-  use VM::EC2;
- ...
+ use VM::EC2;
+ $ec2       - VM::EC2->new(...);
+ $vpc       = $ec2->create_vpc('10.0.0.0/16')     or die $ec2->error_str;
+ $subnet1   = $vpc->create_subnet('10.0.0.0/24')  or die $vpc->error_str;
+ $gateway   = $vpc->create_internet_gateway       or die $vpc->error_str;
+ $routeTbl  = $subnet1->create_route_table        or die $vpc->error_str;
+ $routeTbl->create_route('0.0.0.0/0' => $gateway) or die $vpc->error_str;
+
 
 =head1 DESCRIPTION
 
@@ -39,6 +45,15 @@ In addition, this object supports the following convenience methods:
 
     internet_gateways() -- Return the list of internet gateways attached to
                            this VPC as a list of VM::EC2::VPC::InternetGateway.
+
+    create_subnet($cidr_block)
+                        -- Create a subnet with the indicated CIDR block and
+                           return the VM::EC2::VPC::Subnet object.
+
+    create_internet_gateway()
+                        -- Create an internet gateway and immediately attach
+                           it to this VPC. If successful returns a 
+                           VM::EC2::VPC::InternetGateway object.
 
     subnets()           -- Return the list of subnets attached to this VPC
                            as a list of VM::EC2::VPC::Subnet.
@@ -72,6 +87,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
+use Carp 'croak';
 
 sub valid_fields {
     my $self  = shift;
@@ -129,8 +145,37 @@ sub attach_internet_gateway {
 
 sub detach_internet_gateway {
     my $self = shift;
-    my $gw   = shift;
+    my $gw   = shift || ($self->internet_gateways)[0];
     return $self->aws->detach_internet_gateway($gw=>$self->vpcId);
+}
+
+sub create_subnet {
+    my $self = shift;
+    my $cidr_block = shift or croak "usage: create_subnet(\$cidr_block)";
+    my $result = $self->aws->create_subnet(-vpc_id=>$self->vpcId,
+					   -cidr_block=>$cidr_block);
+    $self->refresh if $result;
+    return $result;
+}
+
+sub delete_internet_gateway {
+    my $self = shift;
+    my $gateway = shift || ($self->internet_gateways)[0];
+    $gateway or return;
+    $self->detach_internet_gateway($gateway) or return;
+    return $self->aws->delete_internet_gateway($gateway);
+}
+
+sub create_internet_gateway {
+    my $self    = shift;
+    my $gateway = $self->aws->create_internet_gateway() or return;
+    my $attach  = $self->attach_internet_gateway($gateway);
+    unless ($attach) {
+	local $self->aws->{error};  # so that we get the error from the attach call
+	$self->aws->delete_internet_gateway($gateway);
+	return;
+    }
+    return $gateway;
 }
 
 1;
