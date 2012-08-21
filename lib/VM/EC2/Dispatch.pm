@@ -448,7 +448,7 @@ sub load_module {
 =head1 EXAMPLE OF USING OVERRIDE TO SUBCLASS VM::EC2::Volume
 
 The author decided that a volume object should not be able to delete
-itself, you disagree with that decision. Let's subclass
+itself; you disagree with that decision. Let's subclass
 VM::EC2::Volume to add a delete() method.
 
 First subclass the VM::EC2::Volume class:
@@ -478,9 +478,10 @@ Now we can test it out:
  use MyEC2;
  # find all volumes that are "available" and not in-use
  my @vol = $ec2->describe_volumes({status=>'available'});
- for my $vol (@vol) { $vol->delete && print "$vol deleted\n" }
+ for my $vol (@vol) { 
+    $vol->delete && print "$vol deleted\n" 
+ }
  
-
 =head1 SEE ALSO
 
 L<VM::EC2>
