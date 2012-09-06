@@ -374,7 +374,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.16';
+our $VERSION = '1.17';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -494,7 +494,7 @@ sub new {
     },ref $self || $self;
 
     if ($args{-region}) {
-	my $region = $obj->describe_regions($args{-region}) or croak "unknown region $args{-region}";
+	my $region = $obj->describe_regions($args{-region}) or croak $obj->error_str;
 	$obj->endpoint($region->regionEndpoint);
     }
 

@@ -1,3 +1,8 @@
+1.17 Wed Sep  5 21:34:50 EDT 2012
+    - Add missing library files to MANIFEST.
+    - Fixed error message reporting in migrate-ebs-image.pl to give informative
+      messages rather than obscure "Can't use string as HASH".
+  
 1.16 Tue Aug 21 07:34:35 EDT 2012
     - Added support for most VPC-related calls (VPCs, subnets, routes, network interfaces).
     - Added support for elastic network interfaces.

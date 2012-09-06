@@ -19,6 +19,7 @@ lib/VM/EC2/Image.pm
 lib/VM/EC2/Image/LaunchPermission.pm
 lib/VM/EC2/Instance.pm
 lib/VM/EC2/Instance/ConsoleOutput.pm
+lib/VM/EC2/Instance/IamProfile.pm
 lib/VM/EC2/Instance/Metadata.pm
 lib/VM/EC2/Instance/MonitoringState.pm
 lib/VM/EC2/Instance/PasswordData.pm
@@ -32,6 +33,10 @@ lib/VM/EC2/Instance/Status/Details.pm
 lib/VM/EC2/Instance/Status/Event.pm
 lib/VM/EC2/Instance/StatusItem.pm
 lib/VM/EC2/KeyPair.pm
+lib/VM/EC2/NetworkInterface.pm
+lib/VM/EC2/NetworkInterface/Association.pm
+lib/VM/EC2/NetworkInterface/Attachment.pm
+lib/VM/EC2/NetworkInterface/PrivateIpAddress.pm
 lib/VM/EC2/ProductCode.pm
 lib/VM/EC2/Region.pm
 lib/VM/EC2/ReservationSet.pm
@@ -60,6 +65,14 @@ lib/VM/EC2/Volume/Status/Action.pm
 lib/VM/EC2/Volume/Status/Details.pm
 lib/VM/EC2/Volume/Status/Event.pm
 lib/VM/EC2/Volume/StatusItem.pm
+lib/VM/EC2/VPC.pm
+lib/VM/EC2/VPC/DhcpOptions.pm
+lib/VM/EC2/VPC/InternetGateway.pm
+lib/VM/EC2/VPC/InternetGateway/Attachment.pm
+lib/VM/EC2/VPC/Route.pm
+lib/VM/EC2/VPC/RouteTable.pm
+lib/VM/EC2/VPC/RouteTable/Association.pm
+lib/VM/EC2/VPC/Subnet.pm
 LICENSE
 Makefile.PL
 MANIFEST			This list of files
