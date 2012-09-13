@@ -1,5 +1,24 @@
-1.18
-   - Made migrate-ebs-image.pl more robust when trying to match ramdisks between regions.
+1.18 Thu Sep 13 06:14:59 EDT 2012
+   - Lance Kinley <lkinley@loyaltymethods.com> contributed major update to support
+     Network ACL, VPN and all Elastic Load Balancing functions.
+
+   FEATURE ENHANCEMENTS
+   - Add -volume_type, -iops arguments to create_volume()
+   - Update API version to 2012-07-20 now that all provisioned IO functions
+     appear complete
+   - Add Network ACL functions
+   - Add VPC VPN functions
+   - Add all Elastic Load Balancing functions (API 2012-06-01)
+
+   FIXES
+   - References to 'iol' volume type corrected to 'io1' in EC2.pm and Volume.pm
+   - Add missing object methods to to valid_fields() in Instance.pm
+   - Fix minor documentation errors in Instance.pm
+   - Add up_time() function to Instance.pm as it is used in documentation
+     but did not exist (alias to upTime)
+   - Fix minor documentation error in SecurityGroup.pm
+   - Fix minor documentation error in VPC/RouteTable/Association.pm
+   - Fix missing semicolon in VPC/Subnet.pm
 
 1.17 Wed Sep  5 21:34:50 EDT 2012
     - Add missing library files to MANIFEST.

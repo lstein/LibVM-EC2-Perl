@@ -43,10 +43,10 @@ The following object methods are supported:
  status           -- Volume state, one of "creating", "available",
                      "in-use", "deleting", "deleted", "error"
  createTime       -- Timestamp for when volume was created.
- volumeType       -- The volume type, one of "standard" or "iol"
+ volumeType       -- The volume type, one of "standard" or "io1"
  iops             -- The number of I/O operations per second that the volume
                      supports, an integer between 1 and 1000. Only valid for
-                     volumes of type "iol".
+                     volumes of type "io1".
  tags             -- Hashref containing tags associated with this group.
                      See L<VM::EC2::Generic>.
 

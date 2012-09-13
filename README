@@ -87,8 +87,18 @@ account for yourself and then either:
 
 See http://help.github.com/ for help getting started.
 
+Credits
+-------
+
+Many thanks to Lance Kinley, who contributed support for Network ACLs,
+VPC VPNs, Elastic Load Balancing, and many smaller feature
+enhancements as well as bug and documentation fixes.
+
+Author
+------
+
 Lincoln D. Stein <lincoln.stein@gmail.com>
-27 July 2012
+13 September 2013
 
 
 
