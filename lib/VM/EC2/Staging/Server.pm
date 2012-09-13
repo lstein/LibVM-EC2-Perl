@@ -726,7 +726,7 @@ sub provision_volume {
 	my $apt_packages = $self->_mkfs_packages();
 	if (my $package = $apt_packages->{$fstype}) {
 	    $self->info("checking for /sbin/mkfs.$fstype\n");
-	    $self->ssh("if [ ! -e /sbin/mkfs.$fstype ]; then sudo apt-get update; sudo apt-get -y install $package; fi");
+	    $self->ssh("if [ ! -e /sbin/mkfs.$fstype ]; then sudo apt-get -q update; sudo apt-get -q -y install $package; fi");
 	}
 	$self->info("Making $fstype filesystem on staging volume...\n");
 	$self->ssh("sudo /sbin/mkfs.$fstype $quiet $label_cmd $uu $mt_device") or croak "Couldn't make filesystem on $mt_device";
