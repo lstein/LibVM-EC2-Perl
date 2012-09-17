@@ -527,13 +527,17 @@ sub _copy_ebs_image {
     my $name         = $info->{name};
     my $description  = $info->{description};
     my $architecture = $info->{architecture};
-    my $kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
-	or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
+    my ($kernel,$ramdisk);
+
+    if ($info->{kernel}) {
+	$kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
+	    or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
+    }
     
-    my $ramdisk;
     if ($info->{ramdisk}) {
 	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
-	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;	    }
+	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;
+    }
 
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
     my $root_device     = $info->{root_device};
@@ -587,8 +591,8 @@ sub _copy_ebs_image {
 						  -block_device_mapping => \@mappings,
 						  -description          => $description,
 						  -architecture         => $architecture,
-						  -kernel_id            => $kernel,
-						  $ramdisk ? (-ramdisk_id  => $ramdisk): ()
+						  $kernel  ? (-kernel_id   => $kernel):  (),
+						  $ramdisk ? (-ramdisk_id  => $ramdisk): (),
 	);
     $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
 
