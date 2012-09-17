@@ -4911,8 +4911,13 @@ Required Arguments:
  -vpn_gateway_id            -- The ID of the VPN gateway
 
 Optional arguments:
- -type       Default is the only currently available option: ipsec.1
-             (API 2012-06-15)
+ -type                      -- Default is the only currently available option:
+                               ipsec.1 (API 2012-06-15)
+
+ -static_routes_only        -- Indicates whether or not the VPN connection
+                               requires static routes. If you are creating a VPN
+                               connection for a device that does not support
+                               BGP, you must specify this value as true.
 
 Returns a L<VM::EC2::VPC::VpnConnection> object.
 
@@ -4926,9 +4931,11 @@ sub create_vpn_connection {
         croak "create_vpn_connection(): -vpn_gateway_id argument missing";
     $args{-customer_gateway_id} or
         croak "create_vpn_connection(): -customer_gateway_id argument missing";
+    $args{'Options.StaticRoutesOnly'} = $args{-static_routes_only};
     my @params;
     push @params,$self->single_parm($_,\%args) foreach
         qw(VpnGatewayId CustomerGatewayId Type);
+    push @params,$self->boolean_parm('Options.StaticRoutesOnly',\%args);
     return $self->call('CreateVpnConnection',@params);
 }
 
@@ -5061,6 +5068,124 @@ sub delete_customer_gateway {
         croak "delete_customer_gateway(): -customer_gateway_id argument missing";
     my @params = $self->single_parm('CustomerGatewayId',\%args);
     return $self->call('DeleteCustomerGateway',@params);
+}
+
+=head2 $success = $ec2->create_vpn_connection_route(-destination_cidr_block=>$cidr,
+                                                    -vpn_connection_id     =>$id)
+
+Creates a new static route associated with a VPN connection between an existing
+virtual private gateway and a VPN customer gateway. The static route allows
+traffic to be routed from the virtual private gateway to the VPN customer
+gateway.
+
+Arguments:
+
+ -destination_cidr_block     -- The CIDR block associated with the local subnet
+                                 of the customer data center.
+
+ -vpn_connection_id           -- The ID of the VPN connection.
+
+Returns true on successsful creation.
+
+=cut
+
+sub create_vpn_connection_route {
+    my $self = shift;
+    my %args = @_;
+    $args{-destination_cidr_block} or
+        croak "create_vpn_connection_route(): -destination_cidr_block argument missing";
+    $args{-vpn_connection_id} or
+        croak "create_vpn_connection_route(): -vpn_connection_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(DestinationCidrBlock VpnConnectionId);
+    return $self->call('CreateVpnConnectionRoute',@params);
+}
+
+=head2 $success = $ec2->delete_vpn_connection_route(-destination_cidr_block=>$cidr,
+                                                    -vpn_connection_id     =>$id)
+
+Deletes a static route associated with a VPN connection between an existing
+virtual private gateway and a VPN customer gateway. The static route allows
+traffic to be routed from the virtual private gateway to the VPN customer
+gateway.
+
+Arguments:
+
+ -destination_cidr_block     -- The CIDR block associated with the local subnet
+                                 of the customer data center.
+
+ -vpn_connection_id           -- The ID of the VPN connection.
+
+Returns true on successsful deletion.
+
+=cut
+
+sub delete_vpn_connection_route {
+    my $self = shift;
+    my %args = @_;
+    $args{-destination_cidr_block} or
+        croak "delete_vpn_connection_route(): -destination_cidr_block argument missing";
+    $args{-vpn_connection_id} or
+        croak "delete_vpn_connection_route(): -vpn_connection_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(DestinationCidrBlock VpnConnectionId);
+    return $self->call('DeleteVpnConnectionRoute',@params);
+}
+
+=head2 $success = $ec2->disable_vgw_route_propogation(-route_table_id=>$rt_id,
+                                                      -gateway_id    =>$gtwy_id)
+
+Disables a virtual private gateway (VGW) from propagating routes to the routing
+tables of an Amazon VPC.
+
+Arguments:
+
+ -route_table_id        -- The ID of the routing table.
+
+ -gateway_id            -- The ID of the virtual private gateway.
+
+Returns true on successful disablement.
+
+=cut
+
+sub disable_vgw_route_propogation {
+    my $self = shift;
+    my %args = @_;
+    $args{-route_table_id} or
+        croak "disable_vgw_route_propogation(): -route_table_id argument missing";
+    $args{-gateway_id} or
+        croak "disable_vgw_route_propogation(): -gateway_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(RouteTableId GatewayId);
+    return $self->call('DisableVgwRoutePropagation',@params);
+}
+
+=head2 $success = $ec2->enable_vgw_route_propogation(-route_table_id=>$rt_id,
+                                                     -gateway_id    =>$gtwy_id)
+
+Enables a virtual private gateway (VGW) to propagate routes to the routing
+tables of an Amazon VPC.
+
+Arguments:
+
+ -route_table_id        -- The ID of the routing table.
+
+ -gateway_id            -- The ID of the virtual private gateway.
+
+Returns true on successful enablement.
+
+=cut
+
+sub enable_vgw_route_propogation {
+    my $self = shift;
+    my %args = @_;
+    $args{-route_table_id} or
+        croak "enable_vgw_route_propogation(): -route_table_id argument missing";
+    $args{-gateway_id} or
+        croak "enable_vgw_route_propogation(): -gateway_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(RouteTableId GatewayId);
+    return $self->call('EnableVgwRoutePropagation',@params);
 }
 
 =head1 Elastic Network Interfaces
@@ -6920,7 +7045,7 @@ API version.
 
 sub version  { 
     my $self = shift;
-    return $self->{version} ||=  '2012-07-20';
+    return $self->{version} ||=  '2012-08-15';
 }
 
 =head2 $ts = $ec2->timestamp
@@ -7068,17 +7193,20 @@ sub args {
 
 =head1 MISSING METHODS
 
-As of 13 Sept 2012, the following Amazon API calls were NOT
-implemented. Volumteers to implement these calls are most welcome.
+As of 17 Sept 2012, the following Amazon API calls were NOT
+implemented. Volunteers to implement these calls are most welcome.
 
 BundleInstance
 CancelBundleTask
 CancelConversionTask
+CancelReservedInstancesListing
 CreatePlacementGroup
+CreateReservedInstancesListing
 DeletePlacementGroup
 DescribeBundleTasks
 DescribeConversionTasks
 DescribePlacementGroups
+DescribeReservedInstancesListings
 ImportInstance
 ImportVolume
 
