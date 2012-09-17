@@ -418,10 +418,14 @@ sub copy_image {
     my $image = ref $imageId && $imageId->isa('VM::EC2::Image') ? $imageId 
   	                                                        : $ec2->describe_images($imageId);
     $image       
-	or croak "Unknown image '$imageId'";
+	or  croak "Unknown image '$imageId'";
     $image->imageType eq 'machine' 
-	or croak "$image is not an AMI";
-    
+	or  croak "$image is not an AMI";
+    $image->platform eq 'windows'
+	and croak "It is not currently possible to migrate Windows images between regions via this method";
+    $image->rootDeviceType eq 'ebs'
+	or croak "It is not currently possible to migrate instance-store backed images between regions via this method";
+        
     my $dest_manager;
     if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
 	$dest_manager = $destination;
@@ -1275,17 +1279,29 @@ sub dd {
     my ($vol1,$vol2) = @_;
     my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
     my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
-    my $hush     = $self->verbosity < VERBOSE_DEBUG ? '2>/dev/null' : '';
+    my $hush     = $self->verbosity <  VERBOSE_INFO ? '2>/dev/null' : '';
+    my $use_pv   = $self->verbosity >= VERBOSE_WARN;
+    my $gigs     = $vol1->size;
+
+    if ($use_pv) {
+	$self->info('Configuring PV to show dd progress.');
+	$server1->ssh("if [ ! -e /usr/bin/pv ]; then sudo apt-get -q update; sudo apt-get -y -q install pv; fi");
+    }
 
     if ($server1 eq $server2) {
-	$server1->ssh("sudo dd if=$device1 of=$device2 $hush");
+	if ($use_pv) {
+	    $server1->ssh("sudo dd if=$device1 $hush | pv -s ${gigs}G -petr | sudo dd of=$device2 $hush");
+	} else {
+	    $server1->ssh("sudo dd if=$device1 of=$device2 $hush");
+	}
     }  else {
 	my $keyname  = $self->_authorize($server1,$server2);
 	my $dest_ip  = $server2->instance->dnsName;
 	my $ssh_args = $server1->_ssh_escaped_args;
 	my $keyfile  = $server1->keyfile;
 	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-	$server1->ssh("sudo dd if=$device1 $hush | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
+	my $pv       = $use_pv ? "| pv -s ${gigs}G -petr" : '';
+	$server1->ssh("sudo dd if=$device1 $hush $pv | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
     }
 }
 
@@ -2003,6 +2019,9 @@ sub _gather_image_info {
 	root_device  =>   $image->rootDeviceName,
 	block_devices=>   [$image->blockDeviceMapping],
 	is_public    =>   $image->isPublic,
+	platform     =>   $image->platform,
+	virtualizationType => $image->virtualizationType,
+	hypervisor         => $image->hypervisor,
 	authorized_users => [$image->authorized_users],
     };
 }
