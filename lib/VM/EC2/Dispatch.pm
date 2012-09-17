@@ -258,6 +258,10 @@ use constant ObjectRegistration => {
     DescribeCustomerGateways          => 'fetch_items,customerGatewaySet,VM::EC2::VPC::CustomerGateway',
     CreateCustomerGateway             => 'fetch_one,customerGateway,VM::EC2::VPC::CustomerGateway',
     DeleteCustomerGateway             => 'boolean',
+    CreateVpnConnectionRoute          => 'boolean',
+    DeleteVpnConnectionRoute          => 'boolean',
+    DisableVgwRoutePropagation        => 'boolean',
+    EnableVgwRoutePropagation         => 'boolean',
     # elastic load balancers
     DescribeLoadBalancers             => 'fetch_members,LoadBalancerDescriptions,VM::EC2::ELB',
     ConfigureHealthCheck              => 'elb_fetch_one,HealthCheck,VM::EC2::ELB::HealthCheck',
