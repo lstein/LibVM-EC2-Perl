@@ -1,6 +1,7 @@
 1.18 Thu Sep 13 06:14:59 EDT 2012
    - Lance Kinley <lkinley@loyaltymethods.com> contributed major update to support
      Network ACL, VPN and all Elastic Load Balancing functions.
+   - Added status reporting when performing dd() between staging manager volumes.
 
    FEATURE ENHANCEMENTS
    - Add -volume_type, -iops arguments to create_volume()
