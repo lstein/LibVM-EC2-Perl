@@ -1285,12 +1285,13 @@ sub dd {
 
     if ($use_pv) {
 	$self->info('Configuring PV to show dd progress.');
-	$server1->ssh("if [ ! -e /usr/bin/pv ]; then sudo apt-get -q update; sudo apt-get -y -q install pv; fi");
+	$server1->ssh("if [ ! -e /usr/bin/pv ]; then sudo apt-get -qq update; sudo apt-get -y -qq install pv; fi");
     }
 
     if ($server1 eq $server2) {
 	if ($use_pv) {
-	    $server1->ssh("sudo dd if=$device1 $hush | pv -s ${gigs}G -petr | sudo dd of=$device2 $hush");
+	    print STDERR "\n";
+	    $server1->ssh("sudo dd if=$device1 2>/dev/null | pv -f -s ${gigs}G -petr | sudo dd of=$device2 2>/dev/null");
 	} else {
 	    $server1->ssh("sudo dd if=$device1 of=$device2 $hush");
 	}
@@ -1803,17 +1804,17 @@ sub _scan_volumes {
 	$args{-name}     = $volume->tags->{StagingName};
 	$args{-fstype}   = $volume->tags->{StagingFsType};
 	$args{-mtpt}     = $volume->tags->{StagingMtPt};
+	my $mounted;
 
 	if (my $attachment = $volume->attachment) {
 	    my $server = $self->find_server_by_instance($attachment->instance);
-	    $args{-server} = $server;
+	    $args{-server}   = $server;
+	    ($args{-mtdev},$mounted)  = $server->ping &&
+		                        $server->_find_mount($attachment->device);
 	}
 
 	my $vol = $self->volume_class()->new(%args);
-	if ($args{-mtpt} && $args{-server}) {
-	    $vol->mounted(1) if $args{-server}->ping && 
-		             $args{-server}->scmd('cat /etc/mtab')=~ $args{-mtpt};
-	}
+	$vol->mounted(1) if $mounted;
 	$self->register_volume($vol);
     }
 }
