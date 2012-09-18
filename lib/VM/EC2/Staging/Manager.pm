@@ -1350,8 +1350,8 @@ sub _rsync_args {
     my $verbosity = $self->verbosity;
     return $verbosity < VERBOSE_WARN  ? '-aqz'
 	  :$verbosity < VERBOSE_INFO  ? '-aqz'
-	  :$verbosity < VERBOSE_DEBUG ? '-az'
-	  : '-avz'
+	  :$verbosity < VERBOSE_DEBUG ? '-azh'
+	  : '-avzh'
 }
 
 sub _authorize {
