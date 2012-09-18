@@ -494,28 +494,28 @@ sub valid_fields {
               placement
               kernelId
               ramdiskId
+              platform
               monitoring
+              subnetId
+              vpcId
               privateIpAddress
               ipAddress
               sourceDestCheck
+              networkInterfaceSet
+              iamInstanceProfile
+              ebsOptimized
+              groupSet
+              stateReason
               architecture
               rootDeviceType
               rootDeviceName
               blockDeviceMapping
-              instanceLifecycle
+              instanceLifeCycle
               spotInstanceRequestId
               virtualizationType
               clientToken
               hypervisor
               tagSet
-              platform
-              ebsOptimized
-              networkInterfaceSet
-              iamInstanceProfile
-              vpcId
-              subnetId
-              stateReason
-              instanceLifeCycle
              );
 }
 
