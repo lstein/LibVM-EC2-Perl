@@ -375,7 +375,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.18';
+our $VERSION = '1.19';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -1798,10 +1798,11 @@ AMI. Optional arguments:
  -image_id        The id of the image, either a string scalar or an
                   arrayref.
 
- -executable_by   Filter by images executable by the indicated user account
+ -executable_by   Filter by images executable by the indicated user account, or
+                    one of the aliases "self" or "all".
 
  -owner           Filter by owner account number or one of the aliases "self",
-                    "aws-marketplace" or "amazon".
+                    "aws-marketplace", "amazon" or "all".
 
  -filter          Tags and other filters to apply
 

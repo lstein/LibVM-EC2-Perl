@@ -1,3 +1,8 @@
+1.19 Tue Sep 25 21:32:02 EDT 2012
+     - fix Instance.pm valid_fields():  add groupSet, 
+     - fix typo in instanceLifeCycle, put in same order as docs
+     - Add back robust ramdisk matching in staging manager (commit apparently lost during VPN patch)
+
 1.18 Thu Sep 13 06:14:59 EDT 2012
    - Lance Kinley <lkinley@loyaltymethods.com> contributed major update to support
      Network ACL, VPN and all Elastic Load Balancing functions.
