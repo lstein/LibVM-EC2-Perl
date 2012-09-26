@@ -537,7 +537,8 @@ sub _copy_ebs_image {
     my $ramdisk;
     if ($info->{ramdisk}) {
 	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
-	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;	    }
+	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;
+    }
 
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
     my $root_device     = $info->{root_device};
