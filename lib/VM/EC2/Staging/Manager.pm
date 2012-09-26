@@ -531,13 +531,17 @@ sub _copy_ebs_image {
     my $name         = $info->{name};
     my $description  = $info->{description};
     my $architecture = $info->{architecture};
-    my $kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
-	or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
+    my ($kernel,$ramdisk);
+
+    if ($info->{kernel}) {
+	$kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
+	    or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
+    }
     
-    my $ramdisk;
     if ($info->{ramdisk}) {
-	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
-	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;
+	$ramdisk      = ( $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
+		       || $dest_manager->_guess_ramdisk($kernel)
+	    )  or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;
     }
 
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
@@ -592,8 +596,8 @@ sub _copy_ebs_image {
 						  -block_device_mapping => \@mappings,
 						  -description          => $description,
 						  -architecture         => $architecture,
-						  -kernel_id            => $kernel,
-						  $ramdisk ? (-ramdisk_id  => $ramdisk): ()
+						  $kernel  ? (-kernel_id   => $kernel):  (),
+						  $ramdisk ? (-ramdisk_id  => $ramdisk): (),
 	);
     $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
 
@@ -1282,12 +1286,13 @@ sub dd {
 
     if ($use_pv) {
 	$self->info('Configuring PV to show dd progress.');
-	$server1->ssh("if [ ! -e /usr/bin/pv ]; then sudo apt-get -q update; sudo apt-get -y -q install pv; fi");
+	$server1->ssh("if [ ! -e /usr/bin/pv ]; then sudo apt-get -qq update; sudo apt-get -y -qq install pv; fi");
     }
 
     if ($server1 eq $server2) {
 	if ($use_pv) {
-	    $server1->ssh("sudo dd if=$device1 $hush | pv -s ${gigs}G -petr | sudo dd of=$device2 $hush");
+	    print STDERR "\n";
+	    $server1->ssh("sudo dd if=$device1 2>/dev/null | pv -f -s ${gigs}G -petr | sudo dd of=$device2 2>/dev/null");
 	} else {
 	    $server1->ssh("sudo dd if=$device1 of=$device2 $hush");
 	}
@@ -1346,8 +1351,8 @@ sub _rsync_args {
     my $verbosity = $self->verbosity;
     return $verbosity < VERBOSE_WARN  ? '-aqz'
 	  :$verbosity < VERBOSE_INFO  ? '-aqz'
-	  :$verbosity < VERBOSE_DEBUG ? '-az'
-	  : '-avz'
+	  :$verbosity < VERBOSE_DEBUG ? '-azh'
+	  : '-avzh'
 }
 
 sub _authorize {
@@ -1800,17 +1805,17 @@ sub _scan_volumes {
 	$args{-name}     = $volume->tags->{StagingName};
 	$args{-fstype}   = $volume->tags->{StagingFsType};
 	$args{-mtpt}     = $volume->tags->{StagingMtPt};
+	my $mounted;
 
 	if (my $attachment = $volume->attachment) {
 	    my $server = $self->find_server_by_instance($attachment->instance);
-	    $args{-server} = $server;
+	    $args{-server}   = $server;
+	    ($args{-mtdev},$mounted)  = $server->ping &&
+		                        $server->_find_mount($attachment->device);
 	}
 
 	my $vol = $self->volume_class()->new(%args);
-	if ($args{-mtpt} && $args{-server}) {
-	    $vol->mounted(1) if $args{-server}->ping && 
-		             $args{-server}->scmd('cat /etc/mtab')=~ $args{-mtpt};
-	}
+	$vol->mounted(1) if $mounted;
 	$self->register_volume($vol);
     }
 }
@@ -2046,6 +2051,23 @@ sub _match_kernel {
 						  -executable_by=>['all','self']);
     }
     return $candidates[0];
+}
+
+# find the most likely ramdisk for a kernel based on preponderant configuration of public images
+sub _guess_ramdisk {
+    my $self = shift;
+    my $kernel = shift;
+    my $ec2    = $self->ec2;
+    my @images = $ec2->describe_images({'image-type' => 'machine',
+					'kernel-id'  => $kernel});
+    my %ramdisks;
+
+    foreach (@images) {
+	$ramdisks{$_->ramdiskId}++;
+    }
+
+    my ($highest) = sort {$ramdisks{$b}<=>$ramdisks{$a}} keys %ramdisks;
+    return $highest;
 }
 
 sub _check_keyfile {

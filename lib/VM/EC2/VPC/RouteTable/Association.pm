@@ -12,10 +12,10 @@ VM::EC2::VPC::RouteTable::Association -- The association between a route table a
  my @associations = $table->associations;
 
  foreach my $a (@associations) {
-       print $r->routeTableAssociationId,"\n",
-             $r->routeTableId,"\n",
-             $r->subnetid,"\n",
-             $r->main,"\n";
+       print $a->routeTableAssociationId,"\n",
+             $a->routeTableId,"\n",
+             $a->subnetid,"\n",
+             $a->main,"\n";
 }
 
 =head1 DESCRIPTION

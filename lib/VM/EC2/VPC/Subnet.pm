@@ -57,6 +57,13 @@ In addition, this object supports the following convenience methods:
                       -- Removes the association of a route table with this subnet. Produces
                          a fatal error if $table is not associated with the subnet. Returns true
                          on success.
+ associate_network_acl($network_acl_id)
+                      -- Associates a network ACL with this subnet, returning the new
+                         association ID on success.
+ disassociate_network_acl()
+                      -- Removes the association of a network ACL with this subnet. The subnet
+                         will then be associated with the default network ACL.  Returns the
+                         the association ID.
 
 =head1 STRING OVERLOADING
 
@@ -129,7 +136,7 @@ sub disassociate_route_table {
     my $rt   = shift or croak "usage: disassociate_route_table(\$route_table_id)";
     $rt      = $self->aws->describe_route_tables($rt) unless ref $rt;
     my ($association) = grep {$_->subnetId eq $self->subnetId} $rt->associations;
-    $association or croak "$rt is not associated with this subnet"
+    $association or croak "$rt is not associated with this subnet";
     return $self->aws->disassociate_route_table($association);
 }
 
@@ -138,6 +145,28 @@ sub create_route_table {
     my $vpc  = $self->vpcId;
     my $rt   = $self->aws->create_route_table($vpc) or return;
     return $self->associate_route_table($rt);
+}
+
+sub disassociate_network_acl {
+    my $self = shift;
+    my $acl = $self->aws->describe_network_acls(-filter=>{ 'association.subnet-id' => $self->subnetId});
+    if ($acl->default) {
+        print "disassociate_network_acl():  Cannot disassociate subnet from default ACL";
+        return;
+    }
+    my $default_acl = $self->aws->describe_network_acls(-filter=>{ 'default' => 'true', 'vpc-id' => $self->vpcId})
+        or croak "disassociate_network_acl(): Cannot determine default ACL";
+    return $self->associate_network_acl($default_acl->networkAclId);
+}
+
+sub associate_network_acl {
+    my $self = shift;
+    my $network_acl_id = shift or croak "usage: associate_network_acl(\$network_acl_id)";
+    my $acl = $self->aws->describe_network_acls(-filter=>{ 'association.subnet-id' => $self->subnetId})
+        or croak "associate_network_acl():  Cannot determine current ACL";
+    my ($association) = grep { $_->subnetId eq $self->subnetId } $acl->associations;
+    my $association_id = $association->networkAclAssociationId;
+    return $self->aws->replace_network_acl_association(-association_id=>$association_id,-network_acl_id=>$network_acl_id);
 }
 
 1;

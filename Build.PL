@@ -20,7 +20,6 @@ my $build = Module::Build->new(
     },
     recommends        => {
     },
-    create_makefile_pl => 'passthrough',
     build_class        => 'Module::Build',
     );
 

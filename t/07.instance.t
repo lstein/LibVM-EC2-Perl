@@ -23,7 +23,7 @@ my $msg =
 '
 # The next two tests will launch three "micro" instances under your Amazon account
 # and then terminate them, incurring a one hour runtime charge each. This will
-# incur a charge of \$0.06 (as of July 2012), which may be covered under 
+# incur a charge of $0.06 (as of July 2012), which may be covered under 
 # the AWS free tier. Also be aware that these tests may take a while
 # (several minutes) due to tests that launch, start, and stop instances.
 # (this prompt will timeout automatically in 15s)

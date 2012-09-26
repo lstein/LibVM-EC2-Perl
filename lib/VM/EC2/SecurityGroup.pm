@@ -16,7 +16,7 @@ VM::EC2::SecurityGroup - Object describing an Amazon EC2 security group
       $desc = $sg->groupDescription;
       $tags = $sg->tags;
       @inbound_permissions  = $sg->ipPermissions;
-      @outbound_permissions = $sg->ipPermissionEgress;
+      @outbound_permissions = $sg->ipPermissionsEgress;
       for $i (@inbound_permissions) {
          $protocol = $i->ipProtocol;
          $fromPort = $i->fromPort;

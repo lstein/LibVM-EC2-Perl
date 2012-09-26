@@ -142,7 +142,7 @@ These object methods are supported:
  blockDeviceMapping -- The block device mappings for the instance, represented
                    as a list of L<VM::EC2::BlockDevice::Mapping> objects.
 
- instanceLifeCycle-- "spot" if this instance is a spot instance, otherwise empty.
+ instanceLifeCycle -- "spot" if this instance is a spot instance, otherwise empty.
 
  spotInstanceRequestId -- The ID of the spot instance request, if applicable.
 
@@ -260,7 +260,7 @@ as returned by describe_addresses(). The reason for this is that the
 allocationId must be retrieved from the object in order to use in the
 call.
 
-=head2 $bool = $ec2->disassociate_address
+=head2 $bool = $instance->disassociate_address
 
 Disassociate an elastic IP address from this instance. if any. The
 result will be true if disassociation was successful. Note that for a
@@ -268,7 +268,7 @@ short period of time (up to a few minutes) after disassociation, the
 instance will have no public IP address and will be unreachable from
 the internet.
 
-=head2 @list = $ec2->network_interfaces
+=head2 @list = $instance->network_interfaces
 
 Return the network interfaces attached to this instance as a set of
 VM::EC2::NetworkInterface objects (VPC only).
@@ -494,24 +494,28 @@ sub valid_fields {
               placement
               kernelId
               ramdiskId
+              platform
               monitoring
+              subnetId
+              vpcId
               privateIpAddress
               ipAddress
               sourceDestCheck
+              networkInterfaceSet
+              iamInstanceProfile
+              ebsOptimized
+              groupSet
+              stateReason
               architecture
               rootDeviceType
               rootDeviceName
               blockDeviceMapping
-              instanceLifecycle
+              instanceLifeCycle
               spotInstanceRequestId
               virtualizationType
               clientToken
               hypervisor
               tagSet
-              platform
-              ebsOptimized
-              networkInterfaceSet
-              iamInstanceProfile
              );
 }
 
@@ -741,6 +745,8 @@ sub upTime {
     my $sec = Date::Parse::str2time($start);
     return time()-$sec;
 }
+
+sub up_time { shift->upTime }
 
 sub associate_address {
     my $self = shift;

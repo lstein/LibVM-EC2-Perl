@@ -145,11 +145,11 @@ unless ($From) {
 
 my $source = eval {VM::EC2->new(-region => $From)->staging_manager(-on_exit=>'terminate',
 		                                                   -quiet  => $Quiet)}
-   or die VM::EC2->error_str;
+    or die $@;
 
 my $dest = eval {VM::EC2->new(-region => $To)->staging_manager(-on_exit=>'terminate',
 							       -quiet  => $Quiet)}
-   or die VM::EC2->error_str;
+    or die $@;
 
 my @extra = @Block_devices ? (-block_devices=>\@Block_devices) : ();
 

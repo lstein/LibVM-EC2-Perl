@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2012-06-15 version of the Amazon AWS API
+This is an interface to the 2012-07-20 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -199,9 +199,10 @@ http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/. The
 following caveats apply:
 
  1) Not all of the Amazon API is currently implemented. Specifically,
-    some calls dealing with Virtual Private Clouds (VPC) and cluster
-    management, are not currently supported.  See L</MISSING METHODS>
-    for a list of all the unimplemented API calls.
+    a handful calls dealing with cluster management and VM importing
+    are missing.  See L</MISSING METHODS> for a list of all the
+    unimplemented API calls. Volunteers to fill in these gaps are
+    most welcome!
 
  2) For consistency with common Perl coding practices, method calls
     are lowercase and words in long method names are separated by
@@ -374,7 +375,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.15';
+our $VERSION = '1.19';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -494,7 +495,7 @@ sub new {
     },ref $self || $self;
 
     if ($args{-region}) {
-	my $region = $obj->describe_regions($args{-region}) or croak "unknown region $args{-region}";
+	my $region = $obj->describe_regions($args{-region}) or croak $obj->error_str;
 	$obj->endpoint($region->regionEndpoint);
     }
 
@@ -993,16 +994,16 @@ following:
             specified, this will default to 'true' and the volume will be
             deleted.
 
-         - '<volume-type>': The volume type. One of "standard" or "iol".
+         - '<volume-type>': The volume type. One of "standard" or "io1".
 
          - '<iops>': The number of I/O operations per second (IOPS) that
            the volume suports. A number between 1 to 1000. Only valid
-           for volumes of type "iol".
+           for volumes of type "io1".
           
          Examples: -block_devices => '/dev/sdb=snap-7eb96d16'
                    -block_devices => '/dev/sdc=snap-7eb96d16:80:false'
                    -block_devices => '/dev/sdd=:120'
-                   -block_devices => '/dev/sdc=:120:true:iol:500'
+                   -block_devices => '/dev/sdc=:120:true:io1:500'
 
 To provide multiple mappings, use an array reference. In this example,
 we launch two 'm1.small' instance in which /dev/sdb is mapped to
@@ -1797,10 +1798,11 @@ AMI. Optional arguments:
  -image_id        The id of the image, either a string scalar or an
                   arrayref.
 
- -executable_by   Filter by images executable by the indicated user account
+ -executable_by   Filter by images executable by the indicated user account, or
+                    one of the aliases "self" or "all".
 
  -owner           Filter by owner account number or one of the aliases "self",
-                    "aws-marketplace" or "amazon".
+                    "aws-marketplace", "amazon" or "all".
 
  -filter          Tags and other filters to apply
 
@@ -2099,6 +2101,15 @@ One or both of -snapshot_id or -size are required. For convenience,
 you may abbreviate -availability_zone as -zone, and -snapshot_id as
 -snapshot.
 
+Optional Arguments:
+
+ -volume_type          -- The volume type.  standard or io1, default is
+                          standard
+
+ -iops                 -- The number of I/O operations per second (IOPS) that
+                          the volume supports.  Range is 1 to 1000.  Required
+                          when volume type is io1.
+
 The returned object is a VM::EC2::Volume object.
 
 =cut
@@ -2110,9 +2121,17 @@ sub create_volume {
     my $snap = $args{-snapshot_id}       || $args{-snapshot};
     my $size = $args{-size};
     $snap || $size or croak "One or both of -snapshot_id or -size are required";
+    if (exists $args{-volume_type} && $args{-volume_type} eq 'io1') {
+        $args{-iops} or croak "Argument -iops required when -volume_type is 'io1'";
+    }
+    elsif ($args{-iops}) {
+        croak "Argument -iops cannot be used when volume type is 'standard'";
+    }
     my @params = (AvailabilityZone => $zone);
     push @params,(SnapshotId   => $snap) if $snap;
     push @params,(Size => $size)         if $size;
+    push @params,$self->single_parm('VolumeType',\%args);
+    push @params,$self->single_parm('Iops',\%args);
     return $self->call('CreateVolume',@params);
 }
 
@@ -4256,6 +4275,300 @@ sub detach_internet_gateway {
     return $self->call('DetachInternetGateway',@param);
 }
 
+=head2 @acls = $ec2->describe_network_acls(-network_acl_id=>\@ids, -filter=>\%filters)
+
+=head2 @acls = $ec2->describe_network_acls(\@network_acl_ids)
+
+=head2 @acls = $ec2->describe_network_acls(%filters)
+
+Provides information about network ACLs.
+
+Returns a series of L<VM::EC2::VPC::NetworkAcl> objects.
+
+Optional parameters are:
+
+ -network_acl_id      -- ID of the network ACL(s) to return information on. 
+                         This can be a string scalar, or an arrayref.
+
+ -filter              -- Tags and other filters to apply.
+
+The filter argument is a hashreference in which the keys are the
+filter names, and the values are the match strings. Some filters
+accept wildcards.
+
+There are a number of filters, which are listed in full at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeNetworkAcls.html
+
+Here is a alpha-sorted list of filter names: 
+association.association-id, association.network-acl-id,
+association.subnet-id, default, entry.cidr, entry.egress,
+entry.icmp.code, entry.icmp.type, entry.port-range.from,
+entry.port-range.to, entry.protocol, entry.rule-action,
+entry.rule-number, network-acl-id, tag-key, tag-value,
+tag:key, vpc-id
+
+=cut
+
+sub describe_network_acls {
+    my $self = shift;
+    my %args = $self->args('-network_acl_id',@_);
+    my @params = $self->list_parm('NetworkAclId',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeNetworkAcls',@params);
+}
+
+=head2 $acl = $ec2->create_network_acl(-vpc_id=>$vpc_id)
+
+=head2 $acl = $ec2->create_network_acl($vpc_id)
+
+Creates a new network ACL in a VPC. Network ACLs provide an optional layer of 
+security (on top of security groups) for the instances in a VPC.
+
+Arguments:
+
+ -vpc_id            -- The VPC ID to create the ACL in
+
+Retuns a VM::EC2::VPC::NetworkAcl object on success.
+
+=cut
+
+sub create_network_acl {
+    my $self = shift;
+    my %args = $self->args('-vpc_id',@_);
+    $args{-vpc_id} or
+        croak "create_network_acl(): -vpc_id argument missing";
+    my @params = $self->single_parm('VpcId',\%args);
+    return $self->call('CreateNetworkAcl',@params);
+}
+
+=head2 $boolean = $ec2->delete_network_acl(-network_acl_id=>$id)
+
+=head2 $boolean = $ec2->delete_network_acl($id)
+
+Deletes a network ACL from a VPC. The ACL must not have any subnets associated
+with it. The default network ACL cannot be deleted.
+
+Arguments:
+
+ -network_acl_id    -- The ID of the network ACL to delete
+
+Returns true on successful deletion.
+
+=cut
+
+sub delete_network_acl {
+    my $self = shift;
+    my %args = $self->args('-network_acl_id',@_);
+    my @params = $self->single_parm('NetworkAclId',\%args);
+    return $self->call('DeleteNetworkAcl',@params);
+}
+
+=head2 $boolean = $ec2->create_network_acl_entry(%args)
+
+Creates an entry (i.e., rule) in a network ACL with the rule number you
+specified. Each network ACL has a set of numbered ingress rules and a 
+separate set of numbered egress rules. When determining whether a packet
+should be allowed in or out of a subnet associated with the ACL, Amazon 
+VPC processes the entries in the ACL according to the rule numbers, in 
+ascending order.
+
+Arguments:
+
+ -network_acl_id       -- ID of the ACL where the entry will be created
+                          (Required)
+ -rule_number          -- Rule number to assign to the entry (e.g., 100).
+                          ACL entries are processed in ascending order by
+                          rule number.  Positive integer from 1 to 32766.
+                          (Required)
+ -protocol             -- The IP protocol the rule applies to. You can use
+                          -1 to mean all protocols.  See
+                          http://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+                          for a list of protocol numbers. (Required)
+ -rule_action          -- Indicates whether to allow or deny traffic that
+                           matches the rule.  allow | deny (Required)
+ -egress               -- Indicates whether this rule applies to egress
+                          traffic from the subnet (true) or ingress traffic
+                          to the subnet (false).  Default is false.
+ -cidr_block           -- The CIDR range to allow or deny, in CIDR notation
+                          (e.g., 172.16.0.0/24). (Required)
+ -icmp_code            -- For the ICMP protocol, the ICMP code. You can use
+                          -1 to specify all ICMP codes for the given ICMP
+                          type.  Required if specifying 1 (ICMP) for protocol.
+ -icmp_type            -- For the ICMP protocol, the ICMP type. You can use
+                          -1 to specify all ICMP types.  Required if
+                          specifying 1 (ICMP) for the protocol
+ -port_from            -- The first port in the range.  Required if specifying
+                          6 (TCP) or 17 (UDP) for the protocol.
+ -port_to              -- The last port in the range.  Required if specifying
+                          6 (TCP) or 17 (UDP) for the protocol.
+
+Returns true on successful creation.
+
+=cut
+
+sub create_network_acl_entry {
+    my $self = shift;
+    my %args = @_;
+    $args{-network_acl_id} or
+        croak "create_network_acl_entry(): -network_acl_id argument missing";
+    $args{-rule_number} or
+        croak "create_network_acl_entry(): -rule_number argument missing";
+    defined $args{-protocol} or
+        croak "create_network_acl_entry(): -protocol argument missing";
+    $args{-rule_action} or
+        croak "create_network_acl_entry(): -rule_action argument missing";
+    $args{-cidr_block} or
+        croak "create_network_acl_entry(): -cidr_block argument missing";
+    if ($args{-protocol} == 1) {
+	defined $args{-icmp_type} && defined $args{-icmp_code} or
+        croak "create_network_acl_entry(): -icmp_type or -icmp_code argument missing";
+    }
+    elsif ($args{-protocol} == 6 || $args{-protocol} == 17) {
+	defined $args{-port_from} or
+		croak "create_network_acl_entry(): -port_from argument missing";
+	$args{-port_to} = $args{-port_from} if (! defined $args{-port_to});
+    }
+    $args{'-Icmp.Type'} = $args{-icmp_type};
+    $args{'-Icmp.Code'} = $args{-icmp_code};
+    $args{'-PortRange.From'} = $args{-port_from};
+    $args{'-PortRange.To'} = $args{-port_to};
+    my @params;
+    push @params,$self->single_parm($_,\%args) foreach
+        qw(NetworkAclId RuleNumber Protocol RuleAction Egress CidrBlock
+           Icmp.Code Icmp.Type PortRange.From PortRange.To);
+    return $self->call('CreateNetworkAclEntry',@params);
+}
+
+=head2 $success = $ec2->delete_network_acl_entry(-network_acl_id=>$id,
+                                                 -rule_number   =>$int,
+                                                 -egress        =>$bool)
+
+Deletes an ingress or egress entry (i.e., rule) from a network ACL.
+
+Arguments:
+
+ -network_acl_id       -- ID of the ACL where the entry will be created
+
+ -rule_number          -- Rule number of the entry (e.g., 100).
+
+Optional arguments:
+
+ -egress    -- Whether the rule to delete is an egress rule (true) or ingress 
+               rule (false).  Default is false.
+
+Returns true on successful deletion.
+
+=cut
+
+sub delete_network_acl_entry {
+    my $self = shift;
+    my %args = @_;
+    $args{-network_acl_id} or
+        croak "delete_network_acl_entry(): -network_acl_id argument missing";
+    $args{-rule_number} or
+        croak "delete_network_acl_entry(): -rule_number argument missing";
+    my @params;
+    push @params,$self->single_parm($_,\%args) foreach
+        qw(NetworkAclId RuleNumber Egress);
+    return $self->call('DeleteNetworkAclEntry',@params);
+}
+
+=head2 $assoc_id = $ec2->replace_network_acl_association(-association_id=>$assoc_id,
+                                                         -network_acl_id=>$id)
+
+Changes which network ACL a subnet is associated with. By default when you
+create a subnet, it's automatically associated with the default network ACL.
+
+Arguments:
+
+ -association_id    -- The ID of the association to replace
+
+ -network_acl_id    -- The ID of the network ACL to associated the subnet with
+
+Returns the new association ID.
+
+=cut
+
+sub replace_network_acl_association {
+    my $self = shift;
+    my %args = @_;
+    $args{-association_id} or
+        croak "replace_network_acl_association(): -association_id argument missing";
+    $args{-network_acl_id} or
+        croak "replace_network_acl_association(): -network_acl_id argument missing";
+    my @params;
+    push @params,$self->single_parm($_,\%args) foreach
+        qw(AssociationId NetworkAclId);
+    return $self->call('ReplaceNetworkAclAssociation',@params);
+}
+
+=head2 $success = $ec2->replace_network_acl_entry(%args)
+
+Replaces an entry (i.e., rule) in a network ACL.
+
+Arguments:
+
+ -network_acl_id       -- ID of the ACL where the entry will be created
+                          (Required)
+ -rule_number          -- Rule number of the entry to replace. (Required)
+ -protocol             -- The IP protocol the rule applies to. You can use
+                          -1 to mean all protocols.  See
+                          http://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+                          for a list of protocol numbers. (Required)
+ -rule_action          -- Indicates whether to allow or deny traffic that
+                           matches the rule.  allow | deny (Required)
+ -egress               -- Indicates whether this rule applies to egress
+                          traffic from the subnet (true) or ingress traffic
+                          to the subnet (false).  Default is false.
+ -cidr_block           -- The CIDR range to allow or deny, in CIDR notation
+                          (e.g., 172.16.0.0/24). (Required)
+ -icmp_code            -- For the ICMP protocol, the ICMP code. You can use
+                          -1 to specify all ICMP codes for the given ICMP
+                          type.  Required if specifying 1 (ICMP) for protocol.
+ -icmp_type            -- For the ICMP protocol, the ICMP type. You can use
+                          -1 to specify all ICMP types.  Required if
+                          specifying 1 (ICMP) for the protocol
+ -port_from            -- The first port in the range.  Required if specifying
+                          6 (TCP) or 17 (UDP) for the protocol.
+ -port_to              -- The last port in the range.  Only required if
+                          specifying 6 (TCP) or 17 (UDP) for the protocol and
+                          is a different port than -port_from.
+
+Returns true on successful replacement.
+
+=cut
+
+sub replace_network_acl_entry {
+    my $self = shift;
+    my %args = @_;
+    $args{-network_acl_id} or
+        croak "replace_network_acl_entry(): -network_acl_id argument missing";
+    $args{-rule_number} or
+        croak "replace_network_acl_entry(): -rule_number argument missing";
+    $args{-protocol} or
+        croak "replace_network_acl_entry(): -protocol argument missing";
+    $args{-rule_action} or
+        croak "replace_network_acl_entry(): -rule_action argument missing";
+    if ($args{-protocol} == 1) { 
+        defined $args{-icmp_type} && defined $args{-icmp_code} or
+        croak "replace_network_acl_entry(): -icmp_type or -icmp_code argument missing";
+    }
+    elsif ($args{-protocol} == 6 || $args{-protocol} == 17) {
+	defined $args{-port_from} or
+		croak "create_network_acl_entry(): -port_from argument missing";
+	$args{-port_to} = $args{-port_from} if (! defined $args{-port_to});
+    }
+    $args{'-Icmp.Type'} = $args{-icmp_type};
+    $args{'-Icmp.Code'} = $args{-icmp_code};
+    $args{'-PortRange.From'} = $args{-port_from};
+    $args{'-PortRange.To'} = $args{-port_to};
+    my @params;
+    push @params,$self->single_parm($_,\%args) foreach
+        qw(NetworkAclId RuleNumber Protocol RuleAction Egress CidrBlock
+           Icmp.Code Icmp.Type PortRange.From PortRange.To);
+    return $self->call('ReplaceNetworkAclEntry',@params);
+}
+
 =head1 DHCP Options
 
 These methods manage DHCP Option objects, which can then be applied to
@@ -4382,6 +4695,498 @@ sub associate_dhcp_options {
     my @param    = $self->single_parm(DhcpOptionsId=> \%args);
     push @param,   $self->single_parm(VpcId        => \%args);
     return $self->call('AssociateDhcpOptions',@param);
+}
+
+=head1 Virtual Private Networks
+
+These methods create and manage Virtual Private Network (VPN) connections
+to an Amazon Virtual Private Cloud (VPC).
+
+=head2 @gtwys = $ec2->describe_vpn_gateways(-vpn_gateway_id=>\@ids,
+                                            -filter        =>\%filters)
+
+=head2 @gtwys = $ec2->describe_vpn_gateways(@vpn_gateway_ids)
+
+=head2 @gtwys = $ec2->describe_vpn_gateways(%filters)
+
+Provides information on VPN gateways.
+
+Return a series of VM::EC2::VPC::VpnGateway objects.  When called with no
+arguments, returns all VPN gateways.  Pass a list of VPN gateway IDs or
+use the assorted filters to restrict the search.
+
+Optional parameters are:
+
+ -vpn_gateway_id         ID of the gateway(s) to return information on. 
+                         This can be a string scalar, or an arrayref.
+
+ -filter                 Tags and other filters to apply.
+
+The filter argument is a hashreference in which the keys are the
+filter names, and the values are the match strings. Some filters
+accept wildcards.
+
+There are a number of filters, which are listed in full at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVpnGateways.html
+
+Here is a alpha-sorted list of filter names: attachment.state,
+attachment.vpc-id, availability-zone, state, tag-key, tag-value, tag:key, type,
+vpn-gateway-id
+
+=cut
+
+sub describe_vpn_gateways {
+    my $self = shift;
+    my %args = $self->args('-vpn_gateway_id',@_);
+    my @params = $self->list_parm('VpnGatewayId',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeVpnGateways',@params);
+}
+
+=head2 $vpn_gateway = $ec2->create_vpn_gateway(-type=>$type)
+
+=head2 $vpn_gateway = $ec2->create_vpn_gateway($type)
+
+=head2 $vpn_gateway = $ec2->create_vpn_gateway
+
+Creates a new virtual private gateway. A virtual private gateway is the
+VPC-side endpoint for a VPN connection. You can create a virtual private 
+gateway before creating the VPC itself.
+
+ -type switch is optional as there is only one type as of API 2012-06-15
+
+Returns a VM::EC2::VPC::VpnGateway object on success
+
+=cut
+
+sub create_vpn_gateway {
+    my $self = shift;
+    my %args = $self->args('-type',@_);
+    $args{-type} ||= 'ipsec.1';
+    my @params = $self->list_parm('Type',\%args);
+    return $self->call('CreateVpnGateway',@params);
+}
+
+=head2 $success = $ec2->delete_vpn_gateway(-vpn_gateway_id=>$id);
+
+=head2 $success = $ec2->delete_vpn_gateway($id);
+
+Deletes a virtual private gateway.  Use this when a VPC and all its associated 
+components are no longer needed.  It is recommended that before deleting a 
+virtual private gateway, detach it from the VPC and delete the VPN connection.
+Note that it is not necessary to delete the virtual private gateway if the VPN 
+connection between the VPC and data center needs to be recreated.
+
+Arguments:
+
+ -vpn_gateway_id    -- The ID of the VPN gateway to delete.
+
+Returns true on successful deletion
+
+=cut
+
+sub delete_vpn_gateway {
+    my $self = shift;
+    my %args = $self->args('-vpn_gateway_id',@_);
+    $args{-vpn_gateway_id} or
+        croak "delete_vpn_gateway(): -vpn_gateway_id argument missing";
+    my @params = $self->single_parm('VpnGatewayId',\%args);
+    return $self->call('DeleteVpnGateway',@params);
+}
+
+=head2 $state = $ec2->attach_vpn_gateway(-vpn_gateway_id=>$vpn_gtwy_id,
+                                         -vpc_id        =>$vpc_id)
+
+Attaches a virtual private gateway to a VPC.
+
+Arguments:
+
+ -vpc_id          -- The ID of the VPC to attach the VPN gateway to
+
+ -vpn_gateway_id  -- The ID of the VPN gateway to attach
+
+Returns the state of the attachment, one of:
+   attaching | attached | detaching | detached
+
+=cut
+
+sub attach_vpn_gateway {
+    my $self = shift;
+    my %args = @_;
+    $args{-vpn_gateway_id} or
+        croak "attach_vpn_gateway(): -vpn_gateway_id argument missing";
+    $args{-vpc_id} or
+        croak "attach_vpn_gateway(): -vpc_id argument missing";
+    my @params = $self->single_parm('VpnGatewayId',\%args);
+    push @params, $self->single_parm('VpcId',\%args);
+    return $self->call('AttachVpnGateway',@params);
+}
+
+=head2 $success = $ec2->detach_vpn_gateway(-vpn_gateway_id=>$vpn_gtwy_id,
+                                           -vpc_id        =>$vpc_id)
+
+Detaches a virtual private gateway from a VPC. You do this if you're
+planning to turn off the VPC and not use it anymore. You can confirm
+a virtual private gateway has been completely detached from a VPC by
+describing the virtual private gateway (any attachments to the 
+virtual private gateway are also described).
+
+You must wait for the attachment's state to switch to detached 
+before you can delete the VPC or attach a different VPC to the 
+virtual private gateway.
+
+Arguments:
+
+ -vpc_id          -- The ID of the VPC to detach the VPN gateway from
+
+ -vpn_gateway_id  -- The ID of the VPN gateway to detach
+
+Returns true on successful detachment.
+
+=cut
+
+sub detach_vpn_gateway {
+    my $self = shift;
+    my %args = @_;
+    $args{-vpn_gateway_id} or
+        croak "detach_vpn_gateway(): -vpn_gateway_id argument missing";
+    $args{-vpc_id} or
+        croak "detach_vpn_gateway(): -vpc_id argument missing";
+    my @params = $self->single_parm('VpnGatewayId',\%args);
+    push @params, $self->single_parm('VpcId',\%args);
+    return $self->call('DetachVpnGateway',@params);
+}
+
+=head2 @vpn_connections = $ec2->describe_vpn_connections(-vpn_connection_id=>\@ids,
+                                                         -filter=>\%filters);
+
+=head2 @vpn_connections = $ec2->describe_vpn_connections(@vpn_connection_ids)
+
+=head2 @vpn_connections = $ec2->describe_vpn_connections(%filters);
+
+Gives information about VPN connections
+
+Returns a series of VM::EC2::VPC::VpnConnection objects.
+
+Optional parameters are:
+
+ -vpn_connection_id      ID of the connection(s) to return information on. 
+                         This can be a string scalar, or an arrayref.
+
+ -filter                 Tags and other filters to apply.
+
+The filter argument is a hashreference in which the keys are the
+filter names, and the values are the match strings. Some filters
+accept wildcards.
+
+There are a number of filters, which are listed in full at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVpnConnections.html
+
+Here is a alpha-sorted list of filter names:
+customer-gateway-configuration, customer-gateway-id, state,
+tag-key, tag-value, tag:key, type, vpn-connection-id,
+vpn-gateway-id
+
+=cut
+
+sub describe_vpn_connections {
+    my $self = shift;
+    my %args = $self->args('-vpn_connection_id',@_);
+    my @params = $self->list_parm('VpnConnectionId',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeVpnConnections',@params);
+}
+
+=head2 $vpn_connection = $ec2->create_vpn_connection(-type               =>$type,
+                                                     -customer_gateway_id=>$gtwy_id,
+                                                     -vpn_gateway_id     =>$vpn_id)
+
+Creates a new VPN connection between an existing virtual private 
+gateway and a VPN customer gateway. The only supported connection 
+type is ipsec.1.
+
+Required Arguments:
+
+ -customer_gateway_id       -- The ID of the customer gateway
+
+ -vpn_gateway_id            -- The ID of the VPN gateway
+
+Optional arguments:
+ -type                      -- Default is the only currently available option:
+                               ipsec.1 (API 2012-06-15)
+
+ -static_routes_only        -- Indicates whether or not the VPN connection
+                               requires static routes. If you are creating a VPN
+                               connection for a device that does not support
+                               BGP, you must specify this value as true.
+
+Returns a L<VM::EC2::VPC::VpnConnection> object.
+
+=cut
+
+sub create_vpn_connection {
+    my $self = shift;
+    my %args = @_;
+    $args{-type} ||= 'ipsec.1';
+    $args{-vpn_gateway_id} or
+        croak "create_vpn_connection(): -vpn_gateway_id argument missing";
+    $args{-customer_gateway_id} or
+        croak "create_vpn_connection(): -customer_gateway_id argument missing";
+    $args{'Options.StaticRoutesOnly'} = $args{-static_routes_only};
+    my @params;
+    push @params,$self->single_parm($_,\%args) foreach
+        qw(VpnGatewayId CustomerGatewayId Type);
+    push @params,$self->boolean_parm('Options.StaticRoutesOnly',\%args);
+    return $self->call('CreateVpnConnection',@params);
+}
+
+=head2 $success = $ec2->delete_vpn_connection(-vpn_connection_id=>$vpn_id)
+
+=head2 $success = $ec2->delete_vpn_connection($vpn_id)
+
+Deletes a VPN connection. Use this if you want to delete a VPC and 
+all its associated components. Another reason to use this operation
+is if you believe the tunnel credentials for your VPN connection 
+have been compromised. In that situation, you can delete the VPN 
+connection and create a new one that has new keys, without needing
+to delete the VPC or virtual private gateway. If you create a new 
+VPN connection, you must reconfigure the customer gateway using the
+new configuration information returned with the new VPN connection ID.
+
+Arguments:
+
+ -vpn_connection_id       -- The ID of the VPN connection to delete
+
+Returns true on successful deletion.
+
+=cut
+
+sub delete_vpn_connection {
+    my $self = shift;
+    my %args = $self->args('-vpn_connection_id',@_);
+    $args{-vpn_connection_id} or
+        croak "delete_vpn_connection(): -vpn_connection_id argument missing";
+    my @params = $self->single_parm('VpnConnectionId',\%args);
+    return $self->call('DeleteVpnConnection',@params);
+}
+
+=head2 @gtwys = $ec2->describe_customer_gateways(-customer_gateway_id=>\@ids,
+                                                 -filter             =>\%filters)
+
+=head2 @gtwys = $ec2->describe_customer_gateways(\@customer_gateway_ids)
+
+=head2 @gtwys = $ec2->describe_customer_gateways(%filters)
+
+Provides information on VPN customer gateways.
+
+Returns a series of VM::EC2::VPC::CustomerGateway objects.
+
+Optional parameters are:
+
+ -customer_gateway_id    ID of the gateway(s) to return information on. 
+                         This can be a string scalar, or an arrayref.
+
+ -filter                 Tags and other filters to apply.
+
+The filter argument is a hashreference in which the keys are the filter names,
+and the values are the match strings. Some filters accept wildcards.
+
+There are a number of filters, which are listed in full at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeCustomerGateways.html
+
+Here is a alpha-sorted list of filter names: bgp-asn, customer-gateway-id, 
+ip-address, state, type, tag-key, tag-value, tag:key
+
+=cut
+
+sub describe_customer_gateways {
+    my $self = shift;
+    my %args = $self->args('-customer_gateway_id',@_);
+    my @params = $self->list_parm('CustomerGatewayId',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeCustomerGateways',@params);
+}
+
+=head2 $cust_gtwy = $ec2->create_customer_gateway(-type      =>$type,
+                                                  -ip_address=>$ip,
+                                                  -bgp_asn   =>$asn)
+
+Provides information to AWS about a VPN customer gateway device. The customer 
+gateway is the appliance at the customer end of the VPN connection (compared 
+to the virtual private gateway, which is the device at the AWS side of the 
+VPN connection).
+
+Arguments:
+
+ -ip_address     -- The IP address of the customer gateway appliance
+
+ -bgp_asn        -- The Border Gateway Protocol (BGP) Autonomous System Number
+                    (ASN) of the customer gateway
+
+ -type           -- Optional as there is only currently (2012-06-15 API) only
+                    one type (ipsec.1)
+
+ -ip             -- Alias for -ip_address
+
+Returns a L<VM::EC2::VPC::CustomerGateway> object on success.
+
+=cut
+
+sub create_customer_gateway {
+    my $self = shift;
+    my %args = @_;
+    $args{-type} ||= 'ipsec.1';
+    $args{-ip_address} ||= $args{-ip};
+    $args{-ip_address} or
+        croak "create_customer_gateway(): -ip_address argument missing";
+    $args{-bgp_asn} or
+        croak "create_customer_gateway(): -bgp_asn argument missing";
+    my @params = $self->single_parm('Type',\%args);
+    push @params, $self->single_parm('IpAddress',\%args);
+    push @params, $self->single_parm('BgpAsn',\%args);
+    return $self->call('CreateCustomerGateway',@params);
+}
+
+=head2 $success = $ec2->delete_customer_gateway(-customer_gateway_id=>$id)
+
+=head2 $success = $ec2->delete_customer_gateway($id)
+
+Deletes a VPN customer gateway. You must delete the VPN connection before 
+deleting the customer gateway.
+
+Arguments:
+
+ -customer_gateway_id     -- The ID of the customer gateway to delete
+
+Returns true on successful deletion.
+
+=cut
+
+sub delete_customer_gateway {
+    my $self = shift;
+    my %args = $self->args('-customer_gateway_id',@_);
+    $args{-customer_gateway_id} or
+        croak "delete_customer_gateway(): -customer_gateway_id argument missing";
+    my @params = $self->single_parm('CustomerGatewayId',\%args);
+    return $self->call('DeleteCustomerGateway',@params);
+}
+
+=head2 $success = $ec2->create_vpn_connection_route(-destination_cidr_block=>$cidr,
+                                                    -vpn_connection_id     =>$id)
+
+Creates a new static route associated with a VPN connection between an existing
+virtual private gateway and a VPN customer gateway. The static route allows
+traffic to be routed from the virtual private gateway to the VPN customer
+gateway.
+
+Arguments:
+
+ -destination_cidr_block     -- The CIDR block associated with the local subnet
+                                 of the customer data center.
+
+ -vpn_connection_id           -- The ID of the VPN connection.
+
+Returns true on successsful creation.
+
+=cut
+
+sub create_vpn_connection_route {
+    my $self = shift;
+    my %args = @_;
+    $args{-destination_cidr_block} or
+        croak "create_vpn_connection_route(): -destination_cidr_block argument missing";
+    $args{-vpn_connection_id} or
+        croak "create_vpn_connection_route(): -vpn_connection_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(DestinationCidrBlock VpnConnectionId);
+    return $self->call('CreateVpnConnectionRoute',@params);
+}
+
+=head2 $success = $ec2->delete_vpn_connection_route(-destination_cidr_block=>$cidr,
+                                                    -vpn_connection_id     =>$id)
+
+Deletes a static route associated with a VPN connection between an existing
+virtual private gateway and a VPN customer gateway. The static route allows
+traffic to be routed from the virtual private gateway to the VPN customer
+gateway.
+
+Arguments:
+
+ -destination_cidr_block     -- The CIDR block associated with the local subnet
+                                 of the customer data center.
+
+ -vpn_connection_id           -- The ID of the VPN connection.
+
+Returns true on successsful deletion.
+
+=cut
+
+sub delete_vpn_connection_route {
+    my $self = shift;
+    my %args = @_;
+    $args{-destination_cidr_block} or
+        croak "delete_vpn_connection_route(): -destination_cidr_block argument missing";
+    $args{-vpn_connection_id} or
+        croak "delete_vpn_connection_route(): -vpn_connection_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(DestinationCidrBlock VpnConnectionId);
+    return $self->call('DeleteVpnConnectionRoute',@params);
+}
+
+=head2 $success = $ec2->disable_vgw_route_propogation(-route_table_id=>$rt_id,
+                                                      -gateway_id    =>$gtwy_id)
+
+Disables a virtual private gateway (VGW) from propagating routes to the routing
+tables of an Amazon VPC.
+
+Arguments:
+
+ -route_table_id        -- The ID of the routing table.
+
+ -gateway_id            -- The ID of the virtual private gateway.
+
+Returns true on successful disablement.
+
+=cut
+
+sub disable_vgw_route_propogation {
+    my $self = shift;
+    my %args = @_;
+    $args{-route_table_id} or
+        croak "disable_vgw_route_propogation(): -route_table_id argument missing";
+    $args{-gateway_id} or
+        croak "disable_vgw_route_propogation(): -gateway_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(RouteTableId GatewayId);
+    return $self->call('DisableVgwRoutePropagation',@params);
+}
+
+=head2 $success = $ec2->enable_vgw_route_propogation(-route_table_id=>$rt_id,
+                                                     -gateway_id    =>$gtwy_id)
+
+Enables a virtual private gateway (VGW) to propagate routes to the routing
+tables of an Amazon VPC.
+
+Arguments:
+
+ -route_table_id        -- The ID of the routing table.
+
+ -gateway_id            -- The ID of the virtual private gateway.
+
+Returns true on successful enablement.
+
+=cut
+
+sub enable_vgw_route_propogation {
+    my $self = shift;
+    my %args = @_;
+    $args{-route_table_id} or
+        croak "enable_vgw_route_propogation(): -route_table_id argument missing";
+    $args{-gateway_id} or
+        croak "enable_vgw_route_propogation(): -gateway_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(RouteTableId GatewayId);
+    return $self->call('EnableVgwRoutePropagation',@params);
 }
 
 =head1 Elastic Network Interfaces
@@ -4790,6 +5595,954 @@ sub detach_network_interface {
     return $self->call('DetachNetworkInterface',@param);
 }
 
+=head1 Elastic Load Balancers (ELB)
+
+The methods in this section allow you to retrieve information about
+Elastic Load Balancers, create new ELBs, and change the properties
+of the ELBs.
+
+The primary object manipulated by these methods is
+L<VM::EC2::ELB>. Please see the L<VM::EC2::ELB> manual page
+
+=head2 @lbs = $ec2->describe_load_balancers(-load_balancer_name=>\@names)
+
+=head2 @lbs = $ec2->describe_load_balancers(@names)
+
+Provides detailed configuration information for the specified ELB(s).
+
+Optional parameters are:
+
+    -load_balancer_names     Name of the ELB to return information on. 
+                             This can be a string scalar, or an arrayref.
+
+    -lb_name,-lb_names,      
+      -load_balancer_name    Aliases for -load_balancer_names
+
+Returns a series of L<VM::EC2::ELB> objects.
+
+=cut
+
+sub describe_load_balancers {
+    my $self = shift;
+    my %args = $self->args('-load_balancer_names',@_);
+    $args{'-load_balancer_names'} ||= $args{-lb_name};
+    $args{'-load_balancer_names'} ||= $args{-lb_names};
+    $args{'-load_balancer_names'} ||= $args{-load_balancer_name};
+    my @params = $self->member_list_parm('LoadBalancerNames',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->elb_call('DescribeLoadBalancers',@params);
+}
+
+=head2 $success = $ec2->delete_load_balancer(-load_balancer_name=>$name)
+
+=head2 $success = $ec2->delete_load_balancer($name)
+
+Deletes the specified ELB.
+
+Arguments:
+
+ -load_balancer_name    -- The name of the ELB to delete
+
+ -lb_name               -- Alias for -load_balancer_name
+
+Returns true on successful deletion.  NOTE:  This API call will return
+success regardless of existence of the ELB.
+
+=cut
+
+sub delete_load_balancer {
+    my $self = shift;
+    my %args = $self->args('-load_balancer_name',@_);
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "delete_load_balancer(): -load_balancer_name argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    return $self->elb_call('DeleteLoadBalancer',@params);
+}
+
+=head2 $healthcheck = $ec2->configure_health_check(-load_balancer_name  => $name,
+                                                   -healthy_threshold   => $cnt,
+                                                   -interval            => $secs,
+                                                   -target              => $target,
+                                                   -timeout             => $secs,
+                                                   -unhealthy_threshold => $cnt)
+
+Define an application healthcheck for the instances.
+
+All Parameters are required.
+
+    -load_balancer_name    Name of the ELB.
+
+    -healthy_threashold    Specifies the number of consecutive health probe successes 
+                           required before moving the instance to the Healthy state.
+
+    -interval              Specifies the approximate interval, in seconds, between 
+                           health checks of an individual instance.
+
+    -target                Must be a string in the form: Protocol:Port[/PathToPing]
+                            - Valid Protocol types are: HTTP, HTTPS, TCP, SSL
+                            - Port must be in range 1-65535
+                            - PathToPing is only applicable to HTTP or HTTPS protocol
+                              types and must be 1024 characters long or fewer.
+
+    -timeout               Specifies the amount of time, in seconds, during which no
+                           response means a failed health probe.
+
+    -unhealthy_threashold  Specifies the number of consecutive health probe failures
+                           required before moving the instance to the Unhealthy state.
+
+    -lb_name               Alias for -load_balancer_name
+
+Returns a L<VM::EC2::ELB::HealthCheck> object.
+
+=cut
+
+sub configure_health_check {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "configure_health_check(): -load_balancer_name argument missing";
+    $args{-healthy_threshold} && $args{-interval} &&
+        $args{-target} && $args{-timeout} && $args{-unhealthy_threshold} or
+        croak "configure_health_check(): healthcheck argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, map {$self->prefix_parm('HealthCheck',$_,\%args)}
+        qw(HealthyThreshold Interval Target Timeout UnhealthyThreshold);
+    return $self->elb_call('ConfigureHealthCheck',@params);
+}
+
+=head2 $success = $ec2->create_app_cookie_stickiness_policy(-load_balancer_name => $name,
+                                                            -cookie_name        => $cookie,
+                                                            -policy_name        => $policy)
+
+Generates a stickiness policy with sticky session lifetimes that follow that of
+an application-generated cookie. This policy can be associated only with
+HTTP/HTTPS listeners.
+
+Required arguments:
+
+    -load_balancer_name    Name of the ELB.
+
+    -cookie_name           Name of the application cookie used for stickiness.
+
+    -policy_name           The name of the policy being created. The name must
+                           be unique within the set of policies for this ELB. 
+
+    -lb_name               Alias for -load_balancer_name
+
+Returns true on successful execution.
+
+=cut
+
+sub create_app_cookie_stickiness_policy {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "create_app_cookie_stickiness_policy(): -load_balancer_name argument missing";
+    $args{-cookie_name} && $args{-policy_name} or
+        croak "create_app_cookie_stickiness_policy(): -cookie_name or -policy_name option missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, map {$self->single_parm($_,\%args)} qw(CookieName PolicyName);
+    return $self->elb_call('CreateAppCookieStickinessPolicy',@params);
+}
+
+=head2 $success = $ec2->create_lb_cookie_stickiness_policy(-load_balancer_name       => $name,
+                                                           -cookie_expiration_period => $secs,
+                                                           -policy_name              => $policy)
+
+Generates a stickiness policy with sticky session lifetimes controlled by the
+lifetime of the browser (user-agent) or a specified expiration period. This
+policy can be associated only with HTTP/HTTPS listeners.
+
+Required arguments:
+
+    -load_balancer_name         Name of the ELB.
+
+    -cookie_expiration_period   The time period in seconds after which the
+                                cookie should be considered stale. Not
+                                specifying this parameter indicates that the
+                                sticky session will last for the duration of
+                                the browser session.  OPTIONAL
+
+    -policy_name                The name of the policy being created. The name
+                                must be unique within the set of policies for 
+                                this ELB. 
+
+    -lb_name                    Alias for -load_balancer_name
+
+Returns true on successful execution.
+
+=cut
+
+sub create_lb_cookie_stickiness_policy {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "create_lb_cookie_stickiness_policy(): -load_balancer_name argument missing";
+    $args{-cookie_expiration_period} && $args{-policy_name} or
+        croak "create_lb_cookie_stickiness_policy(): -cookie_expiration_period or -policy_name option missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, map {$self->single_parm($_,\%args)} qw(CookieExpirationPeriod PolicyName);
+    return $self->elb_call('CreateLBCookieStickinessPolicy',@params);
+}
+
+=head2 $lb = $ec2->create_load_balancer(-load_balancer_name => $name,
+                                        -listeners          => \@listeners,
+                                        -availability_zones => \@zones,
+                                        -scheme             => $scheme,
+)
+
+Creates a new ELB.
+
+Required arguments:
+
+    -load_balancer_name         Name of the ELB.
+
+    -listeners                  Must either be a L<VM::EC2::ELB:Listener> object
+                                (or arrayref of objects) or a hashref (or arrayref
+                                of hashrefs) containing the following keys:
+
+              Protocol            -- Value as one of: HTTP, HTTPS, TCP, or SSL
+              LoadBalancerPort    -- Value in range 1-65535
+              InstancePort        -- Value in range 1-65535
+                and optionally:
+              InstanceProtocol    -- Value as one of: HTTP, HTTPS, TCP, or SSL
+              SSLCertificateId    -- Certificate ID from AWS IAM certificate list
+
+
+    -availability_zones    Literal string or array of strings containing valid
+                           availability zones.  Optional if subnets are
+                           specified in a VPC usage scenario.
+
+Optional arguments:
+
+    -scheme                The type of ELB.  By default, Elastic Load Balancing
+                           creates an Internet-facing LoadBalancer with a
+                           publicly resolvable DNS name, which resolves to
+                           public IP addresses.  Specify the value 'internal'
+                           for this option to create an internal LoadBalancer
+                           with a DNS name that resolves to private IP addresses.
+                           This option is only available in a VPC.
+
+    -security_groups       The security groups assigned to your ELB within your
+                           VPC.  String or arrayref.
+
+    -subnets               A list of subnet IDs in your VPC to attach to your
+                           ELB.  String or arrayref.  REQUIRED if availability
+                           zones are not specified above.
+
+Argument aliases:
+
+    -zones                 Alias for -availability_zones
+    -lb_name               Alias for -load_balancer_name
+                          
+Returns a L<VM::EC2::ELB> object if successful.
+
+=cut
+
+sub create_load_balancer {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-availability_zones } ||= $args{-zones};
+    $args{-load_balancer_name} or
+        croak "create_load_balancer(): -load_balancer_name argument missing";
+    $args{-listeners} or
+        croak "create_load_balancer(): -listeners option missing";
+    $args{-availability_zones} || $args{-subnets} or
+        croak "create_load_balancer(): -availability_zones option is required if subnets are not specified";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->_listener_parm($args{-listeners});
+    push @params, $self->member_list_parm('AvailabilityZones',\%args);
+    push @params, $self->single_parm('Scheme',\%args);
+    push @params, $self->member_list_parm('SecurityGroups',\%args);
+    push @params, $self->member_list_parm('Subnets',\%args);
+    return if (! defined $self->elb_call('CreateLoadBalancer',@params));
+    return $self->describe_load_balancers($args{-load_balancer_name});
+}
+
+
+# Internal method for building ELB listener parameters
+sub _listener_parm {
+    my $self = shift;
+    my $l = shift;
+    my @param;
+
+    my $i = 1;
+    for my $lsnr (ref $l && ref $l eq 'ARRAY' ? @$l : $l) {
+        if (ref $lsnr && ref $lsnr eq 'HASH') {
+            push @param,("Listeners.member.$i.Protocol"=> $lsnr->{Protocol});
+            push @param,("Listeners.member.$i.LoadBalancerPort"=> $lsnr->{LoadBalancerPort});
+            push @param,("Listeners.member.$i.InstancePort"=> $lsnr->{InstancePort});
+            push @param,("Listeners.member.$i.InstanceProtocol"=> $lsnr->{InstanceProtocol})
+                if $lsnr->{InstanceProtocol};
+            push @param,("Listeners.member.$i.SSLCertificateId"=> $lsnr->{SSLCertificateId})
+                if $lsnr->{SSLCertificateId};
+            $i++;
+        } elsif (ref $lsnr && ref $lsnr eq 'VM::EC2::ELB::Listener') {
+            push @param,("Listeners.member.$i.Protocol"=> $lsnr->Protocol);
+            push @param,("Listeners.member.$i.LoadBalancerPort"=> $lsnr->LoadBalancerPort);
+            push @param,("Listeners.member.$i.InstancePort"=> $lsnr->InstancePort);
+            if (my $InstanceProtocol = $lsnr->InstanceProtocol) {
+                push @param,("Listeners.member.$i.InstanceProtocol"=> $InstanceProtocol)
+            }
+            if (my $SSLCertificateId = $lsnr->SSLCertificateId) {
+                push @param,("Listeners.member.$i.SSLCertificateId"=> $SSLCertificateId)
+            }
+            $i++;
+        }
+    }
+    return @param;
+}
+
+=head2 $success = $ec2->create_load_balancer_listeners(-load_balancer_name => $name,
+                                                       -listeners          => \@listeners)
+
+Creates one or more listeners on a ELB for the specified port. If a listener 
+with the given port does not already exist, it will be created; otherwise, the
+properties of the new listener must match the properties of the existing
+listener.
+
+ -listeners    Must either be a L<VM::EC2::ELB:Listener> object (or arrayref of
+               objects) or a hash (or arrayref of hashes) containing the
+               following keys:
+
+             Protocol            -- Value as one of: HTTP, HTTPS, TCP, or SSL
+             LoadBalancerPort    -- Value in range 1-65535
+             InstancePort        -- Value in range 1-65535
+              and optionally:
+             InstanceProtocol    -- Value as one of: HTTP, HTTPS, TCP, or SSL
+             SSLCertificateId    -- Certificate ID from AWS IAM certificate list
+
+ -lb_name      Alias for -load_balancer_name
+
+Returns true on successful execution.
+
+=cut
+
+sub create_load_balancer_listeners {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "create_load_balancer_listeners(): -load_balancer_name argument missing";
+    $args{-listeners} or
+        croak "create_load_balancer_listeners(): -listeners option missing";
+
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->_listener_parm($args{-listeners});
+    return $self->elb_call('CreateLoadBalancerListeners',@params);
+}
+
+=head2 $success = $ec2->delete_load_balancer_listeners(-load_balancer_name  => $name,
+                                                       -load_balancer_ports => \@ports)
+
+Deletes listeners from the ELB for the specified port.
+
+Arguments:
+
+ -load_balancer_name     The name of the ELB
+
+ -load_balancer_ports    An arrayref of strings or literal string containing
+                         the port numbers.
+
+ -ports                  Alias for -load_balancer_ports
+
+ -lb_name                Alias for -load_balancer_name
+
+Returns true on successful execution.
+
+=cut
+
+sub delete_load_balancer_listeners {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_ports} ||= $args{-ports};
+    $args{-load_balancer_name} or
+        croak "delete_load_balancer_listeners(): -load_balancer_name argument missing";
+    $args{-load_balancer_ports} or
+        croak "delete_load_balancer_listeners(): -load_balancer_ports argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->member_list_parm('LoadBalancerPorts',\%args);
+    return $self->elb_call('DeleteLoadBalancerListeners',@params);
+}
+
+=head2 @z = $ec2->disable_availability_zones_for_load_balancer(-load_balancer_name => $name,
+                                                               -availability_zones => \@zones)
+
+Removes the specified EC2 Availability Zones from the set of configured
+Availability Zones for the ELB.  There must be at least one Availability Zone
+registered with a LoadBalancer at all times.  Instances registered with the ELB
+that are in the removed Availability Zone go into the OutOfService state.
+
+Arguments:
+
+ -load_balancer_name    The name of the ELB
+
+ -availability_zones    Arrayref or literal string of availability zone names
+                        (ie. us-east-1a)
+
+ -zones                 Alias for -availability_zones
+
+ -lb_name               Alias for -load_balancer_name
+
+
+Returns an array of L<VM::EC2::AvailabilityZone> objects now associated with the ELB.
+
+=cut
+
+sub disable_availability_zones_for_load_balancer {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-availability_zones} ||= $args{-zones};
+    $args{-load_balancer_name} or
+        croak "disable_availability_zones_for_load_balancer(): -load_balancer_name argument missing";
+    $args{-availability_zones} or
+        croak "disable_availability_zones_for_load_balancer(): -availability_zones argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->member_list_parm('AvailabilityZones',\%args);
+    my @zones = $self->elb_call('DisableAvailabilityZonesForLoadBalancer',@params) or return;
+    return $self->describe_availability_zones(@zones);
+}
+
+=head2 @z = $ec2->enable_availability_zones_for_load_balancer(-load_balancer_name => $name,
+                                                              -availability_zones => \@zones)
+
+Adds one or more EC2 Availability Zones to the ELB.  The ELB evenly distributes
+requests across all its registered Availability Zones that contain instances.
+
+Arguments:
+
+ -load_balancer_name    The name of the ELB
+
+ -availability_zones    Array or literal string of availability zone names
+                        (ie. us-east-1a)
+
+ -zones                 Alias for -availability_zones
+
+ -lb_name               Alias for -load_balancer_name
+
+Returns an array of L<VM::EC2::AvailabilityZone> objects now associated with the ELB.
+
+=cut
+
+sub enable_availability_zones_for_load_balancer {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-availability_zones} ||= $args{-zones};
+    $args{-load_balancer_name} or
+        croak "enable_availability_zones_for_load_balancer(): -load_balancer_name argument missing";
+    $args{-availability_zones} or
+        croak "enable_availability_zones_for_load_balancer(): -availability_zones argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->member_list_parm('AvailabilityZones',\%args);
+    my @zones = $self->elb_call('EnableAvailabilityZonesForLoadBalancer',@params) or return;
+    return $self->describe_availability_zones(@zones);
+}
+
+=head2 @i = $ec2->register_instances_with_load_balancer(-load_balancer_name => $name,
+                                                        -instances          => \@instance_ids)
+
+Adds new instances to the ELB.  If the instance is in an availability zone that
+is not registered with the ELB will be in the OutOfService state.  Once the zone
+is added to the ELB the instance will go into the InService state.
+
+Arguments:
+
+ -load_balancer_name    The name of the ELB
+
+ -instances             An arrayref or literal string of Instance IDs.
+
+ -lb_name               Alias for -load_balancer_name
+
+Returns an array of instances now associated with the ELB in the form of
+L<VM::EC2::Instance> objects.
+
+=cut
+
+sub register_instances_with_load_balancer {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-instances} ||= $args{-instance_id};
+    $args{-load_balancer_name} or
+        croak "register_instances_with_load_balancer(): -load_balancer_name argument missing";
+    $args{-instances} or
+        croak "register_instances_with_load_balancer(): -instances argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->_perm_parm('Instances','member','InstanceId',$args{-instances});
+    my @i = $self->elb_call('RegisterInstancesWithLoadBalancer',@params) or return;
+    return $self->describe_instances(@i);
+}
+
+=head2 @i = $ec2->deregister_instances_from_load_balancer(-load_balancer_name => $name,
+                                                          -instances          => \@instance_ids)
+
+Deregisters instances from the ELB. Once the instance is deregistered, it will
+stop receiving traffic from the ELB. 
+
+Arguments:
+
+ -load_balancer_name    The name of the ELB
+
+ -instances             An arrayref or literal string of Instance IDs.
+
+ -lb_name               Alias for -load_balancer_name
+
+Returns an array of instances now associated with the ELB in the form of
+L<VM::EC2::Instance> objects.
+
+=cut
+
+sub deregister_instances_from_load_balancer {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-instances} ||= $args{-instance_id};
+    $args{-load_balancer_name} or
+        croak "deregister_instances_from_load_balancer(): -load_balancer_name argument missing";
+    $args{-instances} or
+        croak "deregister_instances_from_load_balancer(): -instances argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->_perm_parm('Instances','member','InstanceId',$args{-instances});
+    my @i = $self->elb_call('DeregisterInstancesFromLoadBalancer',@params) or return;
+    return $self->describe_instances(@i);
+}
+
+=head2 $success = $ec2->set_load_balancer_listener_ssl_certificate(-load_balancer_name => $name,
+                                                                   -load_balancer_port => $port,
+                                                                   -ssl_certificate_id => $cert_id)
+
+Sets the certificate that terminates the specified listener's SSL connections.
+The specified certificate replaces any prior certificate that was used on the
+same ELB and port.
+
+Required arguments:
+
+ -load_balancer_name    The name of the the ELB.
+
+ -load_balancer_port    The port that uses the specified SSL certificate.
+
+ -ssl_certificate_id    The ID of the SSL certificate chain to use.  See the
+                        AWS Identity and Access Management documentation under
+                        Managing Server Certificates for more information.
+
+Alias arguments:
+
+ -lb_name    Alias for -load_balancer_name
+
+ -port       Alias for -load_balancer_port
+
+ -cert_id    Alias for -ssl_certificate_id
+
+Returns true on successful execution.
+
+=cut
+
+sub set_load_balancer_listener_ssl_certificate {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_port} ||= $args{-port};
+    $args{-ssl_certificate_id} ||= $args{-cert_id};
+    $args{-load_balancer_name} or
+        croak "set_load_balancer_listener_ssl_certificate(): -load_balancer_name argument missing";
+    $args{-load_balancer_port} or
+        croak "set_load_balancer_listener_ssl_certificate(): -load_balancer_port argument missing";
+    $args{-ssl_certificate_id} or
+        croak "set_load_balancer_listener_ssl_certificate(): -ssl_certificate_id argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->single_parm('LoadBalancerPort',\%args);
+    push @params,('SSLCertificateId'=>$args{-ssl_certificate_id}) if $args{-ssl_certificate_id};
+    return $self->elb_call('SetLoadBalancerListenerSSLCertificate',@params);
+}
+
+=head2 @states = $ec2->describe_instance_health(-load_balancer_name => $name,
+                                                -instances          => \@instance_ids)
+
+Returns the current state of the instances of the specified LoadBalancer. If no
+instances are specified, the state of all the instances for the ELB is returned.
+
+Required arguments:
+
+    -load_balancer_name     The name of the ELB
+
+Optional parameters:
+
+    -instances              Literal string or arrayref of Instance IDs
+
+    -lb_name                Alias for -load_balancer_name
+
+    -instance_id            Alias for -instances
+
+Returns an array of L<VM::EC2::ELB::InstanceState> objects.
+
+=cut
+
+sub describe_instance_health {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-instances} ||= $args{-instance_id};
+    $args{-load_balancer_name} or
+        croak "describe_instance_health(): -load_balancer_name argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->_perm_parm('Instances','member','InstanceId',$args{-instances});
+    return $self->elb_call('DescribeInstanceHealth',@params);
+}
+
+=head2 $success = $ec2->create_load_balancer_policy(-load_balancer_name => $name,
+                                                    -policy_name        => $policy,
+                                                    -policy_type_name   => $type_name,
+                                                    -policy_attributes  => \@attrs)
+
+Creates a new policy that contains the necessary attributes depending on the
+policy type. Policies are settings that are saved for your ELB and that can be
+applied to the front-end listener, or the back-end application server,
+depending on your policy type.
+
+Required Arguments:
+
+ -load_balancer_name   The name associated with the LoadBalancer for which the
+                       policy is being created. This name must be unique within
+                       the client AWS account.
+
+ -policy_name          The name of the ELB policy being created. The name must
+                       be unique within the set of policies for this ELB.
+
+ -policy_type_name     The name of the base policy type being used to create
+                       this policy. To get the list of policy types, use the
+                       describe_load_balancer_policy_types function.
+
+Optional Arguments:
+
+ -policy_attributes    Arrayref of hashes containing AttributeName and AttributeValue
+
+ -lb_name              Alias for -load_balancer_name
+
+Returns true if successful.
+
+=cut
+
+sub create_load_balancer_policy {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "create_load_balancer_policy(): -load_balancer_name argument missing";
+    $args{-policy_name} or
+        croak "create_load_balancer_policy(): -policy_name argument missing";
+    $args{-policy_type_name} or
+        croak "create_load_balancer_policy(): -policy_type_name argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->single_parm('PolicyName',\%args);
+    push @params, $self->single_parm('PolicyTypeName',\%args);
+    push @params, $self->_policy_attr_parm($args{-policy_attributes});
+    return $self->elb_call('CreateLoadBalancerPolicy',@params);
+}
+
+# internal method for building policy attribute parameters
+sub _policy_attr_parm {
+    my $self = shift;
+    my $p = shift;
+    my @param;
+
+    my $i = 1;
+    for my $policy (ref $p && ref $p eq 'ARRAY' ? @$p : $p) {
+        if (ref $policy && ref $policy eq 'HASH') {
+            push @param,("PolicyAttributes.member.$i.AttributeName"=> $policy->{AttributeName});
+            push @param,("PolicyAttributes.member.$i.AttributeValue"=> $policy->{AttributeValue});
+            $i++;
+        } elsif (ref $policy && ref $policy eq 'VM::EC2::ELB::PolicyAttribute') {
+            push @param,("PolicyAttributes.member.$i.AttributeName"=> $policy->AttributeName);
+            push @param,("PolicyAttributes.member.$i.AttributeValue"=> $policy->AttributeValue);
+            $i++;
+        }
+    }
+    return @param;
+}
+
+=head2 $success = $ec2->delete_load_balancer_policy(-load_balancer_name => $name,
+                                                    -policy_name        => $policy)
+
+Deletes a policy from the ELB. The specified policy must not be enabled for any
+listeners.
+
+Arguments:
+
+ -load_balancer_name    The name of the ELB
+
+ -policy_name           The name of the ELB policy
+
+ -lb_name               Alias for -load_balancer_name
+
+Returns true if successful.
+
+=cut
+
+sub delete_load_balancer_policy {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "delete_load_balancer_policy(): -load_balancer_name argument missing";
+    $args{-policy_name} or
+        croak "delete_load_balancer_policy(): -policy_name argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->single_parm('PolicyName',\%args);
+    return $self->elb_call('DeleteLoadBalancerPolicy',@params);
+}
+
+=head2 @policy_descs = $ec2->describe_load_balancer_policies(-load_balancer_name => $name,
+                                                             -policy_names       => \@names)
+
+Returns detailed descriptions of ELB policies. If you specify an ELB name, the
+operation returns either the descriptions of the specified policies, or
+descriptions of all the policies created for the ELB. If you don't specify a ELB
+name, the operation returns descriptions of the specified sample policies, or 
+descriptions of all the sample policies. The names of the sample policies have 
+the ELBSample- prefix.
+
+Optional Arguments:
+
+ -load_balancer_name  The name of the ELB.
+
+ -policy_names        The names of ELB policies created or ELB sample policy names.
+
+ -lb_name             Alias for -load_balancer_name
+
+Returns an array of L<VM::EC2::ELB::PolicyDescription> objects if successful.
+
+=cut
+
+sub describe_load_balancer_policies {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-policy_names} ||= $args{-policy_name};
+    $args{-load_balancer_name} or
+        croak "describe_load_balancer_policies(): -load_balancer_name argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->member_list_parm('PolicyNames',\%args);
+    return $self->elb_call('DescribeLoadBalancerPolicies',@params);
+}
+
+=head2 @policy_types = $ec2->describe_load_balancer_policy_types(-policy_type_names => \@names)
+
+Returns meta-information on the specified ELB policies defined by the Elastic
+Load Balancing service. The policy types that are returned from this action can
+be used in a create_load_balander_policy call to instantiate specific policy
+configurations that will be applied to an ELB.
+
+Required arguemnts:
+
+ -load_balancer_name    The name of the ELB.
+
+Optional arguments:
+
+ -policy_type_names    Literal string or arrayref of policy type names
+
+ -names                Alias for -policy_type_names
+
+Returns an array of L<VM::EC2::ELB::PolicyTypeDescription> objects if successful.
+
+=cut
+
+sub describe_load_balancer_policy_types {
+    my $self = shift;
+    my %args = @_;
+    $args{-policy_type_names} ||= $args{-names};
+    my @params = $self->member_list_parm('PolicyTypeNames',\%args);
+    return $self->elb_call('DescribeLoadBalancerPolicyTypes',@params);
+}
+
+=head2 $success = $ec2->set_load_balancer_policies_of_listener(-load_balancer_name => $name,
+                                                               -load_balancer_port => $port,
+                                                               -policy_names       => \@names)
+
+Associates, updates, or disables a policy with a listener on the ELB.  Multiple
+policies may be associated with a listener.
+
+Required arguments:
+
+ -load_balancer_name    The name associated with the ELB.
+
+ -load_balancer_port    The external port of the LoadBalancer with which this
+                        policy applies to.
+
+ -policy_names          List of policies to be associated with the listener.
+                        Currently this list can have at most one policy. If the
+                        list is empty, the current policy is removed from the
+                        listener.  String or arrayref.
+
+Returns true if successful.
+
+=cut
+
+sub set_load_balancer_policies_of_listener {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_port} ||= $args{-port};
+    $args{-load_balancer_name} or
+        croak "set_load_balancer_policies_of_listener(): -load_balancer_name argument missing";
+    $args{-load_balancer_port} or
+        croak "set_load_balancer_policies_of_listener(): -load_balancer_port argument missing";
+    $args{-policy_names} or
+        croak "set_load_balancer_policies_of_listener(): -policy_names argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->single_parm('LoadBalancerPort',\%args);
+    push @params, $self->member_list_parm('PolicyNames',\%args);
+    return $self->elb_call('SetLoadBalancerPoliciesOfListener',@params);
+}
+
+=head2 @sgs = $ec2->apply_security_groups_to_load_balancer(-load_balancer_name => $name,
+                                                           -security_groups    => \@groups)
+
+Associates one or more security groups with your ELB in VPC.  The provided
+security group IDs will override any currently applied security groups.
+
+Required arguments:
+
+ -load_balancer_name The name associated with the ELB.
+
+ -security_groups    A list of security group IDs to associate with your ELB in
+                     VPC. The security group IDs must be provided as the ID and
+                     not the security group name (For example, sg-123456).
+                     String or arrayref.
+
+Returns a series of L<VM::EC2::SecurityGroup> objects.
+
+=cut
+
+sub apply_security_groups_to_load_balancer {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "apply_security_groups_to_load_balancer(): -load_balancer_name argument missing";
+    $args{-security_groups} or
+        croak "apply_security_groups_to_load_balancer(): -security_groups argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->member_list_parm('SecurityGroups',\%args);
+    my @g = $self->elb_call('ApplySecurityGroupsToLoadBalancer',@params) or return;
+    return $self->describe_security_groups(@g);
+}
+
+=head2 @subnets = $ec2->attach_load_balancer_to_subnets(-load_balancer_name => $name,
+                                                        -subnets            => \@subnets)
+
+Adds one or more subnets to the set of configured subnets for the ELB.
+
+Required arguments:
+
+ -load_balancer_name    The name associated with the ELB.
+
+ -subnets               A list of subnet IDs to add for the ELB.  String or
+                        arrayref.
+
+Returns a series of L<VM::EC2::VPC::Subnet> objects corresponding to the
+subnets the ELB is now attached to.
+
+=cut
+
+sub attach_load_balancer_to_subnets {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "attach_load_balancer_to_subnets(): -load_balancer_name argument missing";
+    $args{-subnets} or
+        croak "attach_load_balancer_to_subnets(): -subnets argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->member_list_parm('Subnets',\%args);
+    my @sn = $self->elb_call('AttachLoadBalancerToSubnets',@params) or return;
+    return $self->describe_subnets(@sn);
+}
+
+=head2 @subnets = $ec2->detach_load_balancer_from_subnets(-load_balancer_name => $name,
+                                                          -subnets            => \@subnets)
+
+Removes subnets from the set of configured subnets in the VPC for the ELB.
+
+Required arguments:
+
+ -load_balancer_name    The name associated with the ELB.
+
+ -subnets               A list of subnet IDs to add for the ELB.  String or
+                        arrayref.
+
+Returns a series of L<VM::EC2::VPC::Subnet> objects corresponding to the
+subnets the ELB is now attached to.
+
+=cut
+
+sub detach_load_balancer_from_subnets {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-load_balancer_name} or
+        croak "detach_load_balancer_from_subnets(): -load_balancer_name argument missing";
+    $args{-subnets} or
+        croak "detach_load_balancer_from_subnets(): -subnets argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->member_list_parm('Subnets',\%args);
+    my @sn = $self->elb_call('DetachLoadBalancerFromSubnets',@params) or return;
+    return $self->describe_subnets(@sn);
+}
+
+=head2 $success = $ec2->set_load_balancer_policies_for_backend_server(-instance_port      => $port,
+                                                                      -load_balancer_name => $name,
+                                                                      -policy_names       => \@policies)
+
+Replaces the current set of policies associated with a port on which the back-
+end server is listening with a new set of policies. After the policies have 
+been created, they can be applied here as a list.  At this time, only the back-
+end server authentication policy type can be applied to the back-end ports;
+this policy type is composed of multiple public key policies.
+
+Required arguments:
+
+ -load_balancer_name    The name associated with the ELB.
+
+ -instance_port         The port number associated with the back-end server.
+
+ -policy_names          List of policy names to be set. If the list is empty,
+                        then all current polices are removed from the back-end
+                        server.
+
+Aliases:
+
+ -port      Alias for -instance_port
+ -lb_name   Alias for -load_balancer_name
+
+Returns true if successful.
+
+=cut
+
+sub set_load_balancer_policies_for_backend_server {
+    my $self = shift;
+    my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
+    $args{-instance_port} ||= $args{-port};
+    $args{-load_balancer_name} or
+        croak "set_load_balancer_policies_for_backend_server(): -load_balancer_name argument missing";
+    $args{-instance_port} or
+        croak "set_load_balancer_policies_for_backend_server(): -instance_port argument missing";
+    $args{-policy_names} or
+        croak "set_load_balancer_policies_for_backend_server(): -policy_names argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->single_parm('InstancePort',\%args);
+    push @params, $self->member_list_parm('PolicyNames',\%args);
+    return $self->elb_call('SetLoadBalancerPoliciesForBackendServer',@params);
+}
+
 =head1 AWS SECURITY TOKENS
 
 AWS security tokens provide a way to grant temporary access to
@@ -5017,6 +6770,39 @@ sub single_parm {
     defined $val or return;
     my $v = ref $val  && ref $val eq 'ARRAY' ? $val->[0] : $val;
     return ($argname=>$v);
+}
+
+=head2 @parameters = $ec2->prefix_parm($prefix, ParameterName => \%args)
+
+=cut
+
+sub prefix_parm {
+    my $self = shift;
+    my ($prefix,$argname,$args) = @_;
+    my $name = $self->canonicalize($argname);
+    my $val  = $args->{$name} || $args->{"-$argname"};
+    defined $val or return;
+    my $v = ref $val  && ref $val eq 'ARRAY' ? $val->[0] : $val;
+    return ("$prefix.$argname"=>$v);
+}
+
+=head2 @parameters = $ec2->member_list_parm(ParameterName => \%args)
+
+=cut
+
+sub member_list_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    my $name = $self->canonicalize($argname);
+
+    my @params;
+    if (my $a = $args->{$name}||$args->{"-$argname"}) {
+        my $c = 1;
+        for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
+            push @params,("$argname.member.".$c++ => $_);
+        }
+    }
+    return @params;
 }
 
 =head2 @arguments = $ec2->list_parm(ParameterName => \%args)
@@ -5258,10 +7044,9 @@ API version.
 
 =cut
 
-#sub version  { '2011-12-15'      }
 sub version  { 
     my $self = shift;
-    return $self->{version} ||=  '2012-06-15';
+    return $self->{version} ||=  '2012-08-15';
 }
 
 =head2 $ts = $ec2->timestamp
@@ -5329,6 +7114,14 @@ sub sts_call {
     my $self = shift;
     local $self->{endpoint} = 'https://sts.amazonaws.com';
     local $self->{version}  = '2011-06-15';
+    $self->call(@_);
+}
+
+sub elb_call {
+    my $self = shift;
+    (my $endpoint = $self->{endpoint}) =~ s/ec2/elasticloadbalancing/;
+    local $self->{endpoint} = $endpoint;
+    local $self->{version}  = '2012-06-01';
     $self->call(@_);
 }
 
@@ -5401,37 +7194,22 @@ sub args {
 
 =head1 MISSING METHODS
 
-As of 30 July 2012, the following Amazon API calls were NOT
-implemented. Volumteers to implement these calls are most welcome.
+As of 17 Sept 2012, the following Amazon API calls were NOT
+implemented. Volunteers to implement these calls are most welcome.
 
-AttachVpnGateway
 BundleInstance
 CancelBundleTask
 CancelConversionTask
-CreateCustomerGateway
-CreateNetworkAcl
-CreateNetworkAclEntry
+CancelReservedInstancesListing
 CreatePlacementGroup
-CreateVpnConnection
-CreateVpnGateway
-DeleteCustomerGateway
-DeleteNetworkAcl
-DeleteNetworkAclEntry
+CreateReservedInstancesListing
 DeletePlacementGroup
-DeleteVpnConnection
-DeleteVpnGateway
 DescribeBundleTasks
 DescribeConversionTasks
-DescribeCustomerGateways
-DescribeNetworkAcls
 DescribePlacementGroups
-DescribeVpnConnections
-DescribeVpnGateways
-DetachVpnGateway
+DescribeReservedInstancesListings
 ImportInstance
 ImportVolume
-ReplaceNetworkAclAssociation
-ReplaceNetworkAclEntry
 
 =head1 OTHER INFORMATION
 
