@@ -142,9 +142,12 @@ use Scalar::Util 'weaken';
 
 use constant                     GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
+use constant LOCK_TIMEOUT  => 10;
 use constant VERBOSE_DEBUG => 3;
 use constant VERBOSE_INFO  => 2;
 use constant VERBOSE_WARN  => 1;
+
+
 
 my (%Zones,%Instances,%Volumes,%Managers);
 my $Verbose;
@@ -692,6 +695,7 @@ sub provision_server {
 	-username => $self->username,
 	-instance => $instance,
 	-manager  => $self,
+	-name     => $args{-name},
 	);
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
@@ -852,17 +856,26 @@ sub _terminate_servers {
     my $self = shift;
     my @servers = @_;
     my $ec2 = $self->ec2 or return;
+
+    my @terminate;
+    foreach (@servers) {
+	my $in_use = $self->unregister_server($_);
+	if ($in_use) {
+	    $self->warn("$_ is still in use. Will not terminate.\n");
+	    next;
+	}
+	push @terminate,$_;
+    }
     
-    if (@servers) {
-	$self->info("Terminating servers @servers.\n");
-	$ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
-	$ec2->wait_for_instances(@servers);
+    if (@terminate) {
+	$self->info("Terminating servers @terminate.\n");
+	$ec2->terminate_instances(@terminate) or warn $self->ec2->error_str;
+	$ec2->wait_for_instances(@terminate);
     }
 
     unless ($self->reuse_key) {
 	$ec2->delete_key_pair($_) foreach $ec2->describe_key_pairs(-filter=>{'key-name' => 'staging-key-*'});
     }
-    $self->unregister_server($_) foreach @servers;
 }
 
 =head2 $manager->wait_for_servers(@servers)
@@ -1687,6 +1700,7 @@ sub register_server {
     my $zone   = $server->placement;
     $Zones{$zone}{Servers}{$server} = $server;
     $Instances{$server->instance}   = $server;
+    return $self->_increment_usage_count($server);
 }
 
 =head2 $manager->unregister_server($server)
@@ -1702,6 +1716,7 @@ sub unregister_server {
     my $zone   = eval{$server->placement} or return; # avoids problems at global destruction
     delete $Zones{$zone}{Servers}{$server};
     delete $Instances{$server->instance};
+    return $self->_decrement_usage_count($server);
 }
 
 =head2 $manager->register_volume($volume)
@@ -1714,6 +1729,7 @@ internally.
 sub register_volume {
     my $self = shift;
     my $vol  = shift;
+    $self->_increment_usage_count($vol);
     $Zones{$vol->availabilityZone}{Volumes}{$vol} = $vol;
     $Volumes{$vol->volumeId} = $vol;
 }
@@ -1729,6 +1745,7 @@ sub unregister_volume {
     my $self = shift;
     my $vol  = shift;
     my $zone = $vol->availabilityZone;
+    $self->_decrement_usage_count($vol);
     delete $Zones{$zone}{$vol};
     delete $Volumes{$vol->volumeId};
 }
@@ -2126,6 +2143,98 @@ sub _servers {
     return @servers unless $endpoint;
     return grep {$_->ec2->endpoint eq $endpoint} @servers;
 }
+
+sub _lock {
+    my $self      = shift;
+    my ($resource,$lock_type)  = @_;
+    $lock_type eq 'SHARED' || $lock_type eq 'EXCLUSIVE'
+	or croak "Usage: _lock(\$resource,'SHARED'|'EXCLUSIVE')";
+
+    $resource->refresh;
+    my $tags = $resource->tags;
+    if (my $value = $tags->{StagingLock}) {
+	my ($type,$pid) = split /\s+/,$value;
+
+	if ($pid eq $$) {  # we've already got lock
+	    $resource->add_tags(StagingLock=>"$lock_type $$")
+		unless $type eq $lock_type;
+	    return 1;
+	}
+	
+	if ($lock_type eq 'SHARED' && $type eq 'SHARED') {
+	    return 1;
+	}
+
+	# wait for lock
+	eval {
+	    local $SIG{ALRM} = sub {die 'timeout'};
+	    alarm(LOCK_TIMEOUT);  # we get lock eventually one way or another
+	    while (1) {
+		$resource->refresh;
+		last unless $resource->tags->{StagingLock};
+		sleep 1;
+	    }
+	};
+	alarm(0);
+    }
+    $resource->add_tags(StagingLock=>"$lock_type $$");
+    return 1;
+}
+
+sub _unlock {
+    my $self     = shift;
+    my $resource = shift;
+    $resource->refresh;
+    my ($type,$pid) = split /\s+/,$resource->tags->{StagingLock};
+    return unless $pid eq $$;
+    $resource->delete_tags('StagingLock');
+}
+
+sub _safe_update_tag {
+    my $self = shift;
+    my ($resource,$tag,$value) = @_;
+    $self->_lock($resource,'EXCLUSIVE');
+    $resource->add_tag($tag => $value);
+    $self->_unlock($resource);
+}
+
+sub _safe_read_tag {
+    my $self = shift;
+    my ($resource,$tag) = @_;
+    $self->_lock($resource,'SHARED');
+    my $value = $resource->tags->{$tag};
+    $self->_unlock($resource);
+    return $value;
+}
+
+
+sub _increment_usage_count {
+    my $self     = shift;
+    my $resource = shift;
+    $self->_lock($resource,'EXCLUSIVE');
+    my $in_use = $resource->tags->{'StagingInUse'} || 0;
+    $resource->add_tags(StagingInUse=>$in_use+1);
+    $self->_unlock($resource);
+    $in_use+1;
+}
+
+sub _decrement_usage_count {
+    my $self     = shift;
+    my $resource = shift;
+
+    $self->_lock($resource,'EXCLUSIVE');
+    my $in_use = $resource->tags->{'StagingInUse'} || 0;
+    $in_use--;
+    if ($in_use > 0) {
+	$resource->add_tags(StagingInUse=>$in_use);
+    } else {
+	$resource->delete_tags('StagingInUse');
+	$in_use = 0;
+    }
+    $self->_unlock($resource);
+    return $in_use;
+}
+
 
 sub DESTROY {
     my $self = shift;
