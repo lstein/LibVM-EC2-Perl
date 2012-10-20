@@ -1,8 +1,9 @@
 This is an interface to Amazon EC2 REST tools that follows the
-2012-08-15 API. I created it because I needed access to the Tag and
+2012-10-01 API. I created it because I needed access to the Tag and
 TagSet interfaces, and neither euca2ools nor Net::Amazon::EC2 provided
-this functionality. The core Amazon API is supported, but support for
-VPC, clusters, spot instances and reserved instances is incomplete.
+this functionality. Almost all of the Amazon API is supported, but API
+calls for VM/volume import, bundle task management, reserved instance
+marketplace, and cluster placement groups are not currently implemented.
 
 The module provides an extensible object-oriented interface as
 illustrated by the following code:
