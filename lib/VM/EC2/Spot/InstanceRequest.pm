@@ -33,6 +33,9 @@ These object methods are supported:
  fault       -- Fault code for the request, if any, an
                 instance of VM::EC2::Error.
 
+ status      -- The status code and status message describing the
+                Spot Instance request.
+
  validFrom   -- Start date and time of the request.
 
  validUntil  -- Date and time that the request expires.
@@ -101,11 +104,12 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use VM::EC2::Spot::LaunchSpecification;
+use VM::EC2::Spot::Status;
 use base 'VM::EC2::Generic';
 
 sub valid_fields {
     my $self = shift;
-    return qw(spotInstanceRequestId spotPrice type state fault
+    return qw(spotInstanceRequestId spotPrice type state fault status
               validFrom validUntil launchGroup availabilityZoneGroup
               launchedAvailabilityZone launchSpecification instanceId
               createTime productDescription);
@@ -113,6 +117,12 @@ sub valid_fields {
 
 sub primary_id {
     shift->spotInstanceRequestId;
+}
+
+sub status {
+    my $self = shift;
+    my $status = $self->SUPER::status;
+    return VM::EC2::Spot::Status->new($status,$self->ec2,$self->xmlns,$self->requestId);
 }
 
 sub launchSpecification {

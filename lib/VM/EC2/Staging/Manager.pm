@@ -539,8 +539,9 @@ sub _copy_ebs_image {
     }
     
     if ($info->{ramdisk}) {
-	$ramdisk      = $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
-	    or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;
+	$ramdisk      = ( $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
+		       || $dest_manager->_guess_ramdisk($kernel)
+	    )  or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;
     }
 
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
@@ -1350,8 +1351,8 @@ sub _rsync_args {
     my $verbosity = $self->verbosity;
     return $verbosity < VERBOSE_WARN  ? '-aqz'
 	  :$verbosity < VERBOSE_INFO  ? '-aqz'
-	  :$verbosity < VERBOSE_DEBUG ? '-az'
-	  : '-avz'
+	  :$verbosity < VERBOSE_DEBUG ? '-azh'
+	  : '-avzh'
 }
 
 sub _authorize {
@@ -2050,6 +2051,23 @@ sub _match_kernel {
 						  -executable_by=>['all','self']);
     }
     return $candidates[0];
+}
+
+# find the most likely ramdisk for a kernel based on preponderant configuration of public images
+sub _guess_ramdisk {
+    my $self = shift;
+    my $kernel = shift;
+    my $ec2    = $self->ec2;
+    my @images = $ec2->describe_images({'image-type' => 'machine',
+					'kernel-id'  => $kernel});
+    my %ramdisks;
+
+    foreach (@images) {
+	$ramdisks{$_->ramdiskId}++;
+    }
+
+    my ($highest) = sort {$ramdisks{$b}<=>$ramdisks{$a}} keys %ramdisks;
+    return $highest;
 }
 
 sub _check_keyfile {

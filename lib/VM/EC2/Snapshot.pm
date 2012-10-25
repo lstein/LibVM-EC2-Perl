@@ -152,9 +152,9 @@ Modify the createVolumePermission attribute to allow the "all" group
 to create volumes from this snapshot. Provide a true value to make the
 snapshot public, a false one to make it private.
 
-=head2 @user_ids = $image->createVolumePermissions()
+=head2 @user_ids = $snap->createVolumePermissions()
 
-=head2 @user_ids = $image->authorized_users
+=head2 @user_ids = $snap->authorized_users
 
 Returns a list of user IDs with createVolume permissions for this
 snapshot. The result is a list of L<VM::EC2::Snapshot::CreateVolumePermission>
@@ -163,11 +163,11 @@ user ID, or the group named "all."
 
 The two methods are aliases of each other.
 
-=head2 $boolean = $image->add_authorized_users($id1,$id2,...)
+=head2 $boolean = $snap->add_authorized_users($id1,$id2,...)
 
-=head2 $boolean = $image->remove_authorized_users($id1,$id2,...)
+=head2 $boolean = $snap->remove_authorized_users($id1,$id2,...)
 
-=head2 $boolean = $image->reset_authorized_users
+=head2 $boolean = $snap->reset_authorized_users
 
 These methods add and remove user accounts which have createVolume
 permissions for the snapshot. The result code indicates whether the
@@ -180,7 +180,7 @@ creation to the owner only.
 
 See also authorized_users().
 
-=head2 $size = $image->size
+=head2 $size = $snap->size
 
 Alias to volumeSize, provided for consistency with
 VM::EC2::Volume->size.
