@@ -137,8 +137,9 @@ use VM::EC2;
 use Carp 'croak','longmess';
 use File::Spec;
 use File::Path 'make_path','remove_tree';
-use File::Basename 'dirname';
+use File::Basename 'dirname','basename';
 use Scalar::Util 'weaken';
+use String::Approx 'adistr';
 
 use constant                     GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
@@ -193,7 +194,7 @@ servers and volumes.
                 or "terminate".
 
  -image_name    Name or ami ID of the AMI to use for creating the
-                instances of new servers. Defaults to 'ubuntu-maverick-10.10'.
+                instances of new servers. Defaults to 'ubuntu-precise-12.04'.
                 If the image name begins with "ami-", then it is 
                 treated as an AMI ID. Otherwise it is treated as
                 a name pattern and will be used to search the AMI
@@ -408,6 +409,12 @@ currently be detected and transferred automatically by copy_image():
                                  -description   => 'My AMI western style',
                                  -block_devices => '/dev/sde=ephemeral0');
 
+=head2 $dest_kernel = $manager->match_kernel($src_kernel,$dest_zone)
+
+Find a kernel in $dest_zone that matches the $src_kernel in the
+current zone. $dest_zone can be a VM::EC2::Staging manager object, a
+region name, or a VM::EC2::Region object.
+
 =cut
 
 #############################################
@@ -429,26 +436,7 @@ sub copy_image {
     $image->rootDeviceType eq 'ebs'
 	or croak "It is not currently possible to migrate instance-store backed images between regions via this method";
         
-    my $dest_manager;
-    if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
-	$dest_manager = $destination;
-    } else {
-	my $dest_region = ref $destination && $destination->isa('VM::EC2::Region') 
-	    ? $destination
-	    : $ec2->describe_regions($destination);
-	$dest_region 
-	    or croak "Invalid EC2 Region '$dest_region'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";	
-	my $dest_endpoint = $dest_region->regionEndpoint;
-	my $dest_ec2      = VM::EC2->new(-endpoint    => $dest_endpoint,
-					 -access_key  => $ec2->access_key,
-					 -secret_key  => $ec2->secret) 
-	    or croak "Could not create new VM::EC2 in $dest_region";
-	$dest_manager = $self->new(-ec2           => $dest_ec2,
-				   -scan          => 1,
-				   -on_exit       => 'destroy',
-				   -instance_type => $self->instance_type);
-    }
-
+    my $dest_manager = $self->_parse_destination($destination);
 
     my $root_type = $image->rootDeviceType;
     if ($root_type eq 'ebs') {
@@ -497,9 +485,10 @@ sub copy_snapshot {
 	) or croak "Couldn't create new destination volume for $snapId";
 
     if ($fstype eq 'raw') {
-	$self->info("Using dd for block level disk copy (will take a while).\n");
+	$self->info("Using dd for block level disk copy (will take 1-2 minutes per gigabyte of raw disk).\n");
 	$source->dd($dest)    or croak "dd failed";
     } else {
+	$self->info("Using rsync for file level disk copy (will take 1-2 minutes per gigabyte of storage used).\n");
 	$source->copy($dest) or croak "rsync failed";
     }
     
@@ -537,14 +526,18 @@ sub _copy_ebs_image {
     my ($kernel,$ramdisk);
 
     if ($info->{kernel}) {
+	$self->info("Searching for a suitable kernel in the destination region.\n");
 	$kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
 	    or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
+	$self->info("Matched kernel $kernel (may be overridden)\n");
     }
     
     if ($info->{ramdisk}) {
+	$self->info("Searching for a suitable ramdisk in the destination region.\n");
 	$ramdisk      = ( $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
 		       || $dest_manager->_guess_ramdisk($kernel)
 	    )  or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;
+	$self->info("Matched ramdisk $ramdisk (may be overridden)\n");
     }
 
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
@@ -601,6 +594,7 @@ sub _copy_ebs_image {
 						  -architecture         => $architecture,
 						  $kernel  ? (-kernel_id   => $kernel):  (),
 						  $ramdisk ? (-ramdisk_id  => $ramdisk): (),
+						  %overrides,
 	);
     $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
 
@@ -1294,7 +1288,8 @@ sub dd {
     my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
     my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
     my $hush     = $self->verbosity <  VERBOSE_INFO ? '2>/dev/null' : '';
-    my $use_pv   = $self->verbosity >= VERBOSE_WARN;
+#    my $use_pv   = $self->verbosity >= VERBOSE_WARN;
+    my $use_pv   = 0; # this generates too many annoying warnings
     my $gigs     = $vol1->size;
 
     if ($use_pv) {
@@ -1574,12 +1569,12 @@ sub default_exit_behavior { 'stop'        }
 
 =head2 $name = $manager->default_image_name
 
-Return the default image name ('ubuntu-maverick-10.10') for use in
+Return the default image name ('ubuntu-precise-12.04') for use in
 creating new instances. Intended to be overridden in subclasses.
 
 =cut
 
-sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
+sub default_image_name    { 'ubuntu-precise-12.04' };  # launches faster than precise
 
 =head2 $name = $manager->default_user_name
 
@@ -2045,6 +2040,42 @@ sub _gather_image_info {
     };
 }
 
+sub _parse_destination {
+    my $self        = shift;
+    my $destination = shift;
+
+    my $ec2         = $self->ec2;
+    my $dest_manager;
+    if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
+	$dest_manager = $destination;
+    } else {
+	my $dest_region = ref $destination && $destination->isa('VM::EC2::Region') 
+	    ? $destination
+	    : $ec2->describe_regions($destination);
+	$dest_region 
+	    or croak "Invalid EC2 Region '$dest_region'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+	my $dest_endpoint = $dest_region->regionEndpoint;
+	my $dest_ec2      = VM::EC2->new(-endpoint    => $dest_endpoint,
+					 -access_key  => $ec2->access_key,
+					 -secret_key  => $ec2->secret) 
+	    or croak "Could not create new VM::EC2 in $dest_region";
+
+	$dest_manager = $self->new(-ec2           => $dest_ec2,
+				   -scan          => $self->scan,
+				   -on_exit       => 'destroy',
+				   -instance_type => $self->instance_type);
+    }
+
+    return $dest_manager;
+}
+
+sub match_kernel {
+    my $self = shift;
+    my ($src_kernel,$dest) = @_;
+    my $dest_manager = $self->_parse_destination($dest) or croak "could not create destination manager for $dest";
+    return $self->_match_kernel($src_kernel,$dest_manager,'kernel');
+}
+
 sub _match_kernel {
     my $self = shift;
     my ($imageId,$dest_manager) = @_;
@@ -2066,6 +2097,18 @@ sub _match_kernel {
 	@candidates  = $dest_ec2->describe_images(-filter=>{'image-type'=>'kernel',
 							    'manifest-location'=>"*/$location"},
 						  -executable_by=>['all','self']);
+    }
+    unless (@candidates) { # go to approximate match
+	my $location = $image->imageLocation;
+	my @kernels = $dest_ec2->describe_images(-filter=>{'image-type'=>'kernel',
+							   'manifest-location'=>"*/*"},
+						 -executable_by=>['all','self']);
+	my %locations = map {$_->imageLocation => $_} @kernels;
+	my %d;
+	my @inputs          = keys %locations;
+	@d{@inputs}         = map {abs} adistr($location,@inputs);
+	my @d               = sort {$d{$a}<=>$d{$b}} @inputs;
+	@candidates   = map {$locations{$_}} @d;
     }
     return $candidates[0];
 }

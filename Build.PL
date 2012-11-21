@@ -17,6 +17,7 @@ my $build = Module::Build->new(
       'URI::URL'     => '5.03',
       'XML::Simple'  => '2.18',
       'File::Path'   => '2.08',
+      'String::Approx' => '3.26',
     },
     recommends        => {
     },
