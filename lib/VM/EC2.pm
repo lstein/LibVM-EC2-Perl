@@ -997,7 +997,7 @@ following:
          - '<volume-type>': The volume type. One of "standard" or "io1".
 
          - '<iops>': The number of I/O operations per second (IOPS) that
-           the volume suports. A number between 1 to 1000. Only valid
+           the volume suports. A number between 100 to 2000. Only valid
            for volumes of type "io1".
           
          Examples: -block_devices => '/dev/sdb=snap-7eb96d16'
@@ -2107,7 +2107,7 @@ Optional Arguments:
                           standard
 
  -iops                 -- The number of I/O operations per second (IOPS) that
-                          the volume supports.  Range is 1 to 1000.  Required
+                          the volume supports.  Range is 100 to 2000.  Required
                           when volume type is io1.
 
 The returned object is a VM::EC2::Volume object.

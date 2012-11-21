@@ -44,10 +44,10 @@ The following object methods are supported:
  deleteOnTermination -- Whether this EBS will be deleted when the
                 instance terminates. Note that this will return
                 perl 0/1 values rather than the strings "false"/"true"
- volumeType  -- The volume type, one of "standard" or "iol"
+ volumeType  -- The volume type, one of "standard" or "io1"
  iops        -- The number of I/O operations per second that the volume
-                supports, an integer between 1 and 1000. Only valid for
-                volumes of type "iol".
+                supports, an integer between 100 and 2000. Only valid for
+                volumes of type "io1".
 
 =head1 STRING OVERLOADING
 
