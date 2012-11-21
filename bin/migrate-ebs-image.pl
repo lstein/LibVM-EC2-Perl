@@ -35,6 +35,8 @@ Options can be abbreviated.  For example, you can use -l for
       --block-device-mapping 
                      Add additional block devices to the image.
       --endpoint     EC2 URL (defaults to http://ec2.amazonaws.com/)
+      --kernel       Force assignment of kernel in destination image.
+      --ramdisk      Force assignment of ramdisk in destination image.
       --quiet        Quench status messages
       --list-regions List the EC2 regions
 
@@ -49,6 +51,12 @@ command line program ec2-register:
  migrate-ebs-image.pl -f us-east-1 -t ap-southeast-1 \
                       -b /dev/sdy=ephemeral0 \
                       ami-123456
+
+Ordinarily the script attempts to guess the correct matching kernel
+and ramdisk for the destination image based on approximate string
+matching. You can override these values by manually specifying the
+kernel and/or ramdisk ID in the destination region. Note that no
+checking is performed that the values you provide are correct.
 
 =head1 ENVIRONMENT VARIABLES
 
@@ -109,7 +117,7 @@ use VM::EC2::Staging::Manager;
 use File::Basename 'basename';
 use Getopt::Long;
 
-my($From,$To,$Access_key,$Secret_key,$Endpoint,$Quiet,$List,@Block_devices);
+my($From,$To,$Access_key,$Secret_key,$Endpoint,$Quiet,$List,$Kernel,$Ramdisk,@Block_devices);
 my $Program_name = basename($0);
 
 GetOptions('from=s'        => \$From,
@@ -120,6 +128,8 @@ GetOptions('from=s'        => \$From,
 	   'quiet'         => \$Quiet,
 	   'list_regions'  => \$List,
 	   'block-device-mapping=s' => \@Block_devices,
+	   'kernel'        => \$Kernel,
+	   'ramdisk'       => \$Ramdisk,
     ) or exec 'perldoc',$0;
 
 #setup defaults
@@ -152,6 +162,8 @@ my $dest = eval {VM::EC2->new(-region => $To)->staging_manager(-on_exit=>'termin
     or die $@;
 
 my @extra = @Block_devices ? (-block_devices=>\@Block_devices) : ();
+push @extra,(-kernel_id  => $Kernel)  if $Kernel;
+push @extra,(-ramdisk_id => $Ramdisk) if $Ramdisk;
 
 my $img  = $source->copy_image($ami => $dest,@extra);
 
