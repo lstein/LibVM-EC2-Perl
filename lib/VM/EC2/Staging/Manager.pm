@@ -564,7 +564,9 @@ sub _copy_ebs_image {
     my @mappings;
     for my $source_ebs (@$block_devices) {
 	my $dest        = "$source_ebs";  # interpolates into correct format
-	$dest          =~ s/=([\w-]+)/'='.$dest_snapshots{$1}||$1/e;  # replace source snap with dest snap
+	warn "dest was $dest";
+	$dest          =~ s/=([\w-]+)/'='.($dest_snapshots{$1}||$1)/e;  # replace source snap with dest snap
+	warn "dest is $dest";
 	push @mappings,$dest;
     }
 
@@ -583,6 +585,7 @@ sub _copy_ebs_image {
     }
 
     # helpful for recovering failed process
+    warn "mappings = @mappings";
     my $block_device_info_args = join ' ',map {"-b $_"} @mappings;
     $self->info("Registering snapshot in destination with the equivalent of:\n");
     $self->info("ec2-register -n '$name' -d '$description' -a $architecture --kernel $kernel --ramdisk '$ramdisk' --root-device-name $root_device $block_device_info_args\n");
