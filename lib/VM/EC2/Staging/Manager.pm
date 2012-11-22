@@ -12,7 +12,7 @@ VM::EC2::Staging::Manager - Automate VMs and volumes for moving data in and out 
  my $staging = $ec2->staging_manager(-on_exit     => 'stop', # default, stop servers when process exists
                                      -verbose     => 1,      # default, verbose progress messages
                                      -scan        => 1,      # default, scan region for existing staging servers and volumes
-                                     -image_name  => 'ubuntu-maverick-10.10', # default server image
+                                     -image_name  => 'ubuntu-precise-12.04',  # default server image
                                      -user_name   => 'ubuntu',                # default server login name
                                      );
 
@@ -515,6 +515,9 @@ sub _copy_ebs_image {
     my $self = shift;
     my ($image,$dest_manager,$options) = @_;
 
+    # apply overrides
+    my %overrides = @$options if $options;
+
     # hashref with keys 'name', 'description','architecture','kernel','ramdisk','block_devices','root_device'
     # 'is_public','authorized_users'
     $self->info("Gathering information about image $image.\n");
@@ -525,19 +528,19 @@ sub _copy_ebs_image {
     my $architecture = $info->{architecture};
     my ($kernel,$ramdisk);
 
-    if ($info->{kernel}) {
+    if ($info->{kernel} && !$overrides{-kernel}) {
 	$self->info("Searching for a suitable kernel in the destination region.\n");
 	$kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
 	    or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
-	$self->info("Matched kernel $kernel (may be overridden)\n");
+	$self->info("Matched kernel $kernel\n");
     }
     
-    if ($info->{ramdisk}) {
+    if ($info->{ramdisk} && !$overrides{-ramdisk}) {
 	$self->info("Searching for a suitable ramdisk in the destination region.\n");
 	$ramdisk      = ( $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
 		       || $dest_manager->_guess_ramdisk($kernel)
 	    )  or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;
-	$self->info("Matched ramdisk $ramdisk (may be overridden)\n");
+	$self->info("Matched ramdisk $ramdisk\n");
     }
 
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
@@ -571,9 +574,6 @@ sub _copy_ebs_image {
 	$name = $self->_token($name);
 	print STDERR "Renamed to '$name'\n";
     }
-
-    # apply overrides
-    my %overrides = @$options if $options;
 
     # merge block device mappings if present
     if (my $m = $overrides{-block_device_mapping}||$overrides{-block_devices}) {
@@ -1288,32 +1288,23 @@ sub dd {
     my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
     my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
     my $hush     = $self->verbosity <  VERBOSE_INFO ? '2>/dev/null' : '';
-#    my $use_pv   = $self->verbosity >= VERBOSE_WARN;
-    my $use_pv   = 0; # this generates too many annoying warnings
     my $gigs     = $vol1->size;
 
-    if ($use_pv) {
-	$self->info('Configuring PV to show dd progress.');
-	$server1->ssh("if [ ! -e /usr/bin/pv ]; then sudo apt-get -qq update; sudo apt-get -y -qq install pv; fi");
-    }
-
     if ($server1 eq $server2) {
-	if ($use_pv) {
-	    print STDERR "\n";
-	    $server1->ssh("sudo dd if=$device1 2>/dev/null | pv -f -s ${gigs}G -petr | sudo dd of=$device2 2>/dev/null");
-	} else {
-	    $server1->ssh("sudo dd if=$device1 of=$device2 $hush");
-	}
+	$server1->ssh("sudo dd if=$device1 of=$device2 $hush");
     }  else {
 	my $keyname  = $self->_authorize($server1,$server2);
 	my $dest_ip  = $server2->instance->dnsName;
 	my $ssh_args = $server1->_ssh_escaped_args;
 	my $keyfile  = $server1->keyfile;
 	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-	my $pv       = $use_pv ? "| pv -s ${gigs}G -petr" : '';
-	$server1->ssh("sudo dd if=$device1 $hush $pv | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
+	$server1->ssh("sudo dd if=$device1 $hush | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
     }
 }
+
+#
+# perl -e 'my $b; while (read(STDIN,$b,65536)
+# 
 
 # take real or symbolic name and turn it into a two element
 # list consisting of server object and mount point
