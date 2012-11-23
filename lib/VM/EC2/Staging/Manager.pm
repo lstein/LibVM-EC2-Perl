@@ -84,6 +84,7 @@ VM::EC2::Staging::Manager - Automate VMs and volumes for moving data in and out 
  $staging->stop_all_servers();
  $staging->start_all_servers();
  $staging->terminate_all_servers();
+ $staging->force_terminate_all_servers();
 
 =head1 DESCRIPTION
 
@@ -132,8 +133,6 @@ the same region will return the same one each time.
 
 use strict;
 use VM::EC2;
-# use VM::EC2::Staging::Volume;
-# use VM::EC2::Staging::Server;
 use Carp 'croak','longmess';
 use File::Spec;
 use File::Path 'make_path','remove_tree';
@@ -141,14 +140,12 @@ use File::Basename 'dirname','basename';
 use Scalar::Util 'weaken';
 use String::Approx 'adistr';
 
-use constant                     GB => 1_073_741_824;
+use constant GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
 use constant LOCK_TIMEOUT  => 10;
 use constant VERBOSE_DEBUG => 3;
 use constant VERBOSE_INFO  => 2;
 use constant VERBOSE_WARN  => 1;
-
-
 
 my (%Zones,%Instances,%Volumes,%Managers);
 my $Verbose;
@@ -564,9 +561,7 @@ sub _copy_ebs_image {
     my @mappings;
     for my $source_ebs (@$block_devices) {
 	my $dest        = "$source_ebs";  # interpolates into correct format
-	warn "dest was $dest";
 	$dest          =~ s/=([\w-]+)/'='.($dest_snapshots{$1}||$1)/e;  # replace source snap with dest snap
-	warn "dest is $dest";
 	push @mappings,$dest;
     }
 
@@ -585,7 +580,6 @@ sub _copy_ebs_image {
     }
 
     # helpful for recovering failed process
-    warn "mappings = @mappings";
     my $block_device_info_args = join ' ',map {"-b $_"} @mappings;
     $self->info("Registering snapshot in destination with the equivalent of:\n");
     $self->info("ec2-register -n '$name' -d '$description' -a $architecture --kernel $kernel --ramdisk '$ramdisk' --root-device-name $root_device $block_device_info_args\n");
@@ -847,6 +841,22 @@ sub terminate_all_servers {
     my $ec2 = $self->ec2 or return;
     my @servers  = $self->servers or return;
     $self->_terminate_servers(@servers);
+}
+
+=head2 $manager->force_terminate_all_servers
+
+Force termination of all VM::EC2::Staging::Servers, even if the
+internal registration system indicates that some may be in use by
+other Manager instances.
+
+=cut
+
+sub force_terminate_all_servers {
+    my $self = shift;
+    my $ec2 = $self->ec2 or return;
+    my @servers  = $self->servers or return;
+    $ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
+    $ec2->wait_for_instances(@servers);
 }
 
 sub _terminate_servers {
@@ -1212,6 +1222,12 @@ sub rsync {
     my $dest_path         = $dest->[1];
 
     my $rsync_args        = $self->_rsync_args;
+    my $dots;
+
+    if ($self->verbosity == VERBOSE_INFO) {
+	$rsync_args       .= 'v';  # print a line for each file
+	$dots             = '2>&1|/tmp/dots.pl t';
+    }
 
     my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,'VM::EC2::Staging::Server');
     my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,'VM::EC2::Staging::Server');
@@ -1223,7 +1239,8 @@ sub rsync {
     # remote rsync on either src or dest server
     if ($remote_path && ($src_is_server || $dest_is_server)) {
 	my $server = $source_host || $dest_host;
-	return $server->ssh(['-t','-A'],"sudo -E rsync -e 'ssh -o \"CheckHostIP no\" -o \"StrictHostKeyChecking no\"' $rsync_args @source_paths $dest_path");
+	$self->_upload_dots_script($server) if $dots;
+	return $server->ssh(['-t','-A'],"sudo -E rsync -e 'ssh -o \"CheckHostIP no\" -o \"StrictHostKeyChecking no\"' $rsync_args @source_paths $dest_path $dots");
     }
 
     # localhost => localhost
@@ -1258,10 +1275,11 @@ sub rsync {
     my $keyfile  = $source_host->keyfile;
     $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
     $self->info("Beginning rsync @source_paths $dest_ip:$dest_path...\n");
+    $self->_upload_dots_script($source_host) if $dots;
     my $result = $source_host->ssh('sudo','rsync',$rsync_args,
 				   '-e',"'ssh $ssh_args'",
 				   "--rsync-path='sudo rsync'",
-				   @source_paths,"$dest_ip:$dest_path");
+				   @source_paths,"$dest_ip:$dest_path",$dots);
     $self->info("...rsync done.\n");
     return $result;
 }
@@ -1290,19 +1308,32 @@ sub dd {
     my ($vol1,$vol2) = @_;
     my ($server1,$device1) = ($vol1->server,$vol1->mtdev);
     my ($server2,$device2) = ($vol2->server,$vol2->mtdev);
-    my $hush     = $self->verbosity <  VERBOSE_INFO ? '2>/dev/null' : '';
     my $gigs     = $vol1->size;
 
+    my ($hush,$print_dots);
+    if ($self->verbosity <  VERBOSE_INFO) {
+	$hush       = '2>/dev/null';
+	$print_dots = '';
+    } else {
+	$self->_upload_dots_script($server1);
+	$hush       = '';
+	$print_dots = '| tee >(/tmp/dots.pl b 1>&2)';
+    }
+
+    $self->info("Beginning dd transfer of $gigs GB\n");
+
     if ($server1 eq $server2) {
-	$server1->ssh("sudo dd if=$device1 of=$device2 $hush");
+	$server1->ssh("sudo cat $device1 $print_dots | sudo dd of=$device2 $hush");
     }  else {
 	my $keyname  = $self->_authorize($server1,$server2);
 	my $dest_ip  = $server2->instance->dnsName;
 	my $ssh_args = $server1->_ssh_escaped_args;
 	my $keyfile  = $server1->keyfile;
 	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-	$server1->ssh("sudo dd if=$device1 $hush | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
+	$server1->ssh("sudo dd if=$device1 $hush $print_dots | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
     }
+
+    $self->info("...dd done.\n");
 }
 
 #
@@ -1351,10 +1382,10 @@ sub _resolve_path {
 sub _rsync_args {
     my $self  = shift;
     my $verbosity = $self->verbosity;
-    return $verbosity < VERBOSE_WARN  ? '-aqz'
-	  :$verbosity < VERBOSE_INFO  ? '-aqz'
+    return $verbosity < VERBOSE_WARN  ? '-azq'
+	  :$verbosity < VERBOSE_INFO  ? '-azh'
 	  :$verbosity < VERBOSE_DEBUG ? '-azh'
-	  : '-avzh'
+	  : '-azhv'
 }
 
 sub _authorize {
@@ -1550,7 +1581,7 @@ is overridden using -verbose at create time.
 
 =cut
 
-sub default_verbosity { 2 }
+sub default_verbosity { VERBOSE_INFO }
 
 =head2 $name = $manager->default_exit_behavior
 
@@ -1686,6 +1717,7 @@ internally.
 sub register_server {
     my $self   = shift;
     my $server = shift;
+    sleep 1;   # AWS lag bugs
     my $zone   = $server->placement;
     $Zones{$zone}{Servers}{$server} = $server;
     $Instances{$server->instance}   = $server;
@@ -2094,15 +2126,19 @@ sub _match_kernel {
     }
     unless (@candidates) { # go to approximate match
 	my $location = $image->imageLocation;
+	my @path     = split '/',$location;
 	my @kernels = $dest_ec2->describe_images(-filter=>{'image-type'=>'kernel',
 							   'manifest-location'=>"*/*"},
 						 -executable_by=>['all','self']);
-	my %locations = map {$_->imageLocation => $_} @kernels;
-	my %d;
-	my @inputs          = keys %locations;
-	@d{@inputs}         = map {abs} adistr($location,@inputs);
-	my @d               = sort {$d{$a}<=>$d{$b}} @inputs;
-	@candidates   = map {$locations{$_}} @d;
+	my %k         = map {$_=>$_} @kernels;
+	my %locations = map {my $l    = $_->imageLocation;
+			     my @path = split '/',$l;
+			     $_       => \@path} @kernels;
+
+	my %level0          = map {$_ => abs(adistr($path[0],$locations{$_}[0]))} keys %locations;
+	my %level1          = map {$_ => abs(adistr($path[1],$locations{$_}[1]))} keys %locations;
+	@candidates         = sort {$level0{$a}<=>$level0{$b} || $level1{$a}<=>$level1{$b}} keys %locations;
+	@candidates         = map {$k{$_}} @candidates;
     }
     return $candidates[0];
 }
@@ -2272,6 +2308,32 @@ sub _decrement_usage_count {
     return $in_use;
 }
 
+sub _upload_dots_script {
+    my $self   = shift;
+    my $server = shift;
+
+    my @lines       = split "\n",longmess();
+    my $stack_count = grep /VM::EC2::Staging::Manager/,@lines;
+    my $spaces      = ' ' x (($stack_count-1)*3);
+
+    my $fh     = $server->scmd_write('cat >/tmp/dots.pl');
+    print $fh <<END;
+#!/usr/bin/perl
+my \$mode = shift || 'b';
+print STDERR "[info] $spaces Data transfer: one dot equals ",(\$mode eq 'b'?'100 Mb':'100 files'),': ';
+my \$b; 
+ READ:
+    while (1) { 
+	do {read(STDIN,\$b,1e5) || last READ for 1..1000} if \$mode eq 'b';
+	do {<> || last READ                  for 1.. 100} if \$mode eq 't';
+	print STDERR '.';
+}
+print STDERR ".\n";
+END
+    ;
+    close $fh;
+    $server->ssh('chmod +x /tmp/dots.pl');
+}
 
 sub DESTROY {
     my $self = shift;

@@ -385,6 +385,8 @@ sub unmount {
     $self->mtpt(undef);
 }
 
+sub umount { shift->unmount(@_) }  # because I forget
+
 =head2 $vol->detach()
 
 Unmount and detach the volume from its current server, if any.
