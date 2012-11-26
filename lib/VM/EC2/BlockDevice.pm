@@ -120,7 +120,7 @@ sub iops        { shift->ebs->iops       }
 sub as_string {
     my $self  = shift;
     my $vname = $self->virtualName;
-    return $self->deviceName.'='.$vname if $vname =~ /^ephemeral/;
+    return $self->deviceName.'='.$vname if $vname && $vname =~ /^ephemeral/;
     my $dot   = $self->deleteOnTermination ? 'true' : 'false';
     my $vtype = $self->volumeType;
     my @type_iops = $vtype eq 'io1' ? ($vtype,$self->iops) : $vtype;
