@@ -1052,8 +1052,8 @@ sub _find_or_create_mount {
 
     unless ($mt_device && $mtpt) {
 	($ebs_device,$mt_device) = $self->unused_block_device;
-	$self->info("attaching $vol to $self via $mt_device\n");
-	my $s = $vol->attach($self->instanceId,$mt_device) 
+	$self->info("attaching $vol to $self via $ebs_device\n");
+	my $s = $vol->attach($self->instanceId,$ebs_device) 
 	    or croak "Can't attach $vol to $self: ",$self->ec2->error_str;
 	$self->ec2->wait_for_attachments($s);
 	$s->current_status eq 'attached' or croak "Can't attach $vol to $self";
