@@ -1,3 +1,12 @@
+1.20 Wed Nov 28 07:07:10 EST 2012
+     - better detection of corresponding kernels when transferring images among zones
+       (requires String::Approx).
+     - fix staging manager pv support (patch from Misha Dragojevic)
+     - fix broken staging volume mount command when staging server uses /dev/xvd* device names.
+     - add progress reporting to rsync-based file transfers in staging server.
+     - correctly transfer images with ephemeral block devices.
+     - documentation fixes to Snapshot.pm
+
 1.19 Tue Sep 25 21:32:02 EDT 2012
      - fix Instance.pm valid_fields():  add groupSet, 
      - fix typo in instanceLifeCycle, put in same order as docs
