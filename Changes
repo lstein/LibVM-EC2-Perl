@@ -1,3 +1,7 @@
+1.21 Tue Dec 11 11:29:57 EST 2012
+     - fix BadParameterValue when passing -private_ip_address to run_instances().
+       (thanks to Makoto Milda for bug report and patch).
+
 1.19 Tue Sep 25 21:32:02 EDT 2012
      - fix Instance.pm valid_fields():  add groupSet, 
      - fix typo in instanceLifeCycle, put in same order as docs

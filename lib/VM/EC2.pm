@@ -375,7 +375,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.20';
+our $VERSION = '1.21';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -1129,7 +1129,7 @@ sub run_instances {
     $args{-availability_zone} ||= $args{-placement_zone};
 
     my @p = map {$self->single_parm($_,\%args) }
-       qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIPAddress
+       qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIpAddress
           InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
     push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
     push @p,('UserData' =>encode_base64($args{-user_data},''))        if $args{-user_data};
