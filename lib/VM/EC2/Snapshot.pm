@@ -135,6 +135,15 @@ Create a new volume from this snapshot. Arguments are:
 If -size is not provided, then the new volume will have the same size as
 the snapshot. 
 
+Optional Arguments:
+
+ -volume_type          -- The volume type.  standard or io1, default is
+                          standard
+
+ -iops                 -- The number of I/O operations per second (IOPS) that
+                          the volume supports.  Range is 100 to 2000.  Required
+                          when volume type is io1.
+
 On success, the returned value is a L<VM::EC2::Volume> object.
 
 =head2 $status = $snap->current_status

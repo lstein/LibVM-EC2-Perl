@@ -79,6 +79,13 @@ sub valid_fields {
 
 sub primary_id { shift->groupId }
 
+sub groupName {
+    my $self = shift;
+    my $name = $self->SUPER::groupName;
+    $name   =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg; # for some reason this is URI encoded!
+    $name;
+}
+
 sub permissions {
     my $self = shift;
     return $self->{perm} if exists $self->{perm};

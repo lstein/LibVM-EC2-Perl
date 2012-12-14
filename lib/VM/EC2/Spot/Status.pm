@@ -53,4 +53,6 @@ sub valid_fields {
     return qw(code updateTime message);
 }
 
+sub short_name { shift->code }
+
 1;
