@@ -240,6 +240,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use LWP::UserAgent;
+use URI::Escape 'uri_unescape';
 use Carp 'croak';
 
 use constant TIMEOUT => 5; # seconds
@@ -322,7 +323,7 @@ sub fetch {
     $ua->timeout(TIMEOUT);
     my $response = $ua->get("http://169.254.169.254/latest/meta-data/$attribute");
     if ($response->is_success) {
-	return $cache->{$attribute} = $response->decoded_content;
+	return $cache->{$attribute} = uri_unescape($response->decoded_content);  # don't know why, but URI escapes used here.
     } else {
 	print STDERR $response->status_line,"\n" unless $response->code == 404;
 	return;

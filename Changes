@@ -1,5 +1,7 @@
 1.21
      - Distinguish current_state() from current_status() in VM::EC2::Spot::InstanceRequest.
+     - URI unescape fields in VM::EC2::Instance::Metadata (not documented to be needed, but apparently so
+       for at least some fields).
 
 1.20 Wed Nov 28 07:07:10 EST 2012
      - better detection of corresponding kernels when transferring images among zones
