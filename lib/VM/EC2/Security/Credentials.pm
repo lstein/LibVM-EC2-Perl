@@ -41,6 +41,12 @@ VM::EC2::Security::Credentials -- Temporary security credentials for EC2
  my $ec2   = VM::EC2->new(-security_token => $token);
  print $ec2->describe_images(-owner=>'self');
 
+ # convenience routine; will return a VM::EC2 object authorized
+ # to use the current token
+ my $ec2   = $token->new_ec2;
+ print $ec2->describe_images(-owner=>'self');
+ 
+
 =head1 DESCRIPTION
 
 The VM::EC2::Security::Credentials object is returned by the
@@ -90,6 +96,17 @@ and session token in unencrypted, but very slightly obfuscated, form.
 Given a previously-serialized Credentials object, unserialize it and
 return a copy.
 
+=head1 CONVENIENCE METHODS
+
+These are convenience methods.
+
+=head2 $ec2 = $credentials->new_ec2(@args)
+
+Create a new VM::EC2 object which is authorized using the security
+token contained in the credentials object. You may pass all the
+arguments, such as -endpoint, that are accepted by VM::EC2->new(), but
+-access_key and -secret_access_key will be ignored.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
@@ -123,6 +140,13 @@ sub valid_fields {
     return qw(AccessKeyId Expiration SecretAccessKey SessionToken);
 }
 
+sub new_ec2 {
+    my $self = shift;
+    my $endpoint = shift;
+    return VM::EC2->new(-security_token=>$self,
+			-endpoint      => $endpoint);
+}
+
 # serialize the credentials in a packed form
 sub serialize {
     my $self = shift;
@@ -151,9 +175,8 @@ sub new_from_json {
 		   };
 
     my $self = $class->new($payload,undef);
-    $self->ec2(VM::EC2->new(-security_token=>$self,
-			    -endpoint      => $endpoint,
-	       )); # interesting bootstrapping behavior here...
+    my $ec2  = $self->new_ec2(-endpoint => $endpoint);
+    $self->ec2($ec2) unless $self->ec2;
     return $self;
 }
 
