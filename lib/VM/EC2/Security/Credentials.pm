@@ -142,9 +142,9 @@ sub valid_fields {
 
 sub new_ec2 {
     my $self = shift;
-    my $endpoint = shift;
+    my @args = @_;
     return VM::EC2->new(-security_token=>$self,
-			-endpoint      => $endpoint);
+			@args);
 }
 
 # serialize the credentials in a packed form
