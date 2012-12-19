@@ -7104,8 +7104,8 @@ sub call {
 	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg},$self);
 	}
 	$self->error($error);
-	carp  "$error" if $self->print_error;
-	croak "$error" if $self->raise_error;
+	carp  "$error. API call '$_[0]'" if $self->print_error;
+	croak "$error. API call '$_[0]'" if $self->raise_error;
 	return;
     }
 
