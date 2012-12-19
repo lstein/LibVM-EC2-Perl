@@ -114,6 +114,7 @@ sub zone {
 sub refresh {
     my $self = shift;
     my $i   = shift;
+    local $self->aws->{raise_error} = 1;
     ($i) = $self->aws->describe_subnets($self->subnetId) unless $i;
     %$self  = %$i;
 }

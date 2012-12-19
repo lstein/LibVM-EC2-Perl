@@ -318,7 +318,8 @@ sub current_status {
 sub refresh {
     my $self = shift;
     my $i   = shift;
-    ($i) = $self->aws->describe_images(-image_id=>$self->imageId) unless $i;
+    local $self->aws->{raise_error} = 1;
+    ($i)    = $self->aws->describe_images(-image_id=>$self->imageId) unless $i;
     %$self  = %$i;
 }
 

@@ -265,6 +265,7 @@ sub current_status {
 
 sub refresh {
     my $self = shift;
+    local $self->aws->{raise_error} = 1;
     my $v    = $self->aws->describe_volumes($self->volumeId);
     %$self   = %$v;
 }

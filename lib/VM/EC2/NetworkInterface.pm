@@ -205,6 +205,7 @@ sub valid_fields {
 sub refresh {
     my $self = shift;
     my $i    = shift;
+    local $self->aws->{raise_error} = 1;
     ($i) = $self->aws->describe_network_interfaces(-network_interface_id=>$self->networkInterfaceId) unless $i;
     %$self  = %$i;
 }
