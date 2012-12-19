@@ -341,7 +341,7 @@ sub publicKeys {
 sub iam_info {
     my $self = shift;
     $self->_load_json;
-    return JSON->decode($self->fetch('iam/info'));
+    return JSON::from_json($self->fetch('iam/info'));
 }
 
 sub iam_role {
@@ -359,8 +359,8 @@ sub iam_credentials {
 }
 
 sub _load_json {
-    eval "require JSON; 1" or croak "no JSON module installed"
-	unless JSON->can('decode');
+    return if JSON->can('decode');
+    eval "require JSON; 1" or croak "no JSON module installed: $@";
 }
 
 sub fetch {

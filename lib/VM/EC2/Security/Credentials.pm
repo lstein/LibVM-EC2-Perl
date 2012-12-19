@@ -140,15 +140,17 @@ sub new_from_serialized {
 sub new_from_json {
     my $class = shift;
     my $data  = shift;
-    eval "require JSON; 1" or die "no JSON module installed"
+    eval "require JSON; 1" or die "no JSON module installed: $@"
 	unless JSON->can('decode');
-    my $hash = JSON->decode($data);
+    my $hash = JSON::from_json($data);
     my $payload = {AccessKeyId     => $hash->{AccessKeyId},
 		   SecretAccessKey => $hash->{SecretAccessKey},
 		   SessionToken    => $hash->{Token},     # note inconsistency here, which is why we are copying
 		   Expiration      => $hash->{Expiration}
 		   };
-    return $class->new($payload);
+    my $self = $class->new($payload,undef);
+    $self->ec2(VM::EC2->new(-security_token=>$self)); # interesting bootstrapping behavior here...
+    return $self;
 }
 
 sub short_name {shift->access_key_id}

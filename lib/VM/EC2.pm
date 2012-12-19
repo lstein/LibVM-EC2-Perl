@@ -466,10 +466,10 @@ sub new {
     my %args = @_;
 
     my ($id,$secret,$token);
-    if (ref $args{-security_token} && $args{-security_token}->can('access_key_id')) {
-	$id     = $args{-security_token}->access_key_id;
-	$secret = $args{-security_token}->secret_access_key;
-	$token  = $args{-security_token}->session_token;
+    if (ref $args{-security_token} && $args{-security_token}->can('AccessKeyId')) {
+	$id     = $args{-security_token}->AccessKeyId;
+	$secret = $args{-security_token}->SecretAccessKey;
+	$token  = $args{-security_token}->SessionToken;
     }
 
     $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY}
@@ -495,8 +495,9 @@ sub new {
     },ref $self || $self;
 
     if ($args{-region}) {
-	my $region = $obj->describe_regions($args{-region}) or croak $obj->error_str;
-	$obj->endpoint($region->regionEndpoint);
+	my $region   = eval{$obj->describe_regions($args{-region})};
+	my $endpoint = $region ? $region->regionEndpoint :"ec2.$args{-region}.amazonaws.com";
+	$obj->endpoint($endpoint);
     }
 
     return $obj;
