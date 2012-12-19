@@ -32,6 +32,10 @@ VM::EC2::Security::Credentials -- Temporary security credentials for EC2
  # create a copy of the token from its serialized form
  my $token = VM::EC2::Security::Credentials->new_from_serialized($serialized);
 
+ # create a copy of the token from its JSON representation (e.g. as returned
+ # from instance metadata of an instance that is assigned an IAM role
+ my $token = VM::EC2::Security::Credentials->new_from_json($json);
+
  # open a new EC2 connection with this token. User will be
  # able to run all the methods specified in the policy.
  my $ec2   = VM::EC2->new(-security_token => $token);
@@ -131,6 +135,20 @@ sub new_from_serialized {
     my $data  = shift;
     my $obj   = thaw(decode_base64($data));
     return bless $obj,ref $class || $class;
+}
+
+sub new_from_json {
+    my $class = shift;
+    my $data  = shift;
+    eval "require JSON; 1" or die "no JSON module installed"
+	unless JSON->can('decode');
+    my $hash = JSON->decode($data);
+    my $payload = {AccessKeyId     => $hash->{AccessKeyId},
+		   SecretAccessKey => $hash->{SecretAccessKey},
+		   SessionToken    => $hash->{Token},     # note inconsistency here, which is why we are copying
+		   Expiration      => $hash->{Expiration}
+		   };
+    return $class->new($payload);
 }
 
 sub short_name {shift->access_key_id}

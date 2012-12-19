@@ -48,6 +48,11 @@ VM::EC2::Instance::Metadata - Object describing the metadata of a running instan
  $pub_ip    = $meta->ipAddress;
  $interfaces= $meta->interfaces;       # a hashref
 
+ # IAM information
+ $iam_info   = $metadata->iam_info;         # a hashref
+ $iam_role   = $metadata->iam_role;         # name of the role
+ $credentials= $metadata->iam_credentials;  # VM::EC2::Security::Credentials object
+
  # Undocumented fields
  $action    = $meta->instanceAction;
  $profile   = $meta->profile;
@@ -121,6 +126,25 @@ The following methods all return single-valued results:
  publicIpv4             -- This instance's public IP address.
  ipAddress              -- Same as publicIpv4() for consistency with
                            VM::EC2::Instance.
+
+=item IAM information
+
+These routines return information about the instance's IAM role, if
+any. These calls also provide a temporary security credentials for
+making EC2 calls, as described here:
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html.
+
+Note that these routines require installation of the perl JSON module, and will
+cause a fatal error if this module cannot be loaded.
+
+ iam_info               -- Returns a hash containing the fields 'LastUpdated',
+                           'InstanceProfileArn', and 'InstanceProfileId'. These
+                           provide information about the instance's IAM role.
+ iam_role               -- Returns the IAM role name for the currently running
+                           instance.
+ iam_credentials        -- Returns a VM::EC2::Security::Credentials object that can
+                           be passed to VM::EC2->new(-security_token=>$credentials).
+
 =item Unknown information:
 
  profile                -- An undocumented field that contains the virtualization
@@ -312,6 +336,31 @@ sub publicKeys {
     my $self = shift;
     my @keys = split /\s+/,$self->fetch('public-keys');
     return map {/^\d+=(.+)/ && $1} @keys;
+}
+
+sub iam_info {
+    my $self = shift;
+    $self->_load_json;
+    return JSON->decode($self->fetch('iam/info'));
+}
+
+sub iam_role {
+    my $self = shift;
+    return $self->fetch('iam/security-credentials');
+}
+
+sub iam_credentials {
+    my $self = shift;
+    my $role = $self->iam_role or return;
+    my $data = $self->fetch("iam/security-credentials/$role") or return;
+    eval "require VM::EC2::Security::Credentials"
+	unless VM::EC2::Security::Credentials->can('new_from_json');
+    return VM::EC2::Security::Credentials->new_from_json($data);
+}
+
+sub _load_json {
+    eval "require JSON; 1" or croak "no JSON module installed"
+	unless JSON->can('decode');
 }
 
 sub fetch {
