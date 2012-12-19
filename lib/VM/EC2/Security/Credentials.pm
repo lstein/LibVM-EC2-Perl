@@ -139,17 +139,21 @@ sub new_from_serialized {
 
 sub new_from_json {
     my $class = shift;
-    my $data  = shift;
+    my ($data,$endpoint) = @_;
     eval "require JSON; 1" or die "no JSON module installed: $@"
 	unless JSON->can('decode');
     my $hash = JSON::from_json($data);
+
     my $payload = {AccessKeyId     => $hash->{AccessKeyId},
 		   SecretAccessKey => $hash->{SecretAccessKey},
 		   SessionToken    => $hash->{Token},     # note inconsistency here, which is why we are copying
 		   Expiration      => $hash->{Expiration}
 		   };
+
     my $self = $class->new($payload,undef);
-    $self->ec2(VM::EC2->new(-security_token=>$self)); # interesting bootstrapping behavior here...
+    $self->ec2(VM::EC2->new(-security_token=>$self,
+			    -endpoint      => $endpoint,
+	       )); # interesting bootstrapping behavior here...
     return $self;
 }
 

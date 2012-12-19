@@ -108,6 +108,8 @@ The following methods all return single-valued results:
  reservationId          -- This instance's reservation ID
  instanceType           -- Machine type, e.g. "m1.small"
  availabilityZone       -- This instance's availability zone.
+ region                 -- This instance's region.
+ endpoint               -- This instance's endpoint.
  userData               -- User data passed at launch time.
 
 =item Network information:
@@ -291,6 +293,10 @@ sub privateIpAddress { shift->localIpv4                  }
 sub kernelId         { shift->fetch('kernel-id')         }
 sub mac              { shift->fetch('mac')               }
 sub availabilityZone { shift->fetch('placement/availability-zone') }
+sub region           { my $r = shift->availabilityZone;
+                       $r    =~ s/[a-z]$//;              
+		       return $r;                        }
+sub endpoint         { 'http://ec2.'.shift->region.'.amazonaws.com'}
 sub productCodes     { split /\s+/,shift->fetch('product-codes')   }
 sub publicHostname   { shift->fetch('public-hostname')   }
 sub dnsName          { shift->publicHostname             }
@@ -355,7 +361,7 @@ sub iam_credentials {
     my $data = $self->fetch("iam/security-credentials/$role") or return;
     eval "require VM::EC2::Security::Credentials"
 	unless VM::EC2::Security::Credentials->can('new_from_json');
-    return VM::EC2::Security::Credentials->new_from_json($data);
+    return VM::EC2::Security::Credentials->new_from_json($data,$self->endpoint);
 }
 
 sub _load_json {
