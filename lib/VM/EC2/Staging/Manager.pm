@@ -2257,7 +2257,7 @@ sub _unlock {
     my $self     = shift;
     my $resource = shift;
     $resource->refresh;
-    my $sl = $resource->tags{StagingLock} or return;
+    my $sl = $resource->tags->{StagingLock} or return;
     my ($type,$pid) = split /\s+/,$sl;
     return unless $pid eq $$;
     $resource->delete_tags('StagingLock');
