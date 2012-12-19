@@ -150,9 +150,12 @@ sub federated_user {
     return VM::EC2::Security::FederatedUser->new($user,undef);
 }
 
-sub secret_access_key { shift->credentials->secret_access_key }
-sub access_key_id     { shift->credentials->access_key_id     }
-sub session_token     { shift->credentials->session_token     }
+sub secret_access_key { shift->credentials->SecretAccessKey }
+sub access_key_id     { shift->credentials->AccessKeyId     }
+sub session_token     { shift->credentials->SessionToken     }
+sub secretAccessKey   { shift->secret_access_key }
+sub accessKeyId       { shift->access_key_id     }
+sub sessionToken      { shift->session_token     }
 
 sub short_name { shift->session_token; }
 

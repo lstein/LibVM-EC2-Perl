@@ -466,10 +466,10 @@ sub new {
     my %args = @_;
 
     my ($id,$secret,$token);
-    if (ref $args{-security_token} && $args{-security_token}->can('AccessKeyId')) {
-	$id     = $args{-security_token}->AccessKeyId;
-	$secret = $args{-security_token}->SecretAccessKey;
-	$token  = $args{-security_token}->SessionToken;
+    if (ref $args{-security_token} && $args{-security_token}->can('access_key_id')) {
+	$id     = $args{-security_token}->accessKeyId;
+	$secret = $args{-security_token}->secretAccessKey;
+	$token  = $args{-security_token}->sessionToken;
     }
 
     $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY}

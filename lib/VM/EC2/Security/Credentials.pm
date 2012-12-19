@@ -140,6 +140,11 @@ sub valid_fields {
     return qw(AccessKeyId Expiration SecretAccessKey SessionToken);
 }
 
+# because of AWS inconsistencies and limitations on the autoloaded can() method.
+sub secret_access_key { shift->{data}{SecretAccessKey} }
+sub access_key_id     { shift->{data}{AccessKeyId}     }
+sub session_token     { shift->{data}{SessionToken}    }
+
 sub new_ec2 {
     my $self = shift;
     my @args = @_;
