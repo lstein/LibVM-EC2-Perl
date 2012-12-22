@@ -139,6 +139,7 @@ use constant ObjectRegistration => {
     DetachVolume      => 'VM::EC2::BlockDevice::Attachment',
     CreateSnapshot    => 'VM::EC2::Snapshot',
     DeleteSnapshot    => 'boolean',
+    CopySnapshot      => sub { shift->{snapshotId} },
     ModifySnapshotAttribute => 'boolean',
     ResetSnapshotAttribute  => 'boolean',
     ModifyInstanceAttribute => 'boolean',

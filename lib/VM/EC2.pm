@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2012-10-01 version of the Amazon AWS API
+This is an interface to the 2012-12-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -2528,6 +2528,40 @@ sub delete_snapshot {
     my %args = $self->args('-snapshot_id',@_);
     my @params   = $self->single_parm('SnapshotId',\%args);
     return $self->call('DeleteSnapshot',@params);
+}
+
+=head2 $snapshot = $ec2->copy_snapshot(-source_region=>$region,-source_snapshot_id=>$id,-description=>$desc)
+
+Copies an existing snapshot within the same region or from one region to another.
+
+Required arguments:
+ -region       -- The region the existing snapshot to copy resides in
+ -snapshot_id  -- The snapshot ID of the snapshot to copy
+
+Optional arguments:
+ -description  -- A description of the new snapshot
+
+The return value is a VM::EC2::Snapshot object that can be queried
+through its current_status() interface to follow the progress of the
+snapshot operation.
+
+=cut
+
+sub copy_snapshot {
+    my $self = shift;
+    my %args = @_;
+    $args{-description} ||= $args{-desc};
+    $args{-source_region} ||= $args{-region};
+    $args{-source_snapshot_id} ||= $args{-snapshot_id};
+    $args{-source_region} or croak "copy_snapshot(): -source_region argument required";
+    $args{-source_snapshot_id} or croak "copy_snapshot(): -source_snapshot_id argument required";
+    # As of 2012-12-22, sourceRegion, sourceSnapshotId are not recognized even though API docs specify those as the parameters
+    # The initial 's' must be capitalized.  This has been reported to AWS as an inconsistency in the docs and API.
+    my @params  = $self->single_parm('SourceRegion',\%args);
+    push @params, $self->single_parm('SourceSnapshotId',\%args);
+    push @params, $self->single_parm('Description',\%args);
+    my $snap_id = $self->call('CopySnapshot',@params);
+    return $snap_id && $self->describe_snapshots($snap_id);
 }
 
 =head1 SECURITY GROUPS AND KEY PAIRS
@@ -7058,7 +7092,7 @@ API version.
 
 sub version  { 
     my $self = shift;
-    return $self->{version} ||=  '2012-10-01';
+    return $self->{version} ||=  '2012-12-01';
 }
 
 =head2 $ts = $ec2->timestamp
