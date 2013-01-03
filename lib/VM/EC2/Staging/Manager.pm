@@ -139,6 +139,7 @@ use File::Path 'make_path','remove_tree';
 use File::Basename 'dirname','basename';
 use Scalar::Util 'weaken';
 use String::Approx 'adistr';
+use File::Temp 'tempfile';
 
 use constant GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
@@ -687,6 +688,7 @@ sub provision_server {
 	-instance => $instance,
 	-manager  => $self,
 	-name     => $args{-name},
+	@args,
 	);
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
@@ -1192,6 +1194,16 @@ prompting for a password or passphrase on the non-managed host
 strict host checking and forwarding the user agent information from
 the local machine.
 
+=head2 $result = $manager->rsync(\@options,$src1,$src2,$src3...,$dest)
+
+This is a variant of the rsync command in which extra options can be
+passed to rsync by providing an array reference as the first argument. 
+For example:
+
+    $manager->rsync(['--exclude' => '*~'],
+                    '/usr/local/backups',
+                    "$my_server:/usr/local");
+
 =cut
 
 # most general form
@@ -1202,6 +1214,10 @@ sub rsync {
 	unless @_ >= 2;
 
     my @p    = @_;
+    my @user_args = ($p[0] && ref($p[0]) eq 'ARRAY')
+	            ? @{shift @p}
+                    : ();
+
     undef $LastHost;
     undef $LastMt;
     my @paths = map {$self->_resolve_path($_)} @p;
@@ -1228,6 +1244,7 @@ sub rsync {
 	$rsync_args       .= 'v';  # print a line for each file
 	$dots             = '2>&1|/tmp/dots.pl t';
     }
+    $rsync_args .= ' '.join ' ', map {_quote_shell($_)} @user_args if @user_args;
 
     my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,'VM::EC2::Staging::Server');
     my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,'VM::EC2::Staging::Server');
@@ -1245,17 +1262,18 @@ sub rsync {
 
     # localhost => localhost
     if (!($source_host || $dest_host)) {
-	return system("rsync @source $dest") == 0;
+	my $dots_cmd = $self->_dots_cmd;
+	return system("rsync @source $dest $dots_cmd") == 0;
     }
 
     # localhost           => DataTransferServer
     if ($dest_is_server && !$src_is_server) {
-	return $dest_host->_rsync_put(@source_paths,$dest_path);
+	return $dest_host->_rsync_put($rsync_args,@source_paths,$dest_path);
     }
 
     # DataTransferServer  => localhost
     if ($src_is_server && !$dest_is_server) {
-	return $source_host->_rsync_get(@source_paths,$dest_path);
+	return $source_host->_rsync_get($rsync_args,@source_paths,$dest_path);
     }
 
     if ($source_host eq $dest_host) {
@@ -1282,6 +1300,13 @@ sub rsync {
 				   @source_paths,"$dest_ip:$dest_path",$dots);
     $self->info("...rsync done.\n");
     return $result;
+}
+
+sub _quote_shell {
+    my $thing = shift;
+    $thing =~ s/\s/\ /;
+    $thing =~ s/(['"])/\\($1)/;
+    $thing;
 }
 
 =head2 $manager->dd($source_vol=>$dest_vol)
@@ -1331,13 +1356,9 @@ sub dd {
 	my $keyfile  = $server1->keyfile;
 	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
 	my $pv       = $use_pv ? "2>/dev/null | pv -s ${gigs}G -petr" : '';
-       $server1->ssh(['-t'], "sudo dd if=$device1 $hush $pv | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2'");
+	$server1->ssh(['-t'], "sudo dd if=$device1 $hush $pv | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2'");
     }
 }
-
-#
-# perl -e 'my $b; while (read(STDIN,$b,65536)
-# 
 
 # take real or symbolic name and turn it into a two element
 # list consisting of server object and mount point
@@ -2308,16 +2329,31 @@ sub _decrement_usage_count {
     return $in_use;
 }
 
+sub _dots_cmd {
+    my $self = shift;
+    return '' unless $self->verbosity == VERBOSE_INFO;
+    my ($fh,$dots_script) = tempfile('dots_XXXXXXX',SUFFIX=>'.pl',UNLINK=>1,TMPDIR=>1);
+    print $fh $self->_dots_script;
+    close $fh;
+    chmod 0755,$dots_script;
+    return "2>&1|$dots_script t";
+}
+
 sub _upload_dots_script {
     my $self   = shift;
     my $server = shift;
+    my $fh     = $server->scmd_write('cat >/tmp/dots.pl');
+    print $fh $self->_dots_script;
+    close $fh;
+    $server->ssh('chmod +x /tmp/dots.pl');
+}
 
+sub _dots_script {
+    my $self = shift;
     my @lines       = split "\n",longmess();
     my $stack_count = grep /VM::EC2::Staging::Manager/,@lines;
     my $spaces      = ' ' x (($stack_count-1)*3);
-
-    my $fh     = $server->scmd_write('cat >/tmp/dots.pl');
-    print $fh <<END;
+    return <<END;
 #!/usr/bin/perl
 my \$mode = shift || 'b';
 print STDERR "[info] ${spaces}One dot equals ",(\$mode eq 'b'?'100 Mb':'100 files'),': ';
@@ -2330,9 +2366,6 @@ my \$b;
 }
 print STDERR ".\n";
 END
-    ;
-    close $fh;
-    $server->ssh('chmod +x /tmp/dots.pl');
 }
 
 sub DESTROY {

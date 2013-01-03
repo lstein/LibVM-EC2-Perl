@@ -1,3 +1,6 @@
+1.22
+     - Allow arbitrary arguments to be passed to rsync.
+
 1.21 Tue Dec 11 11:29:57 EST 2012
      - fix BadParameterValue when passing -private_ip_address to run_instances().
        (thanks to Makoto Milda for bug report and patch).

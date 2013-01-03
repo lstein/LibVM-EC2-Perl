@@ -105,7 +105,6 @@ use overload
 use constant GB => 1_073_741_824;
 
 our $AUTOLOAD;
-
 sub AUTOLOAD {
     my $self = shift;
     my ($pack,$func_name) = $AUTOLOAD=~/(.+)::([^:]+)$/;
@@ -1243,23 +1242,28 @@ sub get {
 
 sub _rsync_put {
     my $self   = shift;
-    my @source = @_;
-    my $dest   = pop @source;
+    my $rsync_args = shift;
+    my @source     = @_;
+    my $dest       = pop @source;
+
     # resolve symbolic name of $dest
-    $dest        =~ s/^.+://;  # get rid of hostname, if it is there
-    my $host     = $self->instance->dnsName;
-    my $ssh_args = $self->_ssh_escaped_args;
-    my $rsync_args = $self->manager->_rsync_args;
+    $dest            =~ s/^.+://;  # get rid of hostname, if it is there
+    my $host         = $self->instance->dnsName;
+    my $ssh_args     = $self->_ssh_escaped_args;
+    $rsync_args    ||= $self->manager->_rsync_args;
     $self->info("Beginning rsync @source $host:$dest ...\n");
-    my $status = system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest") == 0;
+
+    my $dots = $self->manager->_dots_cmd;
+    my $status = system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $host:$dest $dots") == 0;
     $self->info("...rsync done\n");
     return $status;
 }
 
 sub _rsync_get {
     my $self = shift;
-    my @source = @_;
-    my $dest   = pop @source;
+    my $rsync_args = shift;
+    my @source     = @_;
+    my $dest       = pop @source;
 
     # resolve symbolic names of src
     my $host     = $self->instance->dnsName;
@@ -1267,11 +1271,12 @@ sub _rsync_get {
 	(my $path = $_) =~ s/^.+://;  # get rid of host part, if it is there
 	$_ = "$host:$path";
     }
-    my $ssh_args   = $self->_ssh_escaped_args;
-    my $rsync_args = $self->manager->_rsync_args;
+    my $ssh_args     = $self->_ssh_escaped_args;
+    $rsync_args    ||= $self->manager->_rsync_args;
     
     $self->info("Beginning rsync @source $host:$dest ...\n");
-    my $status = system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest")==0;
+    my $dots = $self->manager->_dots_cmd;
+    my $status = system("rsync $rsync_args -e'ssh $ssh_args' --rsync-path='sudo rsync' @source $dest $dots")==0;
     $self->info("...rsync done\n");
     return $status;
 }
