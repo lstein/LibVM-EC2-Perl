@@ -681,8 +681,10 @@ sub provision_server {
 			Name            => "Staging server $args{-name} created by ".__PACKAGE__,
 			StagingUsername => $self->username,
 			StagingName     => $args{-name});
+
+    my $class = $args{-server_class} || $self->server_class;
 			
-    my $server = $self->server_class()->new(
+    my $server = $class->new(
 	-keyfile  => $keyfile,
 	-username => $self->username,
 	-instance => $instance,
