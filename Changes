@@ -2,6 +2,7 @@
      - fix BadParameterValue when passing -private_ip_address to run_instances().
        (thanks to Makoto Milda for bug report and patch).
      - Distinguish current_state() from current_status() in VM::EC2::Spot::InstanceRequest.
+     - Report errors encountered while committing firewall rules to security groups.
 
 1.20 Wed Nov 28 07:07:10 EST 2012
      - better detection of corresponding kernels when transferring images among zones
