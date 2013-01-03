@@ -103,6 +103,7 @@ sub detach {
 sub refresh {
     my $self = shift;
     my $i   = shift;
+    local $self->aws->{raise_error} = 1;
     ($i) = $self->aws->describe_internet_gateways($self->internetGatewayId) unless $i;
     %$self  = %$i;
 }

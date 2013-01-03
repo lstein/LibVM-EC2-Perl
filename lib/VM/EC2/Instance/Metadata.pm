@@ -48,6 +48,11 @@ VM::EC2::Instance::Metadata - Object describing the metadata of a running instan
  $pub_ip    = $meta->ipAddress;
  $interfaces= $meta->interfaces;       # a hashref
 
+ # IAM information
+ $iam_info   = $metadata->iam_info;         # a hashref
+ $iam_role   = $metadata->iam_role;         # name of the role
+ $credentials= $metadata->iam_credentials;  # VM::EC2::Security::Credentials object
+
  # Undocumented fields
  $action    = $meta->instanceAction;
  $profile   = $meta->profile;
@@ -103,6 +108,8 @@ The following methods all return single-valued results:
  reservationId          -- This instance's reservation ID
  instanceType           -- Machine type, e.g. "m1.small"
  availabilityZone       -- This instance's availability zone.
+ region                 -- This instance's region.
+ endpoint               -- This instance's endpoint.
  userData               -- User data passed at launch time.
 
 =item Network information:
@@ -121,6 +128,25 @@ The following methods all return single-valued results:
  publicIpv4             -- This instance's public IP address.
  ipAddress              -- Same as publicIpv4() for consistency with
                            VM::EC2::Instance.
+
+=item IAM information
+
+These routines return information about the instance's IAM role, if
+any. These calls also provide a temporary security credentials for
+making EC2 calls, as described here:
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html.
+
+Note that these routines require installation of the perl JSON module, and will
+cause a fatal error if this module cannot be loaded.
+
+ iam_info               -- Returns a hash containing the fields 'LastUpdated',
+                           'InstanceProfileArn', and 'InstanceProfileId'. These
+                           provide information about the instance's IAM role.
+ iam_role               -- Returns the IAM role name for the currently running
+                           instance.
+ iam_credentials        -- Returns a VM::EC2::Security::Credentials object that can
+                           be passed to VM::EC2->new(-security_token=>$credentials).
+
 =item Unknown information:
 
  profile                -- An undocumented field that contains the virtualization
@@ -240,6 +266,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use LWP::UserAgent;
+use URI::Escape 'uri_unescape';
 use Carp 'croak';
 
 use constant TIMEOUT => 5; # seconds
@@ -266,6 +293,10 @@ sub privateIpAddress { shift->localIpv4                  }
 sub kernelId         { shift->fetch('kernel-id')         }
 sub mac              { shift->fetch('mac')               }
 sub availabilityZone { shift->fetch('placement/availability-zone') }
+sub region           { my $r = shift->availabilityZone;
+                       $r    =~ s/[a-z]$//;              
+		       return $r;                        }
+sub endpoint         { 'http://ec2.'.shift->region.'.amazonaws.com'}
 sub productCodes     { split /\s+/,shift->fetch('product-codes')   }
 sub publicHostname   { shift->fetch('public-hostname')   }
 sub dnsName          { shift->publicHostname             }
@@ -313,6 +344,31 @@ sub publicKeys {
     return map {/^\d+=(.+)/ && $1} @keys;
 }
 
+sub iam_info {
+    my $self = shift;
+    $self->_load_json;
+    return JSON::from_json($self->fetch('iam/info'));
+}
+
+sub iam_role {
+    my $self = shift;
+    return $self->fetch('iam/security-credentials');
+}
+
+sub iam_credentials {
+    my $self = shift;
+    my $role = $self->iam_role or return;
+    my $data = $self->fetch("iam/security-credentials/$role") or return;
+    eval "require VM::EC2::Security::Credentials"
+	unless VM::EC2::Security::Credentials->can('new_from_json');
+    return VM::EC2::Security::Credentials->new_from_json($data,$self->endpoint);
+}
+
+sub _load_json {
+    return if JSON->can('decode');
+    eval "require JSON; 1" or croak "no JSON module installed: $@";
+}
+
 sub fetch {
     my $self = shift;
     my $attribute = shift or croak "Usage: VM::EC2::Instance::Metadata->get('attribute')";
@@ -322,7 +378,7 @@ sub fetch {
     $ua->timeout(TIMEOUT);
     my $response = $ua->get("http://169.254.169.254/latest/meta-data/$attribute");
     if ($response->is_success) {
-	return $cache->{$attribute} = $response->decoded_content;
+	return $cache->{$attribute} = uri_unescape($response->decoded_content);  # don't know why, but URI escapes used here.
     } else {
 	print STDERR $response->status_line,"\n" unless $response->code == 404;
 	return;

@@ -20,6 +20,7 @@ my $build = Module::Build->new(
       'String::Approx' => '3.26',
     },
     recommends        => {
+	'JSON'      => 0,
     },
     build_class        => 'Module::Build',
     );

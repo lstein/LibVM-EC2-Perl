@@ -3,6 +3,10 @@
        (thanks to Makoto Milda for bug report and patch).
      - Distinguish current_state() from current_status() in VM::EC2::Spot::InstanceRequest.
      - Report errors encountered while committing firewall rules to security groups.
+     - URI unescape fields in VM::EC2::Instance::Metadata (not documented to be needed, but apparently so
+       for at least some fields).
+     - Support for retrieving IAM temporary security token from instance metadata from those instances
+       that have an IAM role.
 
 1.20 Wed Nov 28 07:07:10 EST 2012
      - better detection of corresponding kernels when transferring images among zones

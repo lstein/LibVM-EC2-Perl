@@ -467,9 +467,9 @@ sub new {
 
     my ($id,$secret,$token);
     if (ref $args{-security_token} && $args{-security_token}->can('access_key_id')) {
-	$id     = $args{-security_token}->access_key_id;
-	$secret = $args{-security_token}->secret_access_key;
-	$token  = $args{-security_token}->session_token;
+	$id     = $args{-security_token}->accessKeyId;
+	$secret = $args{-security_token}->secretAccessKey;
+	$token  = $args{-security_token}->sessionToken;
     }
 
     $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY}
@@ -495,8 +495,9 @@ sub new {
     },ref $self || $self;
 
     if ($args{-region}) {
-	my $region = $obj->describe_regions($args{-region}) or croak $obj->error_str;
-	$obj->endpoint($region->regionEndpoint);
+	my $region   = eval{$obj->describe_regions($args{-region})};
+	my $endpoint = $region ? $region->regionEndpoint :"ec2.$args{-region}.amazonaws.com";
+	$obj->endpoint($endpoint);
     }
 
     return $obj;
@@ -7103,8 +7104,8 @@ sub call {
 	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg},$self);
 	}
 	$self->error($error);
-	carp  "$error" if $self->print_error;
-	croak "$error" if $self->raise_error;
+	carp  "$error. API call '$_[0]'" if $self->print_error;
+	croak "$error. API call '$_[0]'" if $self->raise_error;
 	return;
     }
 

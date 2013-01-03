@@ -66,7 +66,6 @@ actions. Deny statements take precedence over allow statements.
 As described earlier, deny() returns the object, making it easy to
 chain methods.
 
-
 =head2 $string = $policy->as_string
 
 Converts the policy into a JSON string that can be passed to

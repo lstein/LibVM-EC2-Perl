@@ -37,6 +37,11 @@ VM::EC2::Security::Token - Temporary security token object
  my $ec2   = VM::EC2->new(-security_token => $token);
  print $ec2->describe_images(-owner=>'self');
 
+ # convenience routine; will return a VM::EC2 object authorized
+ # to use the current token
+ my $ec2   = $token->new_ec2;
+ print $ec2->describe_images(-owner=>'self');
+
 =head1 DESCRIPTION
 
 VM::EC2::Security::Token objects allow you to grant a user access to
@@ -88,6 +93,11 @@ order to gain access to EC2 resources.
  session_token() --    Convenience method that calls the credentials object's
                         session_token() method.
 
+ new_ec2(@args)  --    Convenience method that returns a VM::EC2 object authorized
+                        with the current token. You may pass any of the arguments
+                        accepted by VM::EC2->new(), except that -access_key and 
+                        -secret_key will be ignored if present.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate as the
@@ -125,6 +135,10 @@ sub valid_fields {
     return qw(Credentials FederatedUser PackedPolicySize);
 }
 
+sub new_ec2 {
+    shift->credentials->new_ec2(@_);
+}
+
 sub credentials { 
     my $self = shift;
     return VM::EC2::Security::Credentials->new($self->SUPER::credentials,undef);
@@ -136,9 +150,12 @@ sub federated_user {
     return VM::EC2::Security::FederatedUser->new($user,undef);
 }
 
-sub secret_access_key { shift->credentials->secret_access_key }
-sub access_key_id     { shift->credentials->access_key_id     }
-sub session_token     { shift->credentials->session_token     }
+sub secret_access_key { shift->credentials->SecretAccessKey }
+sub access_key_id     { shift->credentials->AccessKeyId     }
+sub session_token     { shift->credentials->SessionToken     }
+sub secretAccessKey   { shift->secret_access_key }
+sub accessKeyId       { shift->access_key_id     }
+sub sessionToken      { shift->session_token     }
 
 sub short_name { shift->session_token; }
 

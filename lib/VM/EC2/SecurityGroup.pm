@@ -315,6 +315,7 @@ sub write { shift->update }
 
 sub refresh {
     my $self = shift;
+    local $self->aws->{raise_error} = 1;
     my $i    = $self->aws->describe_security_groups($self->groupId) or return;
     %$self   = %$i;
 }

@@ -766,6 +766,7 @@ sub disassociate_address {
 sub refresh {
     my $self = shift;
     my $i   = shift;
+    local $self->aws->{raise_error} = 1;
     ($i) = $self->aws->describe_instances(-instance_id=>$self->instanceId) unless $i;
     %$self  = %$i;
 }

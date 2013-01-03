@@ -22,7 +22,8 @@ require_ok('VM::EC2::Security::Policy');
 SKIP: {
 skip "account information unavailable",TEST_COUNT-2 unless setup_environment();
 
-my $ec2 = VM::EC2->new(-print_error=>1,-region=>'us-east-1') or BAIL_OUT("Can't load VM::EC2 module");
+my $ec2 = VM::EC2->new(-print_error=>1,
+		       -region=>'us-east-1') or BAIL_OUT("Can't load VM::EC2 module");
 
 # create a policy
 my $policy = VM::EC2::Security::Policy->new();
@@ -89,7 +90,9 @@ foreach (qw(sessionToken accessKeyId secretAccessKey expiration)) {
     is($credentials->$_,$new_credentials->$_,"serialized and unserialized credentials $_ field matches");
 }
 
-my $new_ec2 = VM::EC2->new(-security_token=>$token);
+my $new_ec2 = VM::EC2->new(-security_token=> $token,
+			   -region        => 'us-east-1'
+    );
 my @zones   = $new_ec2->describe_availability_zones(); # this should work
 cmp_ok(scalar @zones,'>',0,'policy allows describe_availability_zones');
 

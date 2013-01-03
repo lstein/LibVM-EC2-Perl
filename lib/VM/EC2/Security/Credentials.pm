@@ -32,10 +32,20 @@ VM::EC2::Security::Credentials -- Temporary security credentials for EC2
  # create a copy of the token from its serialized form
  my $token = VM::EC2::Security::Credentials->new_from_serialized($serialized);
 
+ # create a copy of the token from its JSON representation (e.g. as returned
+ # from instance metadata of an instance that is assigned an IAM role
+ my $token = VM::EC2::Security::Credentials->new_from_json($json);
+
  # open a new EC2 connection with this token. User will be
  # able to run all the methods specified in the policy.
  my $ec2   = VM::EC2->new(-security_token => $token);
  print $ec2->describe_images(-owner=>'self');
+
+ # convenience routine; will return a VM::EC2 object authorized
+ # to use the current token
+ my $ec2   = $token->new_ec2;
+ print $ec2->describe_images(-owner=>'self');
+ 
 
 =head1 DESCRIPTION
 
@@ -86,6 +96,17 @@ and session token in unencrypted, but very slightly obfuscated, form.
 Given a previously-serialized Credentials object, unserialize it and
 return a copy.
 
+=head1 CONVENIENCE METHODS
+
+These are convenience methods.
+
+=head2 $ec2 = $credentials->new_ec2(@args)
+
+Create a new VM::EC2 object which is authorized using the security
+token contained in the credentials object. You may pass all the
+arguments, such as -endpoint, that are accepted by VM::EC2->new(), but
+-access_key and -secret_access_key will be ignored.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
@@ -119,6 +140,18 @@ sub valid_fields {
     return qw(AccessKeyId Expiration SecretAccessKey SessionToken);
 }
 
+# because of AWS inconsistencies and limitations on the autoloaded can() method.
+sub secret_access_key { shift->{data}{SecretAccessKey} }
+sub access_key_id     { shift->{data}{AccessKeyId}     }
+sub session_token     { shift->{data}{SessionToken}    }
+
+sub new_ec2 {
+    my $self = shift;
+    my @args = @_;
+    return VM::EC2->new(-security_token=>$self,
+			@args);
+}
+
 # serialize the credentials in a packed form
 sub serialize {
     my $self = shift;
@@ -131,6 +164,25 @@ sub new_from_serialized {
     my $data  = shift;
     my $obj   = thaw(decode_base64($data));
     return bless $obj,ref $class || $class;
+}
+
+sub new_from_json {
+    my $class = shift;
+    my ($data,$endpoint) = @_;
+    eval "require JSON; 1" or die "no JSON module installed: $@"
+	unless JSON->can('decode');
+    my $hash = JSON::from_json($data);
+
+    my $payload = {AccessKeyId     => $hash->{AccessKeyId},
+		   SecretAccessKey => $hash->{SecretAccessKey},
+		   SessionToken    => $hash->{Token},     # note inconsistency here, which is why we are copying
+		   Expiration      => $hash->{Expiration}
+		   };
+
+    my $self = $class->new($payload,undef);
+    my $ec2  = $self->new_ec2(-endpoint => $endpoint);
+    $self->ec2($ec2) unless $self->ec2;
+    return $self;
 }
 
 sub short_name {shift->access_key_id}

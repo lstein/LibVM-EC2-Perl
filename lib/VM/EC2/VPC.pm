@@ -97,6 +97,7 @@ sub valid_fields {
 sub refresh {
     my $self = shift;
     my $i   = shift;
+    local $self->aws->{raise_error} = 1;
     ($i) = $self->aws->describe_vpcs(-vpc_id=>$self->vpcId) unless $i;
     %$self  = %$i;
 }

@@ -59,6 +59,7 @@ sub valid_fields {
 
 sub short_name {
     my $s = shift;
+    local $^W = 0;
     my $from = ($s->ipRanges && (' FROM CIDR '.join(',',sort $s->ipRanges))) .
                ($s->groups && (' GRPNAME '.join(',',  sort $s->groups)));
     sprintf("%s(%s..%s)%s",$s->ipProtocol,$s->fromPort,$s->toPort,$from);

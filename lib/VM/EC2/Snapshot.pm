@@ -263,6 +263,7 @@ sub to_volumes {
 
 sub refresh {
     my $self = shift;
+    local $self->aws->{raise_error} = 1;
     my $s = $self->aws->describe_snapshots($self);
     %$self  = %$s;
 }
