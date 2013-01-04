@@ -227,7 +227,12 @@ server.
 
 =cut
 
-sub username { shift->{username} }
+sub username { 
+    my $self = shift;
+    my $d    = $self->{username};
+    $self->{username} = shift if @_;
+    $d;
+}
 
 =head2 $manager = $server->manager
 

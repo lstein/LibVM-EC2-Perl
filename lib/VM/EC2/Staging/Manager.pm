@@ -737,6 +737,11 @@ sub get_server {
     local $^W = 0; # prevent an uninitialized value warning
     my %servers = map {$_->name => $_} $self->servers;
     my $server = $servers{$args{-name}} || $self->provision_server(%args);
+
+    # this information needs to be renewed each time
+    $server->username($args{-username}) if $args{-username};
+    bless $server,$args{-server_class}  if $args{-server_class};
+
     $server->start unless $server->ping;
     return $server;
 }

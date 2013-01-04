@@ -88,6 +88,8 @@ These object methods are supported:
                    as a string is equal to the instance's
                    availability zone.
 
+ availabilityZone -- Same as placement.
+
  kernelId       -- ID of the instance's kernel. CHANGEABLE.
 
  ramdiskId      -- ID of the instance's RAM disk. CHANGEABLE.
@@ -559,6 +561,8 @@ sub placement {
     my $p = $self->SUPER::placement or return;
     return VM::EC2::Instance::Placement->new($p,$self->aws,$self->xmlns,$self->requestId);
 }
+
+sub availabilityZone { shift->placement }
 
 sub monitoring {
     my $self = shift;
