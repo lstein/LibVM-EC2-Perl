@@ -6713,6 +6713,283 @@ sub get_session_token {
     return $self->sts_call('GetSessionToken',@p);
 }
 
+=head1 LAUNCH CONFIGURATIONS
+
+=head2 @lc = $ec2->describe_launchconfigurations(-names => \@names);
+
+=head2 @lc = $ec->describe_launchconfigurations(@names);
+
+Provides detailed information for the specified launch configuration(s).
+
+Optional parameters are:
+
+  -launch_configuration_names   Name of the Launch config.
+                                  This can be a string scalar or an arrayref.
+
+  -name  Alias for -launch_configuration_names
+
+Returns a series of L<VM::EC2::LaunchConfiguration> objects.
+
+=cut
+
+sub describe_launchconfigurations {
+    my $self = shift;
+    my %args = $self->args('-launch_configuration_names',@_);
+    $args{-launch_configuration_names} ||= $args{-names};
+    my @params = $self->list_parm('LaunchConfigurationNames',\%args);
+    return $self->asg_call('DescribeLaunchConfigurations', @params);
+}
+
+=head2 $success = $ec2->create_launchconfiguration(%args);
+
+Creates a new launch configuration.
+
+Required arguments:
+
+  -name           -- scalar, name for the Launch config.
+  -image_id       -- scalar, AMI id which this launch config will use
+  -instance_type  -- scalar, instance type of the Amazon EC2 instance.
+
+Optional arguments:
+
+  -block_device_mappings  -- list of hashref
+  -ebs_optimized          -- scalar (boolean). false by default
+  -iam_instance_profile   -- scalar
+  -instance_monitoring    -- scalar (boolean). true by default
+  -kernel_id              -- scalar
+  -key_name               -- scalar
+  -ramdisk                -- scalar
+  -security_groups        -- list of scalars
+  -spot_price             -- scalar
+  -user_data              -- scalar
+
+Returns true on successful execution.
+
+=cut
+
+sub create_launchconfiguration {
+    my $self = shift;
+    my %args = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my $imageid = $args{-image_id} or croak "-image_id argument is required";
+    my $itype = $args{-instance_type} or croak "-instance_type argument is required";
+
+    my @params = (ImageId => $imageid, InstanceType => $itype, LaunchConfigurationName => $name);
+    push @params, $self->member_list_parm('BlockDeviceMappings',\%args);
+    push @params, $self->member_list_parm('SecurityGroups',\%args);
+    push @params, $self->boolean_parm('EbsOptimized', \%args);
+    push @params, ('UserData' =>encode_base64($args{-user_data},'')) if $args{-user_data};
+    push @params, ('InstanceMonitoring.Enabled' => 'false')
+        if (exists $args{-instance_monitoring} and not $args{-instance_monitoring});
+
+    my @p = map {$self->single_parm($_,\%args) }
+       qw(IamInstanceProfile KernelId KeyName RamdiskId SpotPrice);
+    push @params, @p;
+
+    return $self->asg_call('CreateLaunchConfiguration',@params);
+}
+
+=head2 $success = $ec2->delete_launchconfiguration(-name => $name);
+
+Deletes a launch config.
+
+  -name     Required. Name of the launch config to delete
+
+Returns true on success.
+
+=cut
+
+sub delete_launchconfiguration {
+    my $self = shift;
+    my %args  = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (LaunchConfigurationName => $name);
+    return $self->asg_call('DeleteLaunchConfiguration', @params);
+}
+
+=head1 AUTOSCALING GROUPS
+
+=head2 @asg = $ec2->describe_autoscalinggroups(-auto_scaling_group_names => \@names);
+
+Returns information about autoscaling groups
+
+  -auto_scaling_group_names     List of auto scaling groups to describe
+  -names                        Alias of -auto_scaling_group_names
+
+Returns a list of L<VM::EC2::ASG>.
+
+=cut
+
+sub describe_autoscalinggroups {
+    my ($self, %args) = @_;
+    $args{-auto_scaling_group_names} ||= $args{-names};
+    my @params = $self->list_parm('AutoScalingGroupNames',\%args);
+    return $self->asg_call('DescribeAutoScalingGroups', @params);
+}
+
+=head2 $success = $ec2->create_autoscalinggroup(-name => $name, 
+                                                -launch_config => $lc,
+                                                -max_size => $max_size,
+                                                -min_size => $min_size);
+
+Creates a new autoscaling group.
+
+Required arguments:
+
+  -name             Name for the autoscaling group
+  -launch_config    Name of the launch configuration to be used
+  -max_size         Max number of instances to be run at once
+  -min_size         Min number of instances
+
+Optional arguments:
+
+  -availability_zones   List of availability zone names
+  -load_balancer_names  List of ELB names
+  -tags                 List of tags to apply to the instances run
+  -termination_policies List of policy names
+  -default_cooldown     Time in seconds between autoscaling activities
+  -desired_capacity     Number of instances to be run after creation
+  -health_check_type    One of "ELB" or "EC2"
+  -health_check_grace_period    Mandatory for health check type ELB. Number of
+                                seconds between an instance is started and the
+                                autoscaling group starts checking its health
+  -placement_group      Physical location of your cluster placement group
+  -vpc_zone_identifier  Strinc containing a comma-separated list of subnet 
+                        identifiers
+
+Returns true on success.
+
+=cut
+
+sub create_autoscalinggroup {
+    my $self = shift;
+    my %args = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my $lconfig = $args{-launch_config} or croak "-launch_config argument is required";
+    my $max = $args{-max_size};
+    croak "-max_size argument is required" if (not defined $max);
+    my $min = $args{-min_size};
+    croak "-min_size argument is required" if (not defined $min);
+
+    my @params = (AutoScalingGroupName => $name, LaunchConfigurationName => $lconfig, MaxSize => $max,
+                  MinSize => $max);
+    push @params, $self->member_list_parm('AvailabilityZones',\%args);
+    push @params, $self->member_list_parm('LoadBalancerNames',\%args);
+    push @params, $self->member_list_parm('TerminationPolicies',\%args);
+    push @params, $self->member_list_parm('Tags',\%args);
+
+    my @p = map {$self->single_parm($_,\%args) }
+       qw( DefaultCooldown DesiredCapacity HealthCheckGracePeriod HealthCheckType PlacementGroup
+           VPCZoneIdentifier);
+    push @params, @p;
+
+    return $self->asg_call('CreateAutoScalingGroup',@params);
+}
+
+=head2 $success = $ec2->delete_autoscalinggroup(-name => $name)
+
+Deletes an autoscaling group.
+
+  -name     Name of the autoscaling group to delete
+
+Returns true on success.
+
+=cut
+
+sub delete_autoscalinggroup {
+    my $self = shift;
+    my %args  = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (AutoScalingGroupName => $name);
+    push @params, $self->single_parm('ForceDelete',\%args);
+    return $self->asg_call('DeleteAutoScalingGroup', @params);
+}
+
+=head2 $success = $ec2->update_autoscalinggroup(-name => $name);
+
+Updates an autoscaling group. Only required parameter is C<-name>
+
+Optional arguments:
+
+  -availability_zones       List of AZ's
+  -termination_policies     List of policy names
+  -default_cooldown
+  -desired_capacity
+  -health_check_type
+  -health_check_grace_period
+  -placement_group
+  -vpc_zone_identifier
+  -max_size
+  -min_size
+
+Returns true on success;
+
+=cut
+
+sub update_autoscalinggroup {
+    my $self = shift;
+    my %args = @_;
+
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (AutoScalingGroupName => $name);
+
+    push @params, $self->member_list_parm('AvailabilityZones',\%args);
+    push @params, $self->member_list_parm('TerminationPolicies',\%args);
+
+    my @p = map {$self->single_parm($_,\%args) }
+       qw( DefaultCooldown DesiredCapacity HealthCheckGracePeriod
+           HealthCheckType PlacementGroup VPCZoneIdentifier MaxSize MinSize );
+    push @params, @p;
+
+    return $self->asg_call('UpdateAutoScalingGroup',@params);
+}
+
+=head2 $success = $ec2->suspend_processes(-name => $asg_name,
+                                          -scaling_processes => \@procs);
+
+Suspend the requested autoscaling processes.
+
+  -name                 Name of the autoscaling group
+  -scaling_processes    List of process names to suspend. Valid processes are:
+        Launch
+        Terminate
+        HealthCheck
+        ReplaceUnhealty
+        AZRebalance
+        AlarmNotification
+        ScheduledActions
+        AddToLoadBalancer
+
+Returns true on success.
+
+=cut
+
+sub suspend_processes {
+    my ($self, %args) = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (AutoScalingGroupName => $name);
+    push @params, $self->member_list_parm('ScalingProcesses', \%args);
+    return $self->asg_call('SuspendProcesses', @params);
+}
+
+=head2 $success = $ec2->resume_processes(-name => $asg_name,
+                                         -scaling_processes => \@procs);
+
+Resumes the requested autoscaling processes. It accepts the same arguments than
+C<suspend_processes>.
+
+Returns true on success.
+
+=cut
+
+sub resume_processes {
+    my ($self, %args) = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (AutoScalingGroupName => $name);
+    push @params, $self->member_list_parm('ScalingProcesses', \%args);
+    return $self->asg_call('ResumeProcesses', @params);
+}
+
 # ------------------------------------------------------------------------------------------
 
 =head1 INTERNAL METHODS
@@ -7135,6 +7412,14 @@ sub elb_call {
     (my $endpoint = $self->{endpoint}) =~ s/ec2/elasticloadbalancing/;
     local $self->{endpoint} = $endpoint;
     local $self->{version}  = '2012-06-01';
+    $self->call(@_);
+}
+
+sub asg_call {
+    my $self = shift;
+    (my $endpoint = $self->{endpoint}) =~ s/ec2/autoscaling/;
+    local $self->{endpoint} = $endpoint;
+    local $self->{version}  = '2011-01-01';
     $self->call(@_);
 }
 

@@ -287,6 +287,9 @@ use constant ObjectRegistration => {
     AttachLoadBalancerToSubnets       => 'elb_member_list,Subnets',
     DetachLoadBalancerFromSubnets     => 'elb_member_list,Subnets',
     SetLoadBalancerPoliciesForBackendServer => sub { exists shift->{SetLoadBalancerPoliciesForBackendServerResult} },
+    # auto scaling and launch controls
+    DescribeLaunchConfigurations      => 'fetch_members,LaunchConfigurations,VM::EC2::LaunchConfiguration',
+    DescribeAutoScalingGroups         => 'fetch_members,AutoScalingGroups,VM::EC2::ASG',
 };
 
 sub new {
