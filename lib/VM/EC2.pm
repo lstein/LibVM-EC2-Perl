@@ -6809,7 +6809,7 @@ sub delete_launchconfiguration {
 
 =head1 AUTOSCALING GROUPS
 
-=head2 @asg = $ec2->describe_autoscalinggroups(-auto_scaling_group_names => \@names);
+=head2 @asg = $ec2->describe_autoscaling_groups(-auto_scaling_group_names => \@names);
 
 Returns information about autoscaling groups
 
@@ -6820,14 +6820,14 @@ Returns a list of L<VM::EC2::ASG>.
 
 =cut
 
-sub describe_autoscalinggroups {
+sub describe_autoscaling_groups {
     my ($self, %args) = @_;
     $args{-auto_scaling_group_names} ||= $args{-names};
     my @params = $self->member_list_parm('AutoScalingGroupNames',\%args);
     return $self->asg_call('DescribeAutoScalingGroups', @params);
 }
 
-=head2 $success = $ec2->create_autoscalinggroup(-name => $name, 
+=head2 $success = $ec2->create_autoscaling_group(-name => $name, 
                                                 -launch_config => $lc,
                                                 -max_size => $max_size,
                                                 -min_size => $min_size);
@@ -6861,7 +6861,7 @@ Returns true on success.
 
 =cut
 
-sub create_autoscalinggroup {
+sub create_autoscaling_group {
     my $self = shift;
     my %args = @_;
     my $name = $args{-name} or croak "-name argument is required";
@@ -6886,7 +6886,7 @@ sub create_autoscalinggroup {
     return $self->asg_call('CreateAutoScalingGroup',@params);
 }
 
-=head2 $success = $ec2->delete_autoscalinggroup(-name => $name)
+=head2 $success = $ec2->delete_autoscaling_group(-name => $name)
 
 Deletes an autoscaling group.
 
@@ -6896,7 +6896,7 @@ Returns true on success.
 
 =cut
 
-sub delete_autoscalinggroup {
+sub delete_autoscaling_group {
     my $self = shift;
     my %args  = @_;
     my $name = $args{-name} or croak "-name argument is required";
@@ -6905,7 +6905,7 @@ sub delete_autoscalinggroup {
     return $self->asg_call('DeleteAutoScalingGroup', @params);
 }
 
-=head2 $success = $ec2->update_autoscalinggroup(-name => $name);
+=head2 $success = $ec2->update_autoscaling_group(-name => $name);
 
 Updates an autoscaling group. Only required parameter is C<-name>
 
@@ -6926,7 +6926,7 @@ Returns true on success;
 
 =cut
 
-sub update_autoscalinggroup {
+sub update_autoscaling_group {
     my $self = shift;
     my %args = @_;
 

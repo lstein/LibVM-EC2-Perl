@@ -9,7 +9,7 @@ VM::EC2::ASG - Object describing an AutoScaling Group
   use VM::EC2;
 
   $ec2  = VM::EC2->new(...);
-  @asgs = $ec2->describe_autoscalinggroups();
+  @asgs = $ec2->describe_autoscaling_groups();
 
   $asg  = $asgs[0];
   $name = $asg->auto_scaling_group_name;
@@ -18,7 +18,7 @@ VM::EC2::ASG - Object describing an AutoScaling Group
 =head1 DESCRIPTION
 
 This object represents an AutoScaling Group. It is returned by
-C<VM::EC2->describe_autoscalinggroups()>.
+C<VM::EC2->describe_autoscaling_groups()>.
 
 =head1 METHODS
 

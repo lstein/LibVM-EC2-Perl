@@ -30,7 +30,7 @@ $ec2 = VM::EC2->new(-region=>'eu-west-1') or BAIL_OUT("Can't load VM::EC2 module
 
 # in case it was here from a previous invocation
 $ec2->delete_launchconfiguration(-name => LC_NAME);
-$ec2->delete_autoscalinggroup(-name => ASG_NAME);
+$ec2->delete_autoscaling_group(-name => ASG_NAME);
 
 $ec2->print_error(1);
 
@@ -47,7 +47,7 @@ my @l = $ec2->describe_launchconfigurations();
 ok(scalar @l, 'describe_launchconfigurations');
 is($l[0]->launch_configuration_name, LC_NAME, 'created name is correct');
 
-$s = $ec2->create_autoscalinggroup(
+$s = $ec2->create_autoscaling_group(
     -name => ASG_NAME,
     -min_size => 0,
     -max_size => 0,
@@ -55,19 +55,19 @@ $s = $ec2->create_autoscalinggroup(
     -desired_capacity => 0,
     -availability_zones => [qw/eu-west-1a/],
 );
-ok($s, 'create_autoscalinggroup');
+ok($s, 'create_autoscaling_group');
 
-my @a = $ec2->describe_autoscalinggroups();
-ok(scalar @a, 'describe_autoscalinggroup');
+my @a = $ec2->describe_autoscaling_groups();
+ok(scalar @a, 'describe_autoscaling_group');
 is($a[0]->max_size, 0, 'correct max size');
 
-$s = $ec2->update_autoscalinggroup(
+$s = $ec2->update_autoscaling_group(
     -name => ASG_NAME,
     -max_size => 1,
 );
-ok($s, 'update_autoscalinggroup');
+ok($s, 'update_autoscaling_group');
 
-@a = $ec2->describe_autoscalinggroups();
+@a = $ec2->describe_autoscaling_groups();
 is($a[0]->max_size, 1, 'correctly updated max size');
 }
 
@@ -78,7 +78,7 @@ END {
 	if ($ec2) {
         $ec2->print_error(0);
         $ec2->delete_launchconfiguration(-name => LC_NAME);
-        $ec2->delete_autoscalinggroup(-name => ASG_NAME);
+        $ec2->delete_autoscaling_group(-name => ASG_NAME);
     }
 };
 
