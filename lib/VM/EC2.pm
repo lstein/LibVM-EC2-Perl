@@ -6823,7 +6823,7 @@ Returns a list of L<VM::EC2::ASG>.
 sub describe_autoscalinggroups {
     my ($self, %args) = @_;
     $args{-auto_scaling_group_names} ||= $args{-names};
-    my @params = $self->list_parm('AutoScalingGroupNames',\%args);
+    my @params = $self->member_list_parm('AutoScalingGroupNames',\%args);
     return $self->asg_call('DescribeAutoScalingGroups', @params);
 }
 
