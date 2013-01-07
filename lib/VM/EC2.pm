@@ -7403,8 +7403,15 @@ sub block_device_parm {
 	    push @p,("BlockDeviceMapping.$c.VirtualName"=>$blockdevice);
 	} else {
 	    my ($snapshot,$size,$delete_on_term,$vtype,$iops) = split ':',$blockdevice;
-	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot)               if $snapshot;
-	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeSize" =>$size)                   if $size;
+
+	    # Workaround for apparent bug in 2012-12-01 API; instances will crash without volume size
+	    # even if a snapshot ID is provided
+	    if ($snapshot) {
+		$size ||= eval{$self->describe_snapshots($snapshot)->volumeSize};
+		push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot);
+	    }
+
+	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeSize" =>$size)                    if $size;
 	    push @p,("BlockDeviceMapping.$c.Ebs.DeleteOnTermination"=>$delete_on_term) 
 		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/;
 	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeType"=>$vtype)                    if $vtype;
