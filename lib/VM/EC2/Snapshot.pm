@@ -199,6 +199,18 @@ VM::EC2::Volume->size.
 Refreshes the snapshot from information provided by AWS. Use before
 checking progress or other changeable elements.
 
+=head2 $snapshot_copy = $snapshot->copy(-region=>$dest_region, -description=>$desc)
+
+Copies the snapshot to the same or different region.
+
+Required Argument:
+ -region        The region to copy the snapshot to
+
+Optional Argument:
+ -description   Description of the new snapshot
+
+Returns a VM::EC2::Snapshot object if successful.
+
 =head1 STRING OVERLOADING
 
 When used in a string context, this object will interpolate the
@@ -355,6 +367,21 @@ sub product_codes {
     my $self = shift;
     my @codes = $self->aws->describe_snapshot_attribute($self,'productCodes');
     return map {VM::EC2::ProductCode->new($_,$self->aws)} @codes;
+}
+
+sub copy {
+    my $self = shift;
+    my %args = @_;
+    my $snap_id = $self->snapshotId;   
+    my $desc = $args{-description} || $args{-desc};
+    my $region = $args{-region} or croak "copy(): -region argument required";
+    my $orig_region = $self->aws->region;
+    # set region to dest region in ec2 object
+    $self->aws->region($region);
+    my $snapshot = $self->aws->copy_snapshot(-source_region=>$orig_region, -source_snapshot_id=>$snap_id, -description=>$desc);
+    # set region back
+    $self->aws->region($orig_region);
+    return $snapshot;
 }
 
 1;

@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2012-10-01 version of the Amazon AWS API
+This is an interface to the 2012-12-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -2531,6 +2531,40 @@ sub delete_snapshot {
     return $self->call('DeleteSnapshot',@params);
 }
 
+=head2 $snapshot = $ec2->copy_snapshot(-source_region=>$region,-source_snapshot_id=>$id,-description=>$desc)
+
+Copies an existing snapshot within the same region or from one region to another.
+
+Required arguments:
+ -region       -- The region the existing snapshot to copy resides in
+ -snapshot_id  -- The snapshot ID of the snapshot to copy
+
+Optional arguments:
+ -description  -- A description of the new snapshot
+
+The return value is a VM::EC2::Snapshot object that can be queried
+through its current_status() interface to follow the progress of the
+snapshot operation.
+
+=cut
+
+sub copy_snapshot {
+    my $self = shift;
+    my %args = @_;
+    $args{-description} ||= $args{-desc};
+    $args{-source_region} ||= $args{-region};
+    $args{-source_snapshot_id} ||= $args{-snapshot_id};
+    $args{-source_region} or croak "copy_snapshot(): -source_region argument required";
+    $args{-source_snapshot_id} or croak "copy_snapshot(): -source_snapshot_id argument required";
+    # As of 2012-12-22, sourceRegion, sourceSnapshotId are not recognized even though API docs specify those as the parameters
+    # The initial 's' must be capitalized.  This has been reported to AWS as an inconsistency in the docs and API.
+    my @params  = $self->single_parm('SourceRegion',\%args);
+    push @params, $self->single_parm('SourceSnapshotId',\%args);
+    push @params, $self->single_parm('Description',\%args);
+    my $snap_id = $self->call('CopySnapshot',@params);
+    return $snap_id && $self->describe_snapshots($snap_id);
+}
+
 =head1 SECURITY GROUPS AND KEY PAIRS
 
 The methods in this section allow you to query and manipulate security
@@ -3610,6 +3644,92 @@ sub describe_spot_instance_requests {
     my @params = $self->list_parm('SpotInstanceRequestId',\%args);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeSpotInstanceRequests',@params);
+}
+
+=head1 PLACEMENT GROUPS
+
+Placement groups Provide low latency and high-bandwidth connectivity
+between cluster instances within a single Availability Zone. Create
+a placement group and then launch cluster instances into it. Instances
+launched within a placement group participate in a full-bisection
+bandwidth cluster appropriate for HPC applications.
+
+=head2 @groups = $ec2->describe_placement_groups(@group_names)
+
+=head2 @groups = $ec2->describe_placement_groups(\%filters)
+
+=head2 @groups = $ec2->describe_placement_groups(-group_name=>\@ids,-filter=>\%filters)
+
+This method will return information about cluster placement groups
+as a list of VM::EC2::PlacementGroup objects.
+
+Optional arguments:
+
+ -group_name         -- Scalar or arrayref of placement group names.
+
+ -filter             -- Tags and other filters to apply.
+
+The filters available are described fully at:
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribePlacementGroups.html
+
+    group-name
+    state
+    strategy
+
+=cut
+
+sub describe_placement_groups {
+    my $self = shift;
+    my %args = $self->args('-group_name',@_);
+    my @params = $self->list_parm('GroupName',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribePlacementGroups',@params);
+}
+
+=head2 $success = $ec2->create_placement_group($group_name)
+
+=head2 $success = $ec2->create_placement_group(-group_name=>$name,-strategy=>$strategy)
+
+Creates a placement group that cluster instances are launched into.
+
+Required arguments:
+ -group_name          -- The name of the placement group to create
+
+Optional:
+ -strategy            -- As of 2012-12-23, the only available option is 'cluster'
+                         so the parameter defaults to that.
+
+Returns true on success.
+
+=cut
+
+sub create_placement_group {
+    my $self = shift;
+    my %args = $self->args('-group_name',@_);
+    $args{-strategy} ||= 'cluster';
+    my @params  = $self->single_parm('GroupName',\%args);
+    push @params, $self->single_parm('Strategy',\%args);
+    return $self->call('CreatePlacementGroup',@params);
+}
+
+=head2 $success = $ec2->delete_placement_group($group_name)
+
+=head2 $success = $ec2->delete_placement_group(-group_name=>$group_name)
+
+Deletes a placement group from the account.
+
+Required arguments:
+ -group_name          -- The name of the placement group to delete
+
+Returns true on success.
+
+=cut
+
+sub delete_placement_group {
+    my $self = shift;
+    my %args = $self->args('-group_name',@_);
+    my @params  = $self->single_parm('GroupName',\%args);
+    return $self->call('DeletePlacementGroup',@params);
 }
 
 =head1 VIRTUAL PRIVATE CLOUDS
@@ -7359,7 +7479,7 @@ API version.
 
 sub version  { 
     my $self = shift;
-    return $self->{version} ||=  '2012-10-01';
+    return $self->{version} ||=  '2012-12-01';
 }
 
 =head2 $ts = $ec2->timestamp
@@ -7515,19 +7635,16 @@ sub args {
 
 =head1 MISSING METHODS
 
-As of 20 Oct 2012, the following Amazon API calls were NOT
+As of 24 Dec 2012, the following Amazon API calls were NOT
 implemented. Volunteers to implement these calls are most welcome.
 
 BundleInstance
 CancelBundleTask
 CancelConversionTask
 CancelReservedInstancesListing
-CreatePlacementGroup
 CreateReservedInstancesListing
-DeletePlacementGroup
 DescribeBundleTasks
 DescribeConversionTasks
-DescribePlacementGroups
 DescribeReservedInstancesListings
 ImportInstance
 ImportVolume
