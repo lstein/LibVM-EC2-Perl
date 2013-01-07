@@ -6715,9 +6715,9 @@ sub get_session_token {
 
 =head1 LAUNCH CONFIGURATIONS
 
-=head2 @lc = $ec2->describe_launchconfigurations(-names => \@names);
+=head2 @lc = $ec2->describe_launch_configurations(-names => \@names);
 
-=head2 @lc = $ec->describe_launchconfigurations(@names);
+=head2 @lc = $ec->describe_launch_configurations(@names);
 
 Provides detailed information for the specified launch configuration(s).
 
@@ -6732,7 +6732,7 @@ Returns a series of L<VM::EC2::LaunchConfiguration> objects.
 
 =cut
 
-sub describe_launchconfigurations {
+sub describe_launch_configurations {
     my $self = shift;
     my %args = $self->args('-launch_configuration_names',@_);
     $args{-launch_configuration_names} ||= $args{-names};
@@ -6740,7 +6740,7 @@ sub describe_launchconfigurations {
     return $self->asg_call('DescribeLaunchConfigurations', @params);
 }
 
-=head2 $success = $ec2->create_launchconfiguration(%args);
+=head2 $success = $ec2->create_launch_configuration(%args);
 
 Creates a new launch configuration.
 
@@ -6767,7 +6767,7 @@ Returns true on successful execution.
 
 =cut
 
-sub create_launchconfiguration {
+sub create_launch_configuration {
     my $self = shift;
     my %args = @_;
     my $name = $args{-name} or croak "-name argument is required";
@@ -6789,7 +6789,7 @@ sub create_launchconfiguration {
     return $self->asg_call('CreateLaunchConfiguration',@params);
 }
 
-=head2 $success = $ec2->delete_launchconfiguration(-name => $name);
+=head2 $success = $ec2->delete_launch_configuration(-name => $name);
 
 Deletes a launch config.
 
@@ -6799,7 +6799,7 @@ Returns true on success.
 
 =cut
 
-sub delete_launchconfiguration {
+sub delete_launch_configuration {
     my $self = shift;
     my %args  = @_;
     my $name = $args{-name} or croak "-name argument is required";

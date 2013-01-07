@@ -29,22 +29,22 @@ skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
 $ec2 = VM::EC2->new(-region=>'eu-west-1') or BAIL_OUT("Can't load VM::EC2 module");
 
 # in case it was here from a previous invocation
-$ec2->delete_launchconfiguration(-name => LC_NAME);
+$ec2->delete_launch_configuration(-name => LC_NAME);
 $ec2->delete_autoscaling_group(-name => ASG_NAME);
 
 $ec2->print_error(1);
 
-my $s = $ec2->create_launchconfiguration(
+my $s = $ec2->create_launch_configuration(
     -name => LC_NAME,
     -image_id => 'ami-3a0f034e', # ubuntu 12.04 in eu-west-1
     -instance_type => 't1.micro',
     -security_groups => ['default'],
     -instance_monitoring => 0,
 );
-ok($s, 'create_launchconfiguration');
+ok($s, 'create_launch_configuration');
 
-my @l = $ec2->describe_launchconfigurations();
-ok(scalar @l, 'describe_launchconfigurations');
+my @l = $ec2->describe_launch_configurations();
+ok(scalar @l, 'describe_launch_configurations');
 is($l[0]->launch_configuration_name, LC_NAME, 'created name is correct');
 
 $s = $ec2->create_autoscaling_group(
@@ -77,7 +77,7 @@ END {
     print STDERR "# cleaning up...\n";
 	if ($ec2) {
         $ec2->print_error(0);
-        $ec2->delete_launchconfiguration(-name => LC_NAME);
+        $ec2->delete_launch_configuration(-name => LC_NAME);
         $ec2->delete_autoscaling_group(-name => ASG_NAME);
     }
 };

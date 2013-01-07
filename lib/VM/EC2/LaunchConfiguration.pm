@@ -9,12 +9,12 @@ VM::EC2::LaunchConfiguration - Object describing a Launch Configuration
   use VM::EC2;
 
   $ec2  = VM::EC2->new(...);
-  @lcs  = $ec2->describe_launchconfigurations();
+  @lcs  = $ec2->describe_launch_configurations();
 
 =head1 DESCRIPTION
 
 This object represents a launch configuration. It is returned by
-C<VM::EC2->describe_launchconfigurations()>.
+C<VM::EC2->describe_launch_configurations()>.
 
 =head1 METHODS
 
