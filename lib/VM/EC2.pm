@@ -6876,7 +6876,7 @@ sub create_autoscalinggroup {
     push @params, $self->member_list_parm('AvailabilityZones',\%args);
     push @params, $self->member_list_parm('LoadBalancerNames',\%args);
     push @params, $self->member_list_parm('TerminationPolicies',\%args);
-    push @params, $self->member_list_parm('Tags',\%args);
+    push @params, $self->autoscaling_tags('Tags', \%args);
 
     my @p = map {$self->single_parm($_,\%args) }
        qw( DefaultCooldown DesiredCapacity HealthCheckGracePeriod HealthCheckType PlacementGroup
@@ -7110,6 +7110,29 @@ sub list_parm {
 	for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
 	    push @params,("$argname.".$c++ => $_);
 	}
+    }
+
+    return @params;
+}
+
+=head2 @arguments = $ec2->autoscaling_tags($argname, \%args)
+
+=cut
+
+sub autoscaling_tags {
+    my $self = shift;
+    my ($argname, $args) = @_;
+
+    my $name = $self->canonicalize($argname);
+    my @params;
+    if (my $a = $args->{$name}||$args->{"-$argname"}) {
+        my $c = 1;
+        for my $tag (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
+            my $prefix = "$argname.member." . $c++;
+            while (my ($k, $v) = each %$tag) {
+                push @params, ("$prefix.$k" => $v);
+            }
+        }
     }
 
     return @params;
