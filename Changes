@@ -2,6 +2,9 @@
      - Allow arbitrary arguments to be passed to rsync in VM::EC2::Staging::Manager.
      - Add support for autoscaling groups and launch configs (Patch from Miguel Ruiz;
        see https://github.com/miquelruiz/LibVM-EC2-Perl).
+     - Implement CopySnapshot API call
+     - Implement placement group API calls
+     - Update to API 2012-12-01
 
 1.21 Tue Dec 11 11:29:57 EST 2012
      - fix BadParameterValue when passing -private_ip_address to run_instances().
