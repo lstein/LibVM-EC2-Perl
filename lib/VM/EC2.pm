@@ -7525,7 +7525,7 @@ sub call {
 	my $content = $response->decoded_content;
 	my $error;
 	if ($content =~ /<Response>/) {
-	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content.$call,$self);
+	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self,$call);
 	} else {
 	    my $code = $response->status_line;
 	    my $msg  = $response->decoded_content;
