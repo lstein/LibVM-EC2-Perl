@@ -677,10 +677,16 @@ sub provision_server {
 	%args,
 	);
     $instance or croak $self->ec2->error_str;
-    $instance->add_tags(StagingRole     => 'StagingInstance',
-			Name            => "Staging server $args{-name} created by ".__PACKAGE__,
-			StagingUsername => $self->username,
-			StagingName     => $args{-name});
+
+    my $success;
+    while (!$success) {
+	# race condition...
+	$success = eval{ $instance->add_tags(StagingRole     => 'StagingInstance',
+					     Name            => "Staging server $args{-name} created by ".__PACKAGE__,
+					     StagingUsername => $self->username,
+					     StagingName     => $args{-name});
+	}
+    }
 
     my $class = $args{-server_class} || $self->server_class;
 			
