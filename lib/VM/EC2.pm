@@ -7521,7 +7521,7 @@ sub call {
     my $response  = $self->make_request(@_);
 
     unless ($response->is_success) {
-	my $call    = " while processing $call";
+	my $call    = " while processing $_[0]";
 	my $content = $response->decoded_content;
 	my $error;
 	if ($content =~ /<Response>/) {
