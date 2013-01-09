@@ -1888,7 +1888,7 @@ Common optional arguments:
 
  -description         Description of the AMI
  -architecture        Architecture of the image ("i386" or "x86_64")
- -kernel_id           ID fo the kernel to use
+ -kernel_id           ID of the kernel to use
  -ramdisk_id          ID of the RAM disk to use
  
 While you do not have to specify the kernel ID, it is strongly
@@ -7521,14 +7521,15 @@ sub call {
     my $response  = $self->make_request(@_);
 
     unless ($response->is_success) {
+	my $call    = " while processing $_[0]";
 	my $content = $response->decoded_content;
 	my $error;
 	if ($content =~ /<Response>/) {
-	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self);
+	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self,$call);
 	} else {
 	    my $code = $response->status_line;
 	    my $msg  = $response->decoded_content;
-	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg},$self);
+	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg.$call},$self);
 	}
 	$self->error($error);
 	carp  "$error. API call '$_[0]'" if $self->print_error;

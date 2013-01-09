@@ -578,10 +578,14 @@ sub create_objects {
 
 sub create_error_object {
     my $self = shift;
-    my ($content,$ec2) = @_;
+    my ($content,$ec2,$extra_text) = @_;
     my $class   = ObjectRegistration->{Error};
     eval "require $class; 1" || die $@ unless $class->can('new');
     my $parsed = $self->new_xml_parser->XMLin($content);
+    if (defined $extra_text) {
+	$parsed->{Errors}{Error}{Message} =~ s/\.$//;
+	$parsed->{Errors}{Error}{Message} .= $extra_text;
+    }
     return $class->new($parsed->{Errors}{Error},$ec2,@{$parsed}{'xmlns','requestId'});
 }
 

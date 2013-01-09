@@ -624,7 +624,10 @@ object.
                 it later with a call to get_server().
 
  -architecture  Architecture for the newly-created server
-                instances (e.g. "i386").
+                instances (e.g. "i386"). If not specified, then defaults
+                to the default_architecture() value. If explicitly
+                specified as undef, then the architecture of the matching
+                image will be used.
 
  -instance_type Type of the newly-created server (e.g. "m1.small").
 
@@ -670,6 +673,8 @@ sub provision_server {
     my ($keyname,$keyfile) = $self->_security_key;
     my $security_group     = $self->_security_group;
     my $image              = $self->_search_for_image(%args) or croak "No suitable image found";
+    $args{-architecture}   = $image->architecture;
+
     my ($instance)         = $self->ec2->run_instances(
 	-image_id          => $image,
 	-security_group_id => $security_group,
@@ -2065,13 +2070,13 @@ sub _search_for_image {
 
     $self->info("Searching for a staging image...\n");
 
-    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' :
-    $args{-root_type};
+    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' : $args{-root_type};
+    my @arch         = $args{-architecture}     ? ('architecture' => $args{-architecture}) : ();
 
     my @candidates = $name =~ /^ami-[0-9a-f]+/ ? $self->ec2->describe_images($name)
 	                                       : $self->ec2->describe_images({'name'             => "*$args{-image_name}*",
 									      'root-device-type' => $root_type,
-									      'architecture'     => $args{-architecture}});
+									      @arch});
     return unless @candidates;
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
