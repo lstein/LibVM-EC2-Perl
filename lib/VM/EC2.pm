@@ -1888,7 +1888,7 @@ Common optional arguments:
 
  -description         Description of the AMI
  -architecture        Architecture of the image ("i386" or "x86_64")
- -kernel_id           ID fo the kernel to use
+ -kernel_id           ID of the kernel to use
  -ramdisk_id          ID of the RAM disk to use
  
 While you do not have to specify the kernel ID, it is strongly
