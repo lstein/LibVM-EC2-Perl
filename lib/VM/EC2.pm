@@ -7521,19 +7521,18 @@ sub call {
     my $response  = $self->make_request(@_);
 
     unless ($response->is_success) {
-	my $call    = " while processing $_[0]";
 	my $content = $response->decoded_content;
 	my $error;
 	if ($content =~ /<Response>/) {
-	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self,$call);
+	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self,$_[0]);
 	} else {
 	    my $code = $response->status_line;
 	    my $msg  = $response->decoded_content;
-	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg.$call},$self);
+	    $error = VM::EC2::Error->new({Code=>$code,Message=>"$msg from API call '$_[0]')"},$self);
 	}
 	$self->error($error);
-	carp  "$error. API call '$_[0]'" if $self->print_error;
-	croak "$error. API call '$_[0]'" if $self->raise_error;
+	carp  "$error" if $self->print_error;
+	croak "$error" if $self->raise_error;
 	return;
     }
 
