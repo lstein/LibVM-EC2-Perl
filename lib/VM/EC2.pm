@@ -705,6 +705,23 @@ sub account_id {
 
 sub userId { shift->account_id }
 
+=head2 $new_ec2 = $ec2->clone
+
+This method creates an identical copy of the EC2 object. It is used
+occasionally internally for creating an EC2 object in a different AWS
+region:
+
+ $singapore = $ec2->clone;
+ $singapore->region('ap-souteast-1');
+
+=cut
+
+sub clone {
+    my $self = shift;
+    my %contents = %$self;
+    return bless \%contents,ref $self;
+}
+
 =head1 EC2 REGIONS AND AVAILABILITY ZONES
 
 This section describes methods that allow you to fetch information on

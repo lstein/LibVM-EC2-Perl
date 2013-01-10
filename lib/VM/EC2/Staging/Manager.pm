@@ -456,8 +456,11 @@ $source_snapshot may be an string ID, or a VM::EC2::Snapshot object.
 $destination_zone may be a simple region name, such as "us-west-2", or
 a VM::EC2::Region object (as returned by VM::EC2->describe_regions),
 or a VM::EC2::Staging::Manager object that is associated with the
-desired region. The latter form gives you control over the nature of
-the staging instances created in the destination zone.
+desired region.
+
+Note that this call uses the Amazon CopySnapshot API call that was
+introduced in 2012-12-01 and no longer involves the creation of
+staging servers in the source and destination regions.
 
 =cut
 
@@ -467,39 +470,22 @@ sub copy_snapshot {
     my $snap   = $self->ec2->describe_snapshots($snapId) 
 	or croak "Couldn't find snapshot for $snapId";
     my $description = "duplicate of $snap, created by ".__PACKAGE__." during snapshot copying";
+    my $dest_region = ref($dest_manager) && $dest_manager->can('ec2') 
+	              ? $dest_manager->ec2->region
+		      : "$dest_manager";
 
-    my $source = $self->provision_volume(-snapshot_id=>$snapId) 
-	or croak "Couldn't mount volume for $snapId";
-    my $fstype  = $source->fstype;
-    my $blkinfo = $source->server->scmd('sudo','blkid','-p',$source->mtdev);
-    my ($uuid)  = $blkinfo =~ /UUID="(\S+)"/;
-    my ($label) = $blkinfo =~ /LABEL="(\S+)"/;
-    
-    my $dest   = $dest_manager->provision_volume(-fstype => $fstype,
-						 -size   => $source->size,
-						 -label  => $label,
-						 -uuid   => $uuid,
-						 -reuse  => 0,
-	) or croak "Couldn't create new destination volume for $snapId";
+    $self->info("Copying snapshot $snap from ",$self->ec2->region," to $dest_region\n");
+    my $snapshot = $snap->copy(-region       =>  $dest_region,
+			       -description  => $description);
 
-    if ($fstype eq 'raw') {
-	$self->info("Using dd for block level disk copy (will take 1-2 minutes per gigabyte of raw disk).\n");
-	$source->dd($dest)    or croak "dd failed";
-    } else {
-	$self->info("Using rsync for file level disk copy (will take 1-2 minutes per gigabyte of storage used).\n");
-	$source->copy($dest) or croak "rsync failed";
+    while (!eval{$snapshot->current_status}) {
+	sleep 1;
     }
-    
-    $dest->unmount; # don't want this mounted; otherwise it will be unmounted & remounted
-    my $snapshot = $dest->create_snapshot($description);
+    $self->info("New snapshot=$snapshot; status = ",$snapshot->current_status,"\n");
 
     # copy snapshot tags
     my $tags = $snap->tags;
     $snapshot->add_tags($tags);
-    
-    # we don't need these volumes now
-    $source->delete;
-    $dest->delete;
 
     return $snapshot;
 }

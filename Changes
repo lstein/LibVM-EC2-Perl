@@ -3,6 +3,7 @@
      - Add support for autoscaling groups and launch configs (Patch from Miguel Ruiz;
        see https://github.com/miquelruiz/LibVM-EC2-Perl).
      - Implement CopySnapshot API call
+     - Take advantage of CopySnapshot API in migrate_ebs_image.pl script.
      - Implement placement group API calls
      - Update to API 2012-12-01
 

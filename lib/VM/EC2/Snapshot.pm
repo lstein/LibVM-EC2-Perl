@@ -373,14 +373,14 @@ sub copy {
     my $self = shift;
     my %args = @_;
     my $snap_id = $self->snapshotId;   
-    my $desc = $args{-description} || $args{-desc};
-    my $region = $args{-region} or croak "copy(): -region argument required";
+    my $desc    = $args{-description} || $args{-desc};
+    my $region  = $args{-region} or croak "copy(): -region argument required";
     my $orig_region = $self->aws->region;
-    # set region to dest region in ec2 object
-    $self->aws->region($region);
-    my $snapshot = $self->aws->copy_snapshot(-source_region=>$orig_region, -source_snapshot_id=>$snap_id, -description=>$desc);
-    # set region back
-    $self->aws->region($orig_region);
+
+    # create a new EC2 object for the destination
+    my $dest_aws = $self->aws->clone;
+    $dest_aws->region($region);
+    my $snapshot = $dest_aws->copy_snapshot(-source_region=>$orig_region, -source_snapshot_id=>$snap_id, -description=>$desc);
     return $snapshot;
 }
 
