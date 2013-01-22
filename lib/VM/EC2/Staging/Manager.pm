@@ -569,29 +569,90 @@ sub _copy_ebs_image {
     # helpful for recovering failed process
     my $block_device_info_args = join ' ',map {"-b $_"} @mappings;
     $self->info("Registering snapshot in destination with the equivalent of:\n");
-    $self->info("ec2-register -n '$name' -d '$description' -a $architecture --kernel $kernel --ramdisk '$ramdisk' --root-device-name $root_device $block_device_info_args\n");
+    $self->info("ec2-register -n '$name' -d '$description' -a $architecture --kernel '$kernel' --ramdisk '$ramdisk' --root-device-name $root_device $block_device_info_args\n");
 
-    my $img =  $dest_manager->ec2->register_image(-name                 => $name,
-						  -root_device_name     => $root_device,
-						  -block_device_mapping => \@mappings,
-						  -description          => $description,
-						  -architecture         => $architecture,
-						  $kernel  ? (-kernel_id   => $kernel):  (),
-						  $ramdisk ? (-ramdisk_id  => $ramdisk): (),
-						  %overrides,
-	);
-    $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
+    my $img;
 
+    if ($image->virtualization_type eq 'hvm') {
+	$img = $self->_create_hvm_image(-ec2                  => $dest_manager->ec2,
+					-name                 => $name,
+					-root_device_name     => $root_device,
+					-block_device_mapping => \@mappings,
+					-description          => $description,
+					-architecture         => $architecture,
+					%overrides);
+    }
+
+    else {
+	$img =  $dest_manager->ec2->register_image(-name                 => $name,
+						   -root_device_name     => $root_device,
+						   -block_device_mapping => \@mappings,
+						   -description          => $description,
+						   -architecture         => $architecture,
+						   $kernel  ? (-kernel_id   => $kernel):  (),
+						   $ramdisk ? (-ramdisk_id  => $ramdisk): (),
+						   %overrides,
+	    );
+	$img or croak "Could not register image: ",$dest_manager->ec2->error_str;
+    }
+    
     # copy launch permissions
     $img->make_public(1)                                     if $info->{is_public};
     $img->add_authorized_users(@{$info->{authorized_users}}) if @{$info->{authorized_users}};
-
+    
     # copy tags
     my $tags = $image->tags;
     $img->add_tags($tags);
 
     return $img;
 }
+
+# copying an HVM image requires us to:
+# 1. Copy each of the snapshots to the destination region
+# 2. Find a public HVM image in the destination region that matches the architecture, hypervisor type,
+#    and root device type of the source image. (note: platform must not be 'windows'
+# 3. Run a cc2 instance: "cc2.8xlarge", but replace default block device mapping with the new snapshots.
+# 4. Stop the image.
+# 5. Run create_image() on the instance.
+# 6. Terminate the instance!
+
+sub _create_hvm_image {
+    my $self = shift;
+    my %args = @_;
+
+    my $ec2 = $args{-ec2};
+
+    # find a suitable image that we can run
+    $self->info("Searching for a suitable HVM image in destination region\n");
+    my @i = $ec2->describe_images(-executable_by=> 'all',
+				  -owner        => 'amazon',
+				  -filter => {
+				      'virtualization-type' => 'hvm',
+				      'root-device-type'    => 'ebs',
+				      'root-device-name'    => $args{-root_device_name},
+				      'architecture'        => $args{-architecture}
+				  });
+    @i = grep {$_->platform ne 'windows'} @i;
+    @i or croak "Could not find suitable HVM image in region ",$ec2->region;
+
+    my $ami = $i[0];
+    $self->info("...Found $ami (",$ami->name,")\n");
+    my $instance = $ec2->run_instances(-instance_type => 'cc2.8xlarge',  # $$$$$!
+				       -image_id      => $ami,
+				       -block_devices => $args{-block_device_mapping})
+	or croak "Could not run HVM instance: ",$ec2->error_str;
+    $self->info("Waiting for instance to become ready...\n");
+    $ec2->wait_for_instances($instance);
+    
+    $self->info("Stopping instance...\n");
+    $instance->stop(1);
+
+    $self->info("Creating image in destination region...\n");
+    my $img = $instance->create_image($args{-name},$args{-description});
+    
+    return $img;
+}
+
 
 =head1 Instance Methods for Managing Staging Servers
 
