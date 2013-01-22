@@ -637,9 +637,15 @@ sub _create_hvm_image {
 
     my $ami = $i[0];
     $self->info("...Found $ami (",$ami->name,")\n");
+
+    # remove root device from the block device list
+    my $root            = $args{-root_device_name};
+    my @nonroot_devices = grep {^/^$root/} @{$args{-block_device_mapping}};
+    my ($root_snapshot) = "@{$args{-block_device_mapping}}" =~ /$root=(snap-[0-9a-f]+)/;
+    
     my $instance = $ec2->run_instances(-instance_type => 'cc2.8xlarge',  # $$$$$!
 				       -image_id      => $ami,
-				       -block_devices => $args{-block_device_mapping})
+				       -block_devices => \@nonroot_devices)
 	or croak "Could not run HVM instance: ",$ec2->error_str;
     $self->info("Waiting for instance to become ready...\n");
     $ec2->wait_for_instances($instance);
@@ -647,9 +653,16 @@ sub _create_hvm_image {
     $self->info("Stopping instance...\n");
     $instance->stop(1);
 
+    # TO DO:
+    # unmount root device from stopped instance
+    # create a volume in the same zone from the root snapshot
+    # mount volume on stopped instance with deleteonterminate
+
     $self->info("Creating image in destination region...\n");
     my $img = $instance->create_image($args{-name},$args{-description});
-    
+
+    $instance->terminate;
+
     return $img;
 }
 
