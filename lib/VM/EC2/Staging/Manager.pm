@@ -429,8 +429,8 @@ sub copy_image {
 	or  croak "Unknown image '$imageId'";
     $image->imageType eq 'machine' 
 	or  croak "$image is not an AMI";
-    $image->platform eq 'windows'
-	and croak "It is not currently possible to migrate Windows images between regions via this method";
+#    $image->platform eq 'windows'
+#	and croak "It is not currently possible to migrate Windows images between regions via this method";
     $image->rootDeviceType eq 'ebs'
 	or croak "It is not currently possible to migrate instance-store backed images between regions via this method";
         
@@ -481,7 +481,7 @@ sub copy_snapshot {
     while (!eval{$snapshot->current_status}) {
 	sleep 1;
     }
-    $self->info("New snapshot=$snapshot; status = ",$snapshot->current_status,"\n");
+    $self->info("New snapshot = $snapshot; status = ",$snapshot->current_status,"\n");
 
     # copy snapshot tags
     my $tags = $snap->tags;
@@ -580,6 +580,7 @@ sub _copy_ebs_image {
 					-block_device_mapping => \@mappings,
 					-description          => $description,
 					-architecture         => $architecture,
+					-platform             => $image->platform,
 					%overrides);
     }
 
@@ -613,9 +614,10 @@ sub _copy_ebs_image {
 #    and root device type of the source image. (note: platform must not be 'windows'
 # 3. Run a cc2 instance: "cc2.8xlarge", but replace default block device mapping with the new snapshots.
 # 4. Stop the image.
-# 5. Run create_image() on the instance.
-# 6. Terminate the instance!
-
+# 5. Detach the root volume
+# 6. Initialize and attach a new root volume from the copied source root snapshot.
+# 7. Run create_image() on the instance.
+# 8. Terminate the instance and clean up.
 sub _create_hvm_image {
     my $self = shift;
     my %args = @_;
@@ -632,7 +634,7 @@ sub _create_hvm_image {
 				      'root-device-name'    => $args{-root_device_name},
 				      'architecture'        => $args{-architecture}
 				  });
-    @i = grep {$_->platform ne 'windows'} @i;
+    @i = grep {$_->platform eq $args{-platform}} @i;
     @i or croak "Could not find suitable HVM image in region ",$ec2->region;
 
     my $ami = $i[0];
@@ -640,7 +642,7 @@ sub _create_hvm_image {
 
     # remove root device from the block device list
     my $root            = $args{-root_device_name};
-    my @nonroot_devices = grep {^/^$root/} @{$args{-block_device_mapping}};
+    my @nonroot_devices = grep {!/^$root/} @{$args{-block_device_mapping}};
     my ($root_snapshot) = "@{$args{-block_device_mapping}}" =~ /$root=(snap-[0-9a-f]+)/;
     
     my $instance = $ec2->run_instances(-instance_type => 'cc2.8xlarge',  # $$$$$!
@@ -653,15 +655,30 @@ sub _create_hvm_image {
     $self->info("Stopping instance...\n");
     $instance->stop(1);
 
-    # TO DO:
-    # unmount root device from stopped instance
-    # create a volume in the same zone from the root snapshot
-    # mount volume on stopped instance with deleteonterminate
+    $self->info("Detaching original root volume...\n");
+    my $a = $instance->detach_volume($root) or croak "Could not detach $root: ", $ec2->error_str;
+    $ec2->wait_for_attachments($a);
+    $a->current_status eq 'detached'   or croak "Could not detach $root, status = ",$a->current_status;
+    $ec2->delete_volume($a->volumeId)  or croak "Could not delete original root volume: ",$ec2->error_str;
+
+    $self->info("Creating and attaching new root volume..\n");
+    my $vol = $ec2->create_volume(-availability_zone => $instance->placement,
+				  -snapshot_id       => $root_snapshot) 
+	or croak "Could not create volume from root snapshot $root_snapshot: ",$ec2->error_str;
+    $ec2->wait_for_volumes($vol);
+    $vol->current_status eq 'available'  or croak "Volume creation failed, status = ",$vol->current_status;
+
+    $a = $instance->attach_volume($vol,$root) or croak "Could not attach new root volume: ",$ec2->error_str;
+    $ec2->wait_for_attachments($a);
+    $a->current_status eq 'attached'          or croak "Attach failed, status = ",$a->current_status;
+    $a->deleteOnTermination(1);
 
     $self->info("Creating image in destination region...\n");
     my $img = $instance->create_image($args{-name},$args{-description});
 
-    $instance->terminate;
+    # get rid of the root snapshot - we no longer need it
+    $ec2->delete_snapshot($root_snapshot);
+    $instance->terminate;  # this will delete the volume as well because of deleteOnTermination
 
     return $img;
 }
