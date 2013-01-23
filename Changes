@@ -1,3 +1,6 @@
+1.23
+    - migrate-ebs-image.pl now supports Windows and Cluster instances.
+
 1.22 Mon Jan  7 09:43:50 EST 2013
      - Allow arbitrary arguments to be passed to rsync in VM::EC2::Staging::Manager.
      - Add support for autoscaling groups and launch configs (Patch from Miguel Ruiz;

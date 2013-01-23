@@ -474,14 +474,14 @@ sub copy_snapshot {
 	              ? $dest_manager->ec2->region
 		      : "$dest_manager";
 
-    $self->info("Copying snapshot $snap from ",$self->ec2->region," to $dest_region\n");
+    $self->info("Copying snapshot $snap from ",$self->ec2->region," to $dest_region...\n");
     my $snapshot = $snap->copy(-region       =>  $dest_region,
 			       -description  => $description);
 
     while (!eval{$snapshot->current_status}) {
 	sleep 1;
     }
-    $self->info("New snapshot = $snapshot; status = ",$snapshot->current_status,"\n");
+    $self->info("...new snapshot = $snapshot; status = ",$snapshot->current_status,"\n");
 
     # copy snapshot tags
     my $tags = $snap->tags;
@@ -510,7 +510,19 @@ sub _copy_ebs_image {
     my $name         = $info->{name};
     my $description  = $info->{description};
     my $architecture = $info->{architecture};
+    my $root_device  = $info->{root_device};
+    my $platform     = $info->{platform};
     my ($kernel,$ramdisk);
+
+    # make sure we have a suitable image in the destination region
+    # if the virtualization type is HVM
+    if ($image->virtualization_type eq 'hvm') {
+	$self->_find_hvm_image($dest_manager->ec2,
+			       $root_device,
+			       $architecture,
+			       $platform)
+	    or croak "Destination region ",$dest_manager->ec2->region," does not currently support HVM images of this type";
+    }
 
     if ($info->{kernel} && !$overrides{-kernel}) {
 	$self->info("Searching for a suitable kernel in the destination region.\n");
@@ -528,7 +540,6 @@ sub _copy_ebs_image {
     }
 
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
-    my $root_device     = $info->{root_device};
 
     $self->info("Copying EBS volumes attached to this image (this may take a long time).\n");
     my @bd              = @$block_devices;
@@ -605,6 +616,15 @@ sub _copy_ebs_image {
     my $tags = $image->tags;
     $img->add_tags($tags);
 
+    # Improve the snapshot tags
+    my $source_region = $self->ec2->region;
+    my $dest_region   = $dest_manager->ec2->region;
+    for (@mappings) {
+	my ($snap) = /(snap-[0=9a-f]+)/ or next;
+	my $snap = $dest_manager->ec2->describe_snapshots($snap) or next;
+	my $snap->add_tags(Name => "Copy image $image($source_region) to $img($dest_region)");
+    }
+
     return $img;
 }
 
@@ -626,18 +646,9 @@ sub _create_hvm_image {
 
     # find a suitable image that we can run
     $self->info("Searching for a suitable HVM image in destination region\n");
-    my @i = $ec2->describe_images(-executable_by=> 'all',
-				  -owner        => 'amazon',
-				  -filter => {
-				      'virtualization-type' => 'hvm',
-				      'root-device-type'    => 'ebs',
-				      'root-device-name'    => $args{-root_device_name},
-				      'architecture'        => $args{-architecture}
-				  });
-    @i = grep {$_->platform eq $args{-platform}} @i;
-    @i or croak "Could not find suitable HVM image in region ",$ec2->region;
+    my $ami = $self->_find_hvm_image($ec2,$args{-root_device_name},$args{-architecture},$args{-platform});
+    $ami or croak "Could not find suitable HVM image in region ",$ec2->region;
 
-    my $ami = $i[0];
     $self->info("...Found $ami (",$ami->name,")\n");
 
     # remove root device from the block device list
@@ -645,14 +656,17 @@ sub _create_hvm_image {
     my @nonroot_devices = grep {!/^$root/} @{$args{-block_device_mapping}};
     my ($root_snapshot) = "@{$args{-block_device_mapping}}" =~ /$root=(snap-[0-9a-f]+)/;
     
-    my $instance = $ec2->run_instances(-instance_type => 'cc2.8xlarge',  # $$$$$!
+    my $instance_type = $args{-platform} eq 'windows' ? 'm1.small' : 'cc2.8xlarge';
+    $self->info("Launching an HVM staging server in the target region. Heuristically choosing instance type of '$instance_type' for this type of HVM..\n");
+
+    my $instance = $ec2->run_instances(-instance_type => $instance_type,
 				       -image_id      => $ami,
 				       -block_devices => \@nonroot_devices)
 	or croak "Could not run HVM instance: ",$ec2->error_str;
-    $self->info("Waiting for instance to become ready...\n");
+    $self->info("Waiting for instance to become ready.\n");
     $ec2->wait_for_instances($instance);
     
-    $self->info("Stopping instance...\n");
+    $self->info("Stopping instance temporarily to swap root volumes.\n");
     $instance->stop(1);
 
     $self->info("Detaching original root volume...\n");
@@ -676,11 +690,37 @@ sub _create_hvm_image {
     $self->info("Creating image in destination region...\n");
     my $img = $instance->create_image($args{-name},$args{-description});
 
-    # get rid of the root snapshot - we no longer need it
-    $ec2->delete_snapshot($root_snapshot);
+    # get rid of the original copied snapshots - we no longer need them
+    foreach (@{$args{-block_device_mapping}}) {
+	my ($snapshot) = /(snap-[0-9a-f]+)/ or next;
+	$ec2->delete_snapshot($snapshot) 
+	    or $self->warn("Could not delete unneeded snapshot $snapshot; please delete manually: ",$ec2->error_str)
+    }
+
+    # terminate the staging server.
+    $self->info("Terminating the staging server\n");
     $instance->terminate;  # this will delete the volume as well because of deleteOnTermination
 
     return $img;
+}
+
+sub _find_hvm_image {
+    my $self = shift;
+    my ($ec2,$root_device_name,$architecture,$platform) = @_;
+
+    my $cache_key = join (';',@_);
+    return $self->{_hvm_image}{$cache_key} if exists $self->{_hvm_image}{$cache_key};
+
+    my @i = $ec2->describe_images(-executable_by=> 'all',
+				  -owner        => 'amazon',
+				  -filter => {
+				      'virtualization-type' => 'hvm',
+				      'root-device-type'    => 'ebs',
+				      'root-device-name'    => $root_device_name,
+				      'architecture'        => $architecture,
+				  });
+    @i = grep {$_->platform eq $platform} @i;
+    return $self->{_hvm_image}{$cache_key} = $i[0];
 }
 
 
