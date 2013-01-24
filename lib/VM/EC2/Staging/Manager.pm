@@ -516,7 +516,8 @@ sub _copy_ebs_image {
 
     # make sure we have a suitable image in the destination region
     # if the virtualization type is HVM
-    if ($image->virtualization_type eq 'hvm') {
+    my $is_hvm = $image->virtualization_type eq 'hvm';
+    if ($is_hvm) {
 	$self->_find_hvm_image($dest_manager->ec2,
 			       $root_device,
 			       $architecture,
@@ -579,12 +580,13 @@ sub _copy_ebs_image {
 
     # helpful for recovering failed process
     my $block_device_info_args = join ' ',map {"-b $_"} @mappings;
-    $self->info("Registering snapshot in destination with the equivalent of:\n");
-    $self->info("ec2-register -n '$name' -d '$description' -a $architecture --kernel '$kernel' --ramdisk '$ramdisk' --root-device-name $root_device $block_device_info_args\n");
 
     my $img;
 
-    if ($image->virtualization_type eq 'hvm') {
+    if ($is_hvm) {
+	$self->info("Registering snapshot in destination with the equivalent of:\n");
+	$self->info("ec2-register -n '$name' -d '$description' -a $architecture --virtualization-type hvm --root-device-name $root_device $block_device_info_args\n");
+	$self->info("Note: this is a notional command line that can only be used by AWS development partners.\n");
 	$img = $self->_create_hvm_image(-ec2                  => $dest_manager->ec2,
 					-name                 => $name,
 					-root_device_name     => $root_device,
@@ -596,6 +598,8 @@ sub _copy_ebs_image {
     }
 
     else {
+	$self->info("Registering snapshot in destination with the equivalent of:\n");
+	$self->info("ec2-register -n '$name' -d '$description' -a $architecture --kernel '$kernel' --ramdisk '$ramdisk' --root-device-name $root_device $block_device_info_args\n");
 	$img =  $dest_manager->ec2->register_image(-name                 => $name,
 						   -root_device_name     => $root_device,
 						   -block_device_mapping => \@mappings,
@@ -621,8 +625,8 @@ sub _copy_ebs_image {
     my $dest_region   = $dest_manager->ec2->region;
     for (@mappings) {
 	my ($snap) = /(snap-[0=9a-f]+)/ or next;
-	my $snap = $dest_manager->ec2->describe_snapshots($snap) or next;
-	my $snap->add_tags(Name => "Copy image $image($source_region) to $img($dest_region)");
+	$snap = $dest_manager->ec2->describe_snapshots($snap) or next;
+	$snap->add_tags(Name => "Copy image $image($source_region) to $img($dest_region)");
     }
 
     return $img;
