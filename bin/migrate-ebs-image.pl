@@ -10,8 +10,8 @@ migrate-ebs-image.pl     Copy an EBS-backed Amazon Image from one region to anot
 
 =head1 DESCRIPTION
 
-This script copies an EBS-backed Unix/Linux AMI located in the EC2
-region indicated by --from to the region indicated by --to. All
+This script copies an EBS-backed Unix/Linux/windows AMI located in the
+EC2 region indicated by --from to the region indicated by --to. All
 associated volume snapshots, including LVM and RAID volumes, are
 migrated as well.
 
@@ -19,9 +19,12 @@ If --from is omitted, then the source region is derived from the
 endpoint URL contained in the EC2_URL environment variable. The --to
 option is required.
 
-This script will ONLY work with EBS backed Linux images. It does not
-work with Windows images due to fundamental limitations of the EC2
-API.
+This script works with any EBS backed image, including Linux PVM,
+Linux HVM (cluster) and Windows images. It will B<not> work with any
+instance-store backed image. To migrate such instances, please see one
+of the recipes listed online, for example:
+
+ http://www.dowdandassociates.com/content/howto-move-ec2-instance-store-ami-one-region-another
 
 =head1 COMMAND-LINE OPTIONS
 
