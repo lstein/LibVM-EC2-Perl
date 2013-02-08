@@ -2083,7 +2083,7 @@ sub describe_volumes {
     return $self->call('DescribeVolumes',@params);
 }
 
-=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size)
+=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size,-volume_type=>$type,-iops=>$iops)
 
 Create a volume in the specified availability zone and return
 information about it.
@@ -2555,8 +2555,6 @@ sub copy_snapshot {
     $args{-source_snapshot_id} ||= $args{-snapshot_id};
     $args{-source_region} or croak "copy_snapshot(): -source_region argument required";
     $args{-source_snapshot_id} or croak "copy_snapshot(): -source_snapshot_id argument required";
-    # As of 2012-12-22, sourceRegion, sourceSnapshotId are not recognized even though API docs specify those as the parameters
-    # The initial 's' must be capitalized.  This has been reported to AWS as an inconsistency in the docs and API.
     my @params  = $self->single_parm('SourceRegion',\%args);
     push @params, $self->single_parm('SourceSnapshotId',\%args);
     push @params, $self->single_parm('Description',\%args);
@@ -3120,7 +3118,7 @@ call.
 
 sub disassociate_address {
     my $self = shift;
-    @_ == 1 or croak "Usage: associate_address(\$elastic_addr)";
+    @_ == 1 or croak "Usage: disassociate_address(\$elastic_addr)";
     my $addr = shift;
 
     my @param = eval {$addr->domain eq 'vpc'} ? (AssociationId => $addr->associationId)
@@ -3265,8 +3263,8 @@ sub describe_reserved_instances {
 
 =head1 SPOT INSTANCES
 
-These methods allow you to request spot instances and manipulte spot
-data feed subscriptoins.
+These methods allow you to request spot instances and manipulate spot
+data feed subscriptions.
 
 =cut
 
@@ -3960,7 +3958,7 @@ sub create_route_table {
     my $self = shift;
     my %args = $self->args(-vpc_id => @_);
     $args{-vpc_id} 
-      or croak "Usage: create_subnet(-vpc_id=>\$id)";
+      or croak "Usage: create_route_table(-vpc_id=>\$id)";
     my @parm = $self->single_parm(VpcId => \%args);
     return $self->call('CreateRouteTable',@parm);
 }
@@ -4033,7 +4031,7 @@ Required arguments:
 
  -subnet_id      The subnet ID or a VM::EC2::VPC::Subnet object.
 
- -route_table_id The route table ID or a M::EC2::VPC::RouteTable object.
+ -route_table_id The route table ID or a VM::EC2::VPC::RouteTable object.
 
 It may be more convenient to call the
 VM::EC2::VPC::Subnet->associate_route_table() or
@@ -4052,8 +4050,8 @@ sub associate_route_table {
     }
     $args{-subnet_id} && $args{-route_table_id}
        or croak "-subnet_id, and -route_table_id arguments required";
-    my @param = $self->single_parm(SubnetId=>\%args),
-                $self->single_parm(RouteTableId=>\%args);
+    my @param = ($self->single_parm(SubnetId=>\%args),
+                $self->single_parm(RouteTableId=>\%args));
     return $self->call('AssociateRouteTable',@param);
 }
 

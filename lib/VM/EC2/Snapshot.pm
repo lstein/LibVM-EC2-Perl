@@ -276,7 +276,8 @@ sub to_volumes {
 sub refresh {
     my $self = shift;
     my $s = $self->aws->describe_snapshots($self);
-    %$self  = %$s;
+    %$self  = %$s if $s;
+    return defined $s
 }
 
 sub register_image {
