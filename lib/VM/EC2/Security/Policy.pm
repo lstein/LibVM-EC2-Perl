@@ -96,7 +96,10 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 =cut
 
 use strict;
+
+use JSON;
 use VM::EC2;
+
 use Carp 'croak';
 use overload
     '""'     => 'as_string',
@@ -138,55 +141,25 @@ sub _add_statement {
 
 sub as_string {
     my $self = shift;
-    my $result =<<END;
-\{
-   "Statement": \[
-END
-;
-    if (%{$self->{statements}}) {
-	$result .= join ",\n",$self->_statements;
-    }
-    else {  # no statements, so deny all
-    	local $self->{statements};
-	$self->deny('*');
-	$result .= join ",\n",$self->_statements;
+    my $st   = $self->{statements};
+
+    my @list;
+    foreach my $effect (sort keys %$st) {
+        push @list, {
+            Action => [map { "ec2:$_" } keys $st->{$effect}],
+            Effect => "\u$effect\E",
+            Resource => '*',
+        };
     }
 
-    $result .= <<END;
+    unless (@list) {
+        # No statements, so deny all;
+        local $self->{statements};
+        $self->deny('*');
+        return $self->as_string;
+    }
 
-   ]
-}
-END
-    chomp($result);
-    return $result;
-}
-
-sub _statements {
-    my $self = shift;
-    return  map {
-	$self->_format_statement($_,[keys %{$self->{statements}{$_}}])
-    }  sort keys %{$self->{statements}};
-}
-
-sub _format_statement {
-    my $self = shift;
-    my ($effect,$actions) = @_;
-    my $action_list = join ',',map {$self->_format_action($_)} sort @$actions;
-    my $result =<<END;
-      {
-	  "Action":   [ $action_list ],
-          "Effect":   "\u$effect\E",
-          "Resource": "*"
-      }
-END
-    chomp($result);
-    return $result;
-}
-
-sub _format_action {
-    my $self = shift;
-    my $a    = shift;
-    return qq("ec2:$a");
+    return encode_json({Statement => \@list});
 }
 
 1;

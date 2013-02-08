@@ -4,6 +4,7 @@
 # `make test'. After `make install' it should work as `perl test.t'
 
 use strict;
+use JSON;
 use ExtUtils::MakeMaker;
 use File::Temp qw(tempfile);
 use FindBin '$Bin';
@@ -29,18 +30,17 @@ my $ec2 = VM::EC2->new(-print_error=>1,
 my $policy = VM::EC2::Security::Policy->new();
 ok($policy,'create policy');
 
+my $default = {
+    Statement => [
+        {
+            Action   => [ 'ec2:*' ],
+            Effect   => 'Deny',
+            Resource => '*'
+        }
+    ]
+};
 # default policy should be to deny all
-is("$policy\n",<<END,'default policy is deny all');
-{
-   "Statement": [
-      {
-	  "Action":   [ "ec2:*" ],
-          "Effect":   "Deny",
-          "Resource": "*"
-      }
-   ]
-}
-END
+is("$policy", encode_json($default),'default policy is deny all');
 
 # allow describing everything
 $policy->allow('Describe*');
@@ -51,22 +51,21 @@ $policy->deny('DescribeImages');
 # adding the same thing twice doesn't make it appear twice
 $policy->allow('Describe*','RunInstances');
 
-is("$policy\n",<<END,'allow/deny');
-{
-   "Statement": [
-      {
-	  "Action":   [ "ec2:Describe*","ec2:RunInstances" ],
-          "Effect":   "Allow",
-          "Resource": "*"
-      },
-      {
-	  "Action":   [ "ec2:DescribeImages" ],
-          "Effect":   "Deny",
-          "Resource": "*"
-      }
-   ]
-}
-END
+my $exp = {
+    Statement => [
+        {
+            Action   => [ 'ec2:Describe*', 'ec2:RunInstances' ],
+            Effect   => 'Allow',
+            Resource => '*',
+        },
+        {
+            Action   => [ 'ec2:DescribeImages' ],
+            Effect   => 'Deny',
+            Resource => '*',
+        }
+    ],
+};
+is("$policy", encode_json($exp), 'allow/deny');
 
 my $token = $ec2->get_federation_token(-name     => 'TestUser',
 				       -policy   => $policy,
