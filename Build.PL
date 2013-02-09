@@ -18,9 +18,7 @@ my $build = Module::Build->new(
       'XML::Simple'  => '2.18',
       'File::Path'   => '2.08',
       'String::Approx' => '3.26',
-    },
-    recommends        => {
-	'JSON'      => 0,
+      'JSON'         => 0,
     },
     build_class        => 'Module::Build',
     );
