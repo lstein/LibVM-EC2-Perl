@@ -2558,8 +2558,15 @@ sub copy_snapshot {
     my @params  = $self->single_parm('SourceRegion',\%args);
     push @params, $self->single_parm('SourceSnapshotId',\%args);
     push @params, $self->single_parm('Description',\%args);
-    my $snap_id = $self->call('CopySnapshot',@params);
-    return $snap_id && $self->describe_snapshots($snap_id);
+    my $snap_id = $self->call('CopySnapshot',@params) or return;
+    return eval {
+            my $snapshot;
+            local $SIG{ALRM} = sub {die "timeout"};
+            alarm(60);
+            until ($snapshot = $self->describe_snapshots($snap_id)) { sleep 1 }
+            alarm(0);
+            $snapshot;
+    };
 }
 
 =head1 SECURITY GROUPS AND KEY PAIRS
@@ -2639,7 +2646,14 @@ sub create_security_group {
     my @param;
     push @param,$self->single_parm($_=>\%args) foreach qw(GroupName GroupDescription VpcId);
     my $g = $self->call('CreateSecurityGroup',@param) or return;
-    return $self->describe_security_groups($g);
+    return eval {
+            my $sg;
+            local $SIG{ALRM} = sub {die "timeout"};
+            alarm(60);
+            until ($sg = $self->describe_security_groups($g)) { sleep 1 }
+            alarm(0);
+            $sg;
+    };
 }
 
 =head2 $boolean = $ec2->delete_security_group($group_id)
@@ -5990,8 +6004,15 @@ sub create_load_balancer {
     push @params, $self->single_parm('Scheme',\%args);
     push @params, $self->member_list_parm('SecurityGroups',\%args);
     push @params, $self->member_list_parm('Subnets',\%args);
-    return if (! defined $self->elb_call('CreateLoadBalancer',@params));
-    return $self->describe_load_balancers($args{-load_balancer_name});
+    return unless $self->elb_call('CreateLoadBalancer',@params);
+    return eval {
+            my $elb;
+            local $SIG{ALRM} = sub {die "timeout"};
+            alarm(60);
+            until ($elb = $self->describe_load_balancers($args{-load_balancer_name})) { sleep 1 }
+            alarm(0);
+            $elb;
+    };
 }
 
 
@@ -7210,6 +7231,13 @@ sub call {
     my $self    = shift;
     my $response  = $self->make_request(@_);
 
+    my $sleep_time = 2;
+    while ($response->decoded_content =~ 'RequestLimitExceeded') {
+        last if ($sleep_time > 64); # wait at most 64 seconds
+        sleep $sleep_time;
+        $sleep_time *= 2;
+        $response  = $self->make_request(@_);
+    }
     unless ($response->is_success) {
 	my $content = $response->decoded_content;
 	my $error;
