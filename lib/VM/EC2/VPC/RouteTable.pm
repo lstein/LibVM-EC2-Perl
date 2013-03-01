@@ -41,12 +41,15 @@ L<VM::EC2::Generic> for information.
 
 In addition, this object supports the following convenience methods:
 
- vpc                   -- The VPC object for this route table.
- main                  -- Returns true if this is the VPC's current "main" 
-                          route table
- associate($subnet)    -- Associate the route table with a subnet ID or object.
- disassociate($subnet) -- Disassociate the route table with a subnet ID or object.
- refresh               -- Refreshes the object from its current state in EC2.
+ vpc                            -- The VPC object for this route table.
+ main                           -- Returns true if this is the VPC's current "main" 
+                                   route table
+ associate($subnet)             -- Associate the route table with a subnet ID or object.
+ disassociate($subnet)          -- Disassociate the route table with a subnet ID or object.
+ refresh                        -- Refreshes the object from its current state in EC2.
+ create_route($dest=>$target)   -- Create a route in the route table
+ delete_route($dest)            -- Delete a route in the route table
+ replace_route($dest=>$target)  -- Replace a route in the route table
 
 =head1 STRING OVERLOADING
 
@@ -129,6 +132,21 @@ sub refresh {
     local $self->aws->{raise_error} = 1;
     ($i) = $self->aws->describe_subnets($self->subnetId) unless $i;
     %$self  = %$i;
+}
+
+sub create_route {
+    my $self = shift;
+    return $self->aws->create_route($self->routeTableId, @_);
+}
+
+sub replace_route {
+    my $self = shift;
+    return $self->aws->replace_route($self->routeTableId, @_);
+}
+
+sub delete_route {
+    my $self = shift;
+    return $self->aws->delete_route($self->routeTableId, @_);
 }
 
 1;

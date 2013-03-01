@@ -2101,7 +2101,7 @@ sub describe_volumes {
     return $self->call('DescribeVolumes',@params);
 }
 
-=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size)
+=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size,-volume_type=>$type,-iops=>$iops)
 
 Create a volume in the specified availability zone and return
 information about it.
@@ -2573,13 +2573,18 @@ sub copy_snapshot {
     $args{-source_snapshot_id} ||= $args{-snapshot_id};
     $args{-source_region} or croak "copy_snapshot(): -source_region argument required";
     $args{-source_snapshot_id} or croak "copy_snapshot(): -source_snapshot_id argument required";
-    # As of 2012-12-22, sourceRegion, sourceSnapshotId are not recognized even though API docs specify those as the parameters
-    # The initial 's' must be capitalized.  This has been reported to AWS as an inconsistency in the docs and API.
     my @params  = $self->single_parm('SourceRegion',\%args);
     push @params, $self->single_parm('SourceSnapshotId',\%args);
     push @params, $self->single_parm('Description',\%args);
-    my $snap_id = $self->call('CopySnapshot',@params);
-    return $snap_id && $self->describe_snapshots($snap_id);
+    my $snap_id = $self->call('CopySnapshot',@params) or return;
+    return eval {
+            my $snapshot;
+            local $SIG{ALRM} = sub {die "timeout"};
+            alarm(60);
+            until ($snapshot = $self->describe_snapshots($snap_id)) { sleep 1 }
+            alarm(0);
+            $snapshot;
+    };
 }
 
 =head1 SECURITY GROUPS AND KEY PAIRS
@@ -2659,7 +2664,14 @@ sub create_security_group {
     my @param;
     push @param,$self->single_parm($_=>\%args) foreach qw(GroupName GroupDescription VpcId);
     my $g = $self->call('CreateSecurityGroup',@param) or return;
-    return $self->describe_security_groups($g);
+    return eval {
+            my $sg;
+            local $SIG{ALRM} = sub {die "timeout"};
+            alarm(60);
+            until ($sg = $self->describe_security_groups($g)) { sleep 1 }
+            alarm(0);
+            $sg;
+    };
 }
 
 =head2 $boolean = $ec2->delete_security_group($group_id)
@@ -3138,7 +3150,7 @@ call.
 
 sub disassociate_address {
     my $self = shift;
-    @_ == 1 or croak "Usage: associate_address(\$elastic_addr)";
+    @_ == 1 or croak "Usage: disassociate_address(\$elastic_addr)";
     my $addr = shift;
 
     my @param = eval {$addr->domain eq 'vpc'} ? (AssociationId => $addr->associationId)
@@ -3283,8 +3295,8 @@ sub describe_reserved_instances {
 
 =head1 SPOT INSTANCES
 
-These methods allow you to request spot instances and manipulte spot
-data feed subscriptoins.
+These methods allow you to request spot instances and manipulate spot
+data feed subscriptions.
 
 =cut
 
@@ -3978,7 +3990,7 @@ sub create_route_table {
     my $self = shift;
     my %args = $self->args(-vpc_id => @_);
     $args{-vpc_id} 
-      or croak "Usage: create_subnet(-vpc_id=>\$id)";
+      or croak "Usage: create_route_table(-vpc_id=>\$id)";
     my @parm = $self->single_parm(VpcId => \%args);
     return $self->call('CreateRouteTable',@parm);
 }
@@ -4051,7 +4063,7 @@ Required arguments:
 
  -subnet_id      The subnet ID or a VM::EC2::VPC::Subnet object.
 
- -route_table_id The route table ID or a M::EC2::VPC::RouteTable object.
+ -route_table_id The route table ID or a VM::EC2::VPC::RouteTable object.
 
 It may be more convenient to call the
 VM::EC2::VPC::Subnet->associate_route_table() or
@@ -4070,8 +4082,8 @@ sub associate_route_table {
     }
     $args{-subnet_id} && $args{-route_table_id}
        or croak "-subnet_id, and -route_table_id arguments required";
-    my @param = $self->single_parm(SubnetId=>\%args),
-                $self->single_parm(RouteTableId=>\%args);
+    my @param = ($self->single_parm(SubnetId=>\%args),
+                $self->single_parm(RouteTableId=>\%args));
     return $self->call('AssociateRouteTable',@param);
 }
 
@@ -6010,8 +6022,15 @@ sub create_load_balancer {
     push @params, $self->single_parm('Scheme',\%args);
     push @params, $self->member_list_parm('SecurityGroups',\%args);
     push @params, $self->member_list_parm('Subnets',\%args);
-    return if (! defined $self->elb_call('CreateLoadBalancer',@params));
-    return $self->describe_load_balancers($args{-load_balancer_name});
+    return unless $self->elb_call('CreateLoadBalancer',@params);
+    return eval {
+            my $elb;
+            local $SIG{ALRM} = sub {die "timeout"};
+            alarm(60);
+            until ($elb = $self->describe_load_balancers($args{-load_balancer_name})) { sleep 1 }
+            alarm(0);
+            $elb;
+    };
 }
 
 
@@ -7537,6 +7556,13 @@ sub call {
     my $self    = shift;
     my $response  = $self->make_request(@_);
 
+    my $sleep_time = 2;
+    while ($response->decoded_content =~ 'RequestLimitExceeded') {
+        last if ($sleep_time > 64); # wait at most 64 seconds
+        sleep $sleep_time;
+        $sleep_time *= 2;
+        $response  = $self->make_request(@_);
+    }
     unless ($response->is_success) {
 	my $content = $response->decoded_content;
 	my $error;

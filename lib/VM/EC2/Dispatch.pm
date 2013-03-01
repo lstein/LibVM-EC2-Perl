@@ -149,14 +149,28 @@ use constant ObjectRegistration => {
     CreateImage             => sub { 
 	my ($data,$aws) = @_;
 	my $image_id = $data->{imageId} or return;
-	sleep 2; # wait for the thing to register
-	return $aws->describe_images($image_id);
+	sleep 2; # wait for the thing to register (but sometimes it is not enough)
+	return eval {
+            local $SIG{ALRM} = sub { die 'timeout' };
+            my $image;
+            alarm(60);
+            until ($image = $aws->describe_images($image_id)) { sleep 1 }
+            alarm(0);
+            $image;
+        };
     },
     RegisterImage             => sub { 
 	my ($data,$aws) = @_;
 	my $image_id = $data->{imageId} or return;
-	sleep 2; # wait for the thing to register
-	return $aws->describe_images($image_id);
+	sleep 2; # wait for the thing to register (but sometimes it is not enough)
+	return eval {
+            local $SIG{ALRM} = sub { die 'timeout' };
+            my $image;
+            alarm(60);
+            until ($image = $aws->describe_images($image_id)) { sleep 1 }
+            alarm(0);
+            $image;
+        };
     },
     DeregisterImage      => 'boolean',
     DescribeAddresses => 'fetch_items,addressesSet,VM::EC2::ElasticAddress',

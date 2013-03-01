@@ -145,7 +145,8 @@ sub create_route_table {
     my $self = shift;
     my $vpc  = $self->vpcId;
     my $rt   = $self->aws->create_route_table($vpc) or return;
-    return $self->associate_route_table($rt);
+    $self->associate_route_table($rt->routeTableId) or return;
+    return $rt
 }
 
 sub disassociate_network_acl {

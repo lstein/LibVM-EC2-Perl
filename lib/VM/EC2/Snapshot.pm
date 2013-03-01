@@ -277,7 +277,8 @@ sub refresh {
     my $self = shift;
     local $self->aws->{raise_error} = 1;
     my $s = $self->aws->describe_snapshots($self);
-    %$self  = %$s;
+    %$self  = %$s if $s;
+    return defined $s
 }
 
 sub register_image {
