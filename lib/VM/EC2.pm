@@ -400,9 +400,11 @@ sub AUTOLOAD {
 }
 
 use constant import_tags => {
-    ':default'  => ['instance','elastic_ip','ebs','ami','keys','zone','general','tag','security_group',],
+    ':standard' => ['instance','elastic_ip','ebs','ami','keys','zone','general','tag','security_group',],
     ':vpn'      => ['customer_gateway','dhcp','eni','private_ip','internet_gateway','network_acl','route_table','subnet','vpc','vpn','vpg',],
-    ':standard' => [':default'],
+    ':misc'     => ['devpay','monitoring','spot_instance','vm_export','vm_import','windows'],
+    ':all'      => [':standard',':vpn',':misc'],
+    ':default'  => [':all'],
 };
 
 # e.g. use VM::EC2 ':default','!ami';
@@ -415,13 +417,14 @@ sub import {
 	last if @processed == @args;  # no more expansion needed
 	@args = @processed;
     }
-    my %exclude;
+    my (%excluded,%included);
     foreach (@args) {
-	$exclude{$1}++ if /^!(\S+)/;
+	$excluded{$1}++ if /^!(\S+)/;
     }
     foreach (@args) {
 	next unless /^\S/;
-	next if $exclude{$_};
+	next if $excluded{$_};
+	next if $included{$_}++;
 	my $class = "VM::EC2::REST::$_";
 	eval "require $class; 1" or die $@;
     }
