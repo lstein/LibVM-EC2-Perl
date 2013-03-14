@@ -4,9 +4,115 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
-=head1 NAME
+=head1 NAME VM::EC2::REST::customer_gateway
 
 =head1 METHODS
+
+These methods control customer gateways for AWS VPNs.
+
+=head2 @gtwys = $ec2->describe_customer_gateways(-customer_gateway_id=>\@ids,
+                                                 -filter             =>\%filters)
+
+=head2 @gtwys = $ec2->describe_customer_gateways(\@customer_gateway_ids)
+
+=head2 @gtwys = $ec2->describe_customer_gateways(%filters)
+
+Provides information on VPN customer gateways.
+
+Returns a series of VM::EC2::VPC::CustomerGateway objects.
+
+Optional parameters are:
+
+ -customer_gateway_id    ID of the gateway(s) to return information on. 
+                         This can be a string scalar, or an arrayref.
+
+ -filter                 Tags and other filters to apply.
+
+The filter argument is a hashreference in which the keys are the filter names,
+and the values are the match strings. Some filters accept wildcards.
+
+There are a number of filters, which are listed in full at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeCustomerGateways.html
+
+Here is a alpha-sorted list of filter names: bgp-asn, customer-gateway-id, 
+ip-address, state, type, tag-key, tag-value, tag:key
+
+=cut
+
+sub describe_customer_gateways {
+    my $self = shift;
+    my %args = $self->args('-customer_gateway_id',@_);
+    my @params = $self->list_parm('CustomerGatewayId',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeCustomerGateways',@params);
+}
+VM::EC2::Dispatch->register(DescribeCustomerGateways          => 'fetch_items,customerGatewaySet,VM::EC2::VPC::CustomerGateway');
+
+=head2 $cust_gtwy = $ec2->create_customer_gateway(-type      =>$type,
+                                                  -ip_address=>$ip,
+                                                  -bgp_asn   =>$asn)
+
+Provides information to AWS about a VPN customer gateway device. The customer 
+gateway is the appliance at the customer end of the VPN connection (compared 
+to the virtual private gateway, which is the device at the AWS side of the 
+VPN connection).
+
+Arguments:
+
+ -ip_address     -- The IP address of the customer gateway appliance
+
+ -bgp_asn        -- The Border Gateway Protocol (BGP) Autonomous System Number
+                    (ASN) of the customer gateway
+
+ -type           -- Optional as there is only currently (2012-06-15 API) only
+                    one type (ipsec.1)
+
+ -ip             -- Alias for -ip_address
+
+Returns a L<VM::EC2::VPC::CustomerGateway> object on success.
+
+=cut
+
+sub create_customer_gateway {
+    my $self = shift;
+    my %args = @_;
+    $args{-type} ||= 'ipsec.1';
+    $args{-ip_address} ||= $args{-ip};
+    $args{-ip_address} or
+        croak "create_customer_gateway(): -ip_address argument missing";
+    $args{-bgp_asn} or
+        croak "create_customer_gateway(): -bgp_asn argument missing";
+    my @params = $self->single_parm('Type',\%args);
+    push @params, $self->single_parm('IpAddress',\%args);
+    push @params, $self->single_parm('BgpAsn',\%args);
+    return $self->call('CreateCustomerGateway',@params);
+}
+VM::EC2::Dispatch->register(CreateCustomerGateway             => 'fetch_one,customerGateway,VM::EC2::VPC::CustomerGateway');
+
+=head2 $success = $ec2->delete_customer_gateway(-customer_gateway_id=>$id)
+
+=head2 $success = $ec2->delete_customer_gateway($id)
+
+Deletes a VPN customer gateway. You must delete the VPN connection before 
+deleting the customer gateway.
+
+Arguments:
+
+ -customer_gateway_id     -- The ID of the customer gateway to delete
+
+Returns true on successful deletion.
+
+=cut
+
+sub delete_customer_gateway {
+    my $self = shift;
+    my %args = $self->args('-customer_gateway_id',@_);
+    $args{-customer_gateway_id} or
+        croak "delete_customer_gateway(): -customer_gateway_id argument missing";
+    my @params = $self->single_parm('CustomerGatewayId',\%args);
+    return $self->call('DeleteCustomerGateway',@params);
+}
+VM::EC2::Dispatch->register(DeleteCustomerGateway             => 'boolean');
 
 =head1 SEE ALSO
 
