@@ -15,7 +15,7 @@ use Test::More tests => TEST_COUNT;
 use EC2TestSupport;
 
 # this script tests all the describe() functions and associated features such as tags.
-require_ok('VM::EC2');
+use_ok('VM::EC2',':standard');
 reset_declined();
 
 SKIP: {

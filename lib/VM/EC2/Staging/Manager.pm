@@ -132,7 +132,7 @@ the same region will return the same one each time.
 =cut
 
 use strict;
-use VM::EC2;
+use VM::EC2 ':standard';
 use Carp 'croak','longmess';
 use File::Spec;
 use File::Path 'make_path','remove_tree';

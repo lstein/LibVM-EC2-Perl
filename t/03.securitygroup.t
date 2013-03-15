@@ -21,7 +21,7 @@ use constant GROUP_DESCRIPTION => 'Test group created by VM::EC2; do not use!!';
 # this script tests the security groups
 my ($ec2);
 
-require_ok('VM::EC2');
+use_ok('VM::EC2',':standard');
 SKIP: {
 
 skip "account information unavailable",TEST_COUNT-1 unless setup_environment();

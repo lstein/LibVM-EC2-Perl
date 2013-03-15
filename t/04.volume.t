@@ -21,7 +21,7 @@ use constant VOLUME_DESC => 'Delete me!';
 
 my ($ec2);
 
-require_ok('VM::EC2');
+use_ok('VM::EC2',':standard');
 
 SKIP: {
 skip "account information unavailable",TEST_COUNT-1 unless setup_environment();

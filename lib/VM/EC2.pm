@@ -448,12 +448,13 @@ sub AUTOLOAD {
 }
 
 use constant import_tags => {
-    ':standard' => ['instance','elastic_ip','ebs','ami','keys','monitoring','zone','general','tag','security_group',],
-    ':vpc'      => ['customer_gateway','dhcp','elastic_network_interface','private_ip','internet_gateway','network_acl','route_table','subnet','vpc','vpn','vpn_gateway',],
+    ':standard' => [qw(instance elastic_ip ebs ami keys monitoring zone general tag security_group security_token)],
+    ':vpc'      => [qw(customer_gateway dhcp elastic_network_interface private_ip 
+                       internet_gateway network_acl route_table subnet vpc vpn vpn_gateway)],
     ':hpc'      => ['placement_group'],
     ':scaling'  => ['elastic_load_balancer','autoscaling'],
     ':misc'     => ['devpay','reserved_instance', 'spot_instance','vm_export','vm_import','windows'],
-    ':all'      => [':standard',':vpn',':elb',':misc',':hpc'],
+    ':all'      => [qw(:standard :vpc :hpc :scaling :misc)],
     ':DEFAULT'  => [':all'],
 };
 
@@ -461,20 +462,25 @@ use constant import_tags => {
 sub import {
     my $self = shift;
     my @args = @_;
-    @args    = ':default' unless @args;
+    @args    = ':DEFAULT' unless @args;
     while (1) {
 	my @processed = map {/^:/ && import_tags->{$_} ? @{import_tags->{$_}} : $_ } @args;
-	last if @processed == @args;  # no more expansion needed
+	last if "@processed" eq  "@args";  # no more expansion needed
 	@args = @processed;
     }
     my (%excluded,%included);
     foreach (@args) {
-	$excluded{$1}++ if /^!(\S+)/;
+	if (/^!(\S+)/) {
+	    $excluded{$1}++ ;
+	    $_ = $1;
+	}
     }
     foreach (@args) {
 	next unless /^\S/;
 	next if $excluded{$_};
 	next if $included{$_}++;
+	croak "'$_' is not a valid import tag" if /^[!:]/;
+	next if $INC{"VM/EC2/REST/$_.pm"};
 	my $class = "VM::EC2::REST::$_";
 	eval "require $class; 1" or die $@;
     }

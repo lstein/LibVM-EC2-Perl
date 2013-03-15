@@ -1,4 +1,4 @@
-package VM::EC2::REST::reserved_instance
+package VM::EC2::REST::reserved_instance;
 
 use strict;
 use VM::EC2 '';  # important not to import anything!
@@ -9,8 +9,7 @@ VM::EC2::Dispatch->register(
     DescribeReservedInstancesOfferings  => 'fetch_items,reservedInstancesOfferingsSet,VM::EC2::ReservedInstance::Offering',
     PurchaseReservedInstancesOffering  => sub { my ($data,$ec2) = @_;
 						my $ri_id = $data->{reservedInstancesId} or return;
-						return $ec2->describe_reserved_instances($ri_id);
-    },
+						return $ec2->describe_reserved_instances($ri_id); },
     );
 
 =head1 NAME VM::EC2::REST::reserved_instance

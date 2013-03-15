@@ -18,7 +18,7 @@ use EC2TestSupport;
 
 setup_environment();
 
-require_ok('VM::EC2');
+use_ok('VM::EC2',':standard');
 require_ok('VM::EC2::Security::Policy');
 SKIP: {
 skip "account information unavailable",TEST_COUNT-2 unless setup_environment();

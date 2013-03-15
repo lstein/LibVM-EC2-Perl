@@ -21,7 +21,7 @@ use constant ASG_NAME => 'VM-EC2-ASG-test';
 # this script tests the autoscaling groups
 my ($ec2);
 
-require_ok('VM::EC2');
+use_ok('VM::EC2',':standard',':scaling');
 SKIP: {
 
 skip "account information unavailable",TEST_COUNT-1 unless setup_environment();
