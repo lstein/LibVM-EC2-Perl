@@ -116,10 +116,16 @@ sub new {
     return $self;
 }
 
-sub register {
+sub replace {
     my $self = shift;
     my ($request_name,$object_creator) = @_;
     $REGISTRATION->{$request_name} = $object_creator;
+}
+
+sub register {
+    my $self = shift;
+    my ($request_name,$object_creator) = @_;
+    $REGISTRATION->{$request_name} ||= $object_creator;
 }
 
 sub response2objects {

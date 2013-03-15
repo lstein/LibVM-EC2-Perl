@@ -6,9 +6,25 @@ package VM::EC2;  # add methods to VM::EC2
 
 =head1 NAME VM::EC2::REST::ami
 
+=head1 SYNOPSIS
+
+use VM::EC2 ':standard';
+
 =head1 METHODS
 
 These are methods that allow you to fetch and manipulate Amazon Machine Images.
+
+Implemented:
+ CreateImage
+ DeregisterImage
+ DescribeImageAttribute
+ DescribeImages
+ ModifyImageAttribute
+ RegisterImage
+ ResetImageAttribute
+
+Unimplemented:
+ (none)
 
 =head1 EC2 AMAZON MACHINE IMAGES
 

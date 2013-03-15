@@ -8,6 +8,10 @@ package VM::EC2;  # add methods to VM::EC2
 
 VM::EC2::REST::instance - VM::EC2 methods for controlling instances
 
+=head1 SYNOPSIS
+
+ use VM::EC2 ':standard';
+
 =head1 METHODS
 
 The methods in this section allow you to retrieve information about
@@ -597,64 +601,6 @@ sub get_password_data {
     return $self->call('GetPasswordData',@params);
 }
 VM::EC2::Dispatch->register(ConfirmProductInstance => 'boolean',);
-
-=head2 $output = $ec2->get_console_output(-instance_id=>'i-12345')
-
-=head2 $output = $ec2->get_console_output('i-12345');
-
-Return the console output of the indicated instance. The output is
-actually a VM::EC2::ConsoleOutput object, but it is
-overloaded so that when treated as a string it will appear as a
-large text string containing the  console output. When treated like an
-object it provides instanceId() and timestamp() methods.
-
-=cut
-
-sub get_console_output {
-    my $self = shift;
-    my %args = $self->args(-instance_id=>@_);
-    $args{-instance_id} or croak "Usage: get_console_output(-instance_id=>\$id)";
-    my @params = $self->single_parm('InstanceId',\%args);
-    return $self->call('GetConsoleOutput',@params);
-}
-
-VM::EC2::Dispatch->register(GetConsoleOutput     => 'VM::EC2::Instance::ConsoleOutput');
-
-=head2 @monitoring_state = $ec2->monitor_instances(@list_of_instanceIds)
-
-=head2 @monitoring_state = $ec2->monitor_instances(-instance_id=>\@instanceIds)
-
-This method enables monitoring for the listed instances and returns a
-list of VM::EC2::Instance::MonitoringState objects. You can
-later use these objects to activate and inactivate monitoring.
-
-=cut
-
-sub monitor_instances {
-    my $self = shift;
-    my %args = $self->args('-instance_id',@_);
-    my @params = $self->list_parm('InstanceId',\%args);
-    return $self->call('MonitorInstances',@params);
-}
-VM::EC2::Dispatch->register(MonitorInstances     => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState');
-
-=head2 @monitoring_state = $ec2->unmonitor_instances(@list_of_instanceIds)
-
-=head2 @monitoring_state = $ec2->unmonitor_instances(-instance_id=>\@instanceIds)
-
-This method disables monitoring for the listed instances and returns a
-list of VM::EC2::Instance::MonitoringState objects. You can
-later use these objects to activate and inactivate monitoring.
-
-=cut
-
-sub unmonitor_instances {
-    my $self = shift;
-    my %args = $self->args('-instance_id',@_);
-    my @params = $self->list_parm('InstanceId',\%args);
-    return $self->call('UnmonitorInstances',@params);
-}
-VM::EC2::Dispatch->register(UnmonitorInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState');
 
 =head2 $meta = VM::EC2->instance_metadata
 

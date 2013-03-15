@@ -4,13 +4,24 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
-=head1 NAME
+=head1 NAME VM::EC2::REST::zone
+
+=head1 SYNOPSIS
+
+ use VM::EC2 qw(:standard);
 
 =head1 EC2 REGIONS AND AVAILABILITY ZONES
 
 This section describes methods that allow you to fetch information on
 EC2 regions and availability zones. These methods return objects of
 type L<VM::EC2::Region> and L<VM::EC2::AvailabilityZone>.
+
+Implemented:
+ DescribeAvailabilityZones
+ DescribeRegions
+
+Unimplemented:
+ (none)
 
 =head2 @regions = $ec2->describe_regions(@list)
 

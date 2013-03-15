@@ -4,9 +4,15 @@ use VM::EC2 '';  # important not to import anything!
 
 package VM::EC2;  # add methods to VM::EC2
 
-=head1 NAME
+=head1 NAME VM::EC2::REST::devpay
 
 =head1 METHODS
+
+Implemented:
+
+Unimplemented:
+
+  ConfirmProductInstance
 
 =head1 SEE ALSO
 

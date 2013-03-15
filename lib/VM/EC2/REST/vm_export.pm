@@ -4,9 +4,24 @@ use strict;
 use VM::EC2 '';   # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
-=head1 NAME
+=head1 NAME VM::EC2::REST::vm_export
+
+=head1 SYNOPSIS
+
+ use VM::EC2 ':misc';
 
 =head1 METHODS
+
+These methods allow you to export a VM to a non-EC2
+environment. Currently not supported by VM::EC2 (volunteers welcome).
+
+Implemented:
+ (none)
+
+Unimplemented:
+ CancelExportTask
+ CreateInstanceExportTask
+ DescribeExportTasks
 
 =head1 SEE ALSO
 

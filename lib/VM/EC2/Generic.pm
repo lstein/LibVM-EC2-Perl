@@ -55,6 +55,7 @@ is not intended to be used directly.
 use strict;
 use Carp 'croak';
 use Data::Dumper;
+use VM::EC2 'tag';
 
 our $AUTOLOAD;
 $Data::Dumper::Terse++;

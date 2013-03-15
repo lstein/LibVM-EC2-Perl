@@ -4,9 +4,553 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
-=head1 NAME
+=head1 NAME VM::EC2::REST::ebs
+
+=head1 SYNOPSIS
+
+ use VM::EC2 ':standard';
 
 =head1 METHODS
+
+The methods in this section allow you to query and manipulate EC2 EBS
+volumes and snapshots. See L<VM::EC2::Volume> and L<VM::EC2::Snapshot>
+for additional functionality provided through the object interface.
+
+Implemented:
+ AttachVolume
+ CopySnapshot
+ CreateSnapshot
+ CreateVolume
+ DeleteSnapshot
+ DeleteVolume
+ DescribeSnapshotAttribute
+ DescribeSnapshots
+ DescribeVolumes
+ DescribeVolumeAttribute
+ DescribeVolumeStatus
+ DetachVolume
+ EnableVolumeIO
+ ImportVolume
+ ModifySnapshotAttribute
+ ModifyVolumeAttribute
+ ResetSnapshotAttribute
+
+Unimplemented:
+ (none)
+
+=head2 @v = $ec2->describe_volumes(-volume_id=>\@ids,-filter=>\%filters)
+
+=head2 @v = $ec2->describe_volumes(@volume_ids)
+
+Return a series of VM::EC2::Volume objects. Optional arguments:
+
+ -volume_id    The id of the volume to fetch, either a string
+               scalar or an arrayref.
+
+ -filter       One or more filters to apply to the search
+
+The -filter argument name can be omitted if there are no other
+arguments you wish to pass.
+
+The full list of volume filters can be found at:
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVolumes.html
+
+=cut
+
+sub describe_volumes {
+    my $self = shift;
+    my %args = $self->args(-volume_id=>@_);
+    my @params;
+    push @params,$self->list_parm('VolumeId',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeVolumes',@params);
+}
+
+=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size,-volume_type=>$type,-iops=>$iops)
+
+Create a volume in the specified availability zone and return
+information about it.
+
+Arguments:
+
+ -availability_zone    -- An availability zone from
+                          describe_availability_zones (required)
+
+ -snapshot_id          -- ID of a snapshot to use to build volume from.
+
+ -size                 -- Size of the volume, in GB (between 1 and 1024).
+
+One or both of -snapshot_id or -size are required. For convenience,
+you may abbreviate -availability_zone as -zone, and -snapshot_id as
+-snapshot.
+
+Optional Arguments:
+
+ -volume_type          -- The volume type.  standard or io1, default is
+                          standard
+
+ -iops                 -- The number of I/O operations per second (IOPS) that
+                          the volume supports.  Range is 100 to 2000.  Required
+                          when volume type is io1.
+
+The returned object is a VM::EC2::Volume object.
+
+=cut
+
+sub create_volume {
+    my $self = shift;
+    my %args = @_;
+    my $zone = $args{-availability_zone} || $args{-zone} or croak "-availability_zone argument is required";
+    my $snap = $args{-snapshot_id}       || $args{-snapshot};
+    my $size = $args{-size};
+    $snap || $size or croak "One or both of -snapshot_id or -size are required";
+    if (exists $args{-volume_type} && $args{-volume_type} eq 'io1') {
+        $args{-iops} or croak "Argument -iops required when -volume_type is 'io1'";
+    }
+    elsif ($args{-iops}) {
+        croak "Argument -iops cannot be used when volume type is 'standard'";
+    }
+    my @params = (AvailabilityZone => $zone);
+    push @params,(SnapshotId   => $snap) if $snap;
+    push @params,(Size => $size)         if $size;
+    push @params,$self->single_parm('VolumeType',\%args);
+    push @params,$self->single_parm('Iops',\%args);
+    return $self->call('CreateVolume',@params);
+}
+
+=head2 $result = $ec2->delete_volume($volume_id);
+
+Deletes the specified volume. Returns a boolean indicating success of
+the delete operation. Note that a volume will remain in the "deleting"
+state for some time after this call completes.
+
+=cut
+
+sub delete_volume {
+    my $self = shift;
+    my %args  = $self->args(-volume_id => @_);
+    my @param = $self->single_parm(VolumeId=>\%args);
+    return $self->call('DeleteVolume',@param);
+}
+
+=head2 $attachment = $ec2->attach_volume($volume_id,$instance_id,$device);
+
+=head2 $attachment = $ec2->attach_volume(-volume_id=>$volume_id,-instance_id=>$instance_id,-device=>$device);
+
+Attaches the specified volume to the instance using the indicated
+device. All arguments are required:
+
+ -volume_id      -- ID of the volume to attach. The volume must be in
+                    "available" state.
+ -instance_id    -- ID of the instance to attach to. Both instance and
+                    attachment must be in the same availability zone.
+ -device         -- How the device is exposed to the instance, e.g.
+                    '/dev/sdg'.
+
+The result is a VM::EC2::BlockDevice::Attachment object which
+you can monitor by calling current_status():
+
+    my $a = $ec2->attach_volume('vol-12345','i-12345','/dev/sdg');
+    while ($a->current_status ne 'attached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+or more simply
+
+    my $a = $ec2->attach_volume('vol-12345','i-12345','/dev/sdg');
+    $ec2->wait_for_attachments($a);
+
+=cut
+
+sub attach_volume {
+    my $self = shift;
+    my %args; 
+    if ($_[0] !~ /^-/ && @_ == 3) { 
+	@args{qw(-volume_id -instance_id -device)} = @_; 
+    } else { 
+	%args = @_; 
+    }
+    $args{-volume_id} && $args{-instance_id} && $args{-device} or
+	croak "-volume_id, -instance_id and -device arguments must all be specified";
+    my @param = $self->single_parm(VolumeId=>\%args);
+    push @param,$self->single_parm(InstanceId=>\%args);
+    push @param,$self->single_parm(Device=>\%args);
+    return $self->call('AttachVolume',@param);
+}
+
+=head2 $attachment = $ec2->detach_volume($volume_id)
+
+=head2 $attachment = $ec2->detach_volume(-volume_id=>$volume_id,-instance_id=>$instance_id,
+                                         -device=>$device,      -force=>$force);
+
+Detaches the specified volume from an instance.
+
+ -volume_id      -- ID of the volume to detach. (required)
+ -instance_id    -- ID of the instance to detach from. (optional)
+ -device         -- How the device is exposed to the instance. (optional)
+ -force          -- Force detachment, even if previous attempts were
+                    unsuccessful. (optional)
+
+
+The result is a VM::EC2::BlockDevice::Attachment object which
+you can monitor by calling current_status():
+
+    my $a = $ec2->detach_volume('vol-12345');
+    while ($a->current_status ne 'detached') {
+       sleep 2;
+    }
+    print "volume is ready to go\n";
+
+Or more simply:
+
+    my $a = $ec2->detach_volume('vol-12345');
+    $ec2->wait_for_attachments($a);
+    print "volume is ready to go\n" if $a->current_status eq 'detached';
+
+
+=cut
+
+sub detach_volume {
+    my $self = shift;
+    my %args = $self->args(-volume_id => @_);
+    my @param = $self->single_parm(VolumeId=>\%args);
+    push @param,$self->single_parm(InstanceId=>\%args);
+    push @param,$self->single_parm(Device=>\%args);
+    push @param,$self->single_parm(Force=>\%args);
+    return $self->call('DetachVolume',@param);
+}
+
+=head2 @v = $ec2->describe_volume_status(@volume_ids)
+
+=head2 @v = $ec2->describe_volume_status(\%filters)
+
+=head2 @v = $ec2->describe_volume_status(-volume_id=>\@ids,-filter=>\%filters)
+
+Return a series of VM::EC2::Volume::StatusItem objects. Optional arguments:
+
+ -volume_id    The id of the volume to fetch, either a string
+               scalar or an arrayref.
+
+ -filter       One or more filters to apply to the search
+
+ -max_results  Maximum number of items to return (must be more than
+                5).
+
+The -filter argument name can be omitted if there are no other
+arguments you wish to pass.
+
+The full list of volume filters can be found at:
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVolumeStatus.html
+
+If -max_results is specified, then the call will return at most the
+number of volume status items you requested. You may see whether there
+are additional results by calling more_volume_status(), and then
+retrieve the next set of results with additional call(s) to
+describe_volume_status():
+
+ my @results = $ec2->describe_volume_status(-max_results => 10);
+ do_something(\@results);
+ while ($ec2->more_volume_status) {
+    @results = $ec2->describe_volume_status;
+    do_something(\@results);
+ }
+
+=cut
+
+sub more_volume_status {
+    my $self = shift;
+    return $self->{volume_status_token} &&
+           !$self->{volume_status_stop};
+}
+
+sub describe_volume_status {
+    my $self = shift;
+    my @parms;
+
+    if (!@_ && $self->{volume_status_token} && $self->{volume_status_args}) {
+	@parms = (@{$self->{volume_status_args}},NextToken=>$self->{volume_status_token});
+    }
+    
+    else {
+	my %args = $self->args('-volume_id',@_);
+	push @parms,$self->list_parm('VolumeId',\%args);
+	push @parms,$self->filter_parm(\%args);
+	push @parms,$self->single_parm('MaxResults',\%args);
+	
+	if ($args{-max_results}) {
+	    $self->{volume_status_token} = 'xyzzy'; # dummy value
+	    $self->{volume_status_args} = \@parms;
+	}
+
+    }
+    return $self->call('DescribeVolumeStatus',@parms);
+}
+
+=head2 @data = $ec2->describe_volume_attribute($volume_id,$attribute)
+
+This method returns volume attributes.  Only one attribute can be
+retrieved at a time. The following is the list of attributes that can be
+retrieved:
+
+ autoEnableIO                      -- boolean
+ productCodes                      -- list of scalar
+
+These values can be retrieved more conveniently from the
+L<VM::EC2::Volume> object returned from describe_volumes():
+
+ $volume->auto_enable_io(1);
+ @codes = $volume->product_codes;
+
+=cut
+
+sub describe_volume_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_volume_attribute(\$instance_id,\$attribute_name)";
+    my ($instance_id,$attribute) = @_;
+    my @param  = (VolumeId=>$instance_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeVolumeAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+sub modify_volume_attribute {
+    my $self = shift;
+    my $volume_id = shift or croak "Usage: modify_volume_attribute(\$volumeId,%param)";
+    my %args   = @_;
+    my @param  = (VolumeId=>$volume_id);
+    push @param,('AutoEnableIO.Value'=>$args{-auto_enable_io} ? 'true':'false');
+    return $self->call('ModifyVolumeAttribute',@param);
+}
+
+=head2 $boolean = $ec2->enable_volume_io($volume_id)
+
+=head2 $boolean = $ec2->enable_volume_io(-volume_id=>$volume_id)
+
+Given the ID of a volume whose I/O has been disabled (e.g. due to
+hardware degradation), this method will reenable the I/O and return
+true if successful.
+
+=cut
+
+sub enable_volume_io {
+    my $self = shift;
+    my %args = $self->args('-volume_id',@_);
+    $args{-volume_id} or croak "Usage: enable_volume_io(\$volume_id)";
+    my @param = $self->single_parm('VolumeId',\%args);
+    return $self->call('EnableVolumeIO',@param);
+}
+
+=head2 @snaps = $ec2->describe_snapshots(@snapshot_ids)
+
+=head2 @snaps = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_args)
+
+Returns a series of VM::EC2::Snapshot objects. All arguments
+are optional:
+
+ -snapshot_id     ID of the snapshot
+
+ -owner           Filter by owner ID
+
+ -restorable_by   Filter by IDs of a user who is allowed to restore
+                   the snapshot
+
+ -filter          Tags and other filters
+
+The -filter argument name can be omitted if there are no other
+arguments you wish to pass.
+
+The full list of applicable filters can be found at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeSnapshots.html
+
+=cut
+
+sub describe_snapshots {
+    my $self = shift;
+    my %args = $self->args('-snapshot_id',@_);
+
+    my @params;
+    push @params,$self->list_parm('SnapshotId',\%args);
+    push @params,$self->list_parm('Owner',\%args);
+    push @params,$self->list_parm('RestorableBy',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeSnapshots',@params);
+}
+
+=head2 @data = $ec2->describe_snapshot_attribute($snapshot_id,$attribute)
+
+This method returns snapshot attributes. The first argument is the
+snapshot ID, and the second is the name of the attribute to
+fetch. Currently Amazon defines two attributes:
+
+ createVolumePermission   -- return a list of user Ids who are
+                             allowed to create volumes from this snapshot.
+ productCodes             -- product codes for this snapshot
+
+The result is a raw hash of attribute values. Please see
+L<VM::EC2::Snapshot> for a more convenient way of accessing and
+modifying snapshot attributes.
+
+=cut
+
+sub describe_snapshot_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_snapshot_attribute(\$instance_id,\$attribute_name)";
+    my ($snapshot_id,$attribute) = @_;
+    my @param  = (SnapshotId=>$snapshot_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeSnapshotAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+=head2 $boolean = $ec2->modify_snapshot_attribute($snapshot_id,-$argument=>$value)
+
+This method changes snapshot attributes. The first argument is the
+snapshot ID, and this is followed by an attribute modification command
+and the value to change it to.
+
+Currently the only attribute that can be changed is the
+createVolumeAttribute. This is done through the following arguments
+
+ -createvol_add_user         -- scalar or arrayref of UserIds to grant create volume permissions to
+ -createvol_add_group        -- scalar or arrayref of Groups to remove create volume permissions from
+                               (only currently valid value is "all")
+ -createvol_remove_user      -- scalar or arrayref of UserIds to remove from create volume permissions
+ -createvol_remove_group     -- scalar or arrayref of Groups to remove from create volume permissions
+
+You can abbreviate these to -add_user, -add_group, -remove_user, -remove_group, etc.
+
+See L<VM::EC2::Snapshot> for more convenient methods for interrogating
+and modifying the create volume permissions.
+
+=cut
+
+sub modify_snapshot_attribute {
+    my $self = shift;
+    my $snapshot_id = shift or croak "Usage: modify_snapshot_attribute(\$snapshotId,%param)";
+    my %args   = @_;
+
+    # shortcuts
+    foreach (qw(add_user remove_user add_group remove_group)) {
+	$args{"-createvol_$_"} ||= $args{"-$_"};
+    }
+
+    my @param  = (SnapshotId=>$snapshot_id);
+    push @param,$self->create_volume_perm_parm('Add','UserId',   $args{-createvol_add_user});
+    push @param,$self->create_volume_perm_parm('Remove','UserId',$args{-createvol_remove_user});
+    push @param,$self->create_volume_perm_parm('Add','Group',    $args{-createvol_add_group});
+    push @param,$self->create_volume_perm_parm('Remove','Group', $args{-createvol_remove_group});
+    return $self->call('ModifySnapshotAttribute',@param);
+}
+
+=head2 $boolean = $ec2->reset_snapshot_attribute($snapshot_id,$attribute)
+
+This method resets an attribute of the given snapshot to its default
+value. The only valid attribute at this time is
+"createVolumePermission."
+
+=cut
+
+sub reset_snapshot_attribute {
+    my $self = shift;
+    @_      == 2 or 
+	croak "Usage: reset_snapshot_attribute(\$snapshotId,\$attribute_name)";
+    my ($snapshot_id,$attribute) = @_;
+    my %valid = map {$_=>1} qw(createVolumePermission);
+    $valid{$attribute} or croak "attribute to reset must be 'createVolumePermission'";
+    return $self->call('ResetSnapshotAttribute',
+		       SnapshotId => $snapshot_id,
+		       Attribute  => $attribute);
+}
+
+
+=head2 $snapshot = $ec2->create_snapshot($volume_id)
+
+=head2 $snapshot = $ec2->create_snapshot(-volume_id=>$vol,-description=>$desc)
+
+Snapshot the EBS volume and store it to S3 storage. To ensure a
+consistent snapshot, the volume should be unmounted prior to
+initiating this operation.
+
+Arguments:
+
+ -volume_id    -- ID of the volume to snapshot (required)
+ -description  -- A description to add to the snapshot (optional)
+
+The return value is a VM::EC2::Snapshot object that can be queried
+through its current_status() interface to follow the progress of the
+snapshot operation.
+
+Another way to accomplish the same thing is through the
+VM::EC2::Volume interface:
+
+  my $volume = $ec2->describe_volumes(-filter=>{'tag:Name'=>'AccountingData'});
+  $s = $volume->create_snapshot("Backed up at ".localtime);
+  while ($s->current_status eq 'pending') {
+     print "Progress: ",$s->progress,"% done\n";
+  }
+  print "Snapshot status: ",$s->current_status,"\n";
+
+=cut
+
+sub create_snapshot {
+    my $self = shift;
+    my %args = $self->args('-volume_id',@_);
+    my @params   = $self->single_parm('VolumeId',\%args);
+    push @params,$self->single_parm('Description',\%args);
+    return $self->call('CreateSnapshot',@params);
+}
+
+=head2 $boolean = $ec2->delete_snapshot($snapshot_id) 
+
+Delete the indicated snapshot and return true if the request was
+successful.
+
+=cut
+
+sub delete_snapshot {
+    my $self = shift;
+    my %args = $self->args('-snapshot_id',@_);
+    my @params   = $self->single_parm('SnapshotId',\%args);
+    return $self->call('DeleteSnapshot',@params);
+}
+
+=head2 $snapshot = $ec2->copy_snapshot(-source_region=>$region,-source_snapshot_id=>$id,-description=>$desc)
+
+Copies an existing snapshot within the same region or from one region to another.
+
+Required arguments:
+ -region       -- The region the existing snapshot to copy resides in
+ -snapshot_id  -- The snapshot ID of the snapshot to copy
+
+Optional arguments:
+ -description  -- A description of the new snapshot
+
+The return value is a VM::EC2::Snapshot object that can be queried
+through its current_status() interface to follow the progress of the
+snapshot operation.
+
+=cut
+
+sub copy_snapshot {
+    my $self = shift;
+    my %args = @_;
+    $args{-description} ||= $args{-desc};
+    $args{-source_region} ||= $args{-region};
+    $args{-source_snapshot_id} ||= $args{-snapshot_id};
+    $args{-source_region} or croak "copy_snapshot(): -source_region argument required";
+    $args{-source_snapshot_id} or croak "copy_snapshot(): -source_snapshot_id argument required";
+    my @params  = $self->single_parm('SourceRegion',\%args);
+    push @params, $self->single_parm('SourceSnapshotId',\%args);
+    push @params, $self->single_parm('Description',\%args);
+    my $snap_id = $self->call('CopySnapshot',@params) or return;
+    return eval {
+            my $snapshot;
+            local $SIG{ALRM} = sub {die "timeout"};
+            alarm(60);
+            until ($snapshot = $self->describe_snapshots($snap_id)) { sleep 1 }
+            alarm(0);
+            $snapshot;
+    };
+}
 
 =head1 SEE ALSO
 

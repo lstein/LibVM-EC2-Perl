@@ -4,7 +4,11 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
-=head1 NAME
+=head1 NAME VM::EC2::REST::eni
+
+=head1 SYNOPSIS
+
+ use VM::EC2 ':vpc';
 
 =head1 METHODS
 

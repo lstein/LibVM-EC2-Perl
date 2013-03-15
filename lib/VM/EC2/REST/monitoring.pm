@@ -4,9 +4,51 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
-=head1 NAME
+=head1 NAME VM::EC2::REST::monitoring
+
+=head1 SYNOPSIS
+
+ use VM::EC2 ':misc';
 
 =head1 METHODS
+
+These methods enable the monitoring/unmonitoring of instances.
+
+=head2 @monitoring_state = $ec2->monitor_instances(@list_of_instanceIds)
+
+=head2 @monitoring_state = $ec2->monitor_instances(-instance_id=>\@instanceIds)
+
+This method enables monitoring for the listed instances and returns a
+list of VM::EC2::Instance::MonitoringState objects. You can
+later use these objects to activate and inactivate monitoring.
+
+=cut
+
+sub monitor_instances {
+    my $self = shift;
+    my %args = $self->args('-instance_id',@_);
+    my @params = $self->list_parm('InstanceId',\%args);
+    return $self->call('MonitorInstances',@params);
+}
+VM::EC2::Dispatch->register(MonitorInstances     => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState');
+
+=head2 @monitoring_state = $ec2->unmonitor_instances(@list_of_instanceIds)
+
+=head2 @monitoring_state = $ec2->unmonitor_instances(-instance_id=>\@instanceIds)
+
+This method disables monitoring for the listed instances and returns a
+list of VM::EC2::Instance::MonitoringState objects. You can
+later use these objects to activate and inactivate monitoring.
+
+=cut
+
+sub unmonitor_instances {
+    my $self = shift;
+    my %args = $self->args('-instance_id',@_);
+    my @params = $self->list_parm('InstanceId',\%args);
+    return $self->call('UnmonitorInstances',@params);
+}
+VM::EC2::Dispatch->register(UnmonitorInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState');
 
 =head1 SEE ALSO
 

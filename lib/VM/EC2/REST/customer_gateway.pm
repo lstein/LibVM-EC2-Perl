@@ -6,9 +6,21 @@ package VM::EC2;  # add methods to VM::EC2
 
 =head1 NAME VM::EC2::REST::customer_gateway
 
+=head1 SYNOPSIS
+
+ use VM::EC2 ':vpn';
+
 =head1 METHODS
 
 These methods control customer gateways for AWS VPNs.
+
+Implemented:
+ CreateCustomerGateway
+ DeleteCustomerGateway
+ DescribeCustomerGateways
+
+Unimplemented:
+ (none)
 
 =head2 @gtwys = $ec2->describe_customer_gateways(-customer_gateway_id=>\@ids,
                                                  -filter             =>\%filters)

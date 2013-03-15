@@ -219,6 +219,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
+use VM::EC2 'security_group';
 use VM::EC2::SecurityGroup::IpPermission;
 use Carp 'croak';
 
