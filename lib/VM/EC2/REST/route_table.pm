@@ -4,6 +4,18 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    AssociateRouteTable               => sub { shift->{associationId}    },
+    CreateRoute                       => 'boolean',
+    CreateRouteTable                  => 'fetch_one,routeTable,VM::EC2::VPC::RouteTable',
+    DeleteRoute                       => 'boolean',
+    DeleteRouteTable                  => 'boolean',
+    DescribeRouteTables               => 'fetch_items,routeTableSet,VM::EC2::VPC::RouteTable',
+    DisassociateRouteTable            => 'boolean',
+    ReplaceRoute                      => 'boolean',
+    ReplaceRouteTableAssociation      => sub { shift->{newAssociationId} },
+    );
+
 =head1 NAME VM::EC2::REST::route_table
 
 =head1 SYNOPSIS

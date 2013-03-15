@@ -8,6 +8,8 @@ package VM::EC2;  # add methods to VM::EC2
 
 =head1 METHODS
 
+This is a stub for the DevPay API, which is currently not implemented.
+
 Implemented:
 
 Unimplemented:

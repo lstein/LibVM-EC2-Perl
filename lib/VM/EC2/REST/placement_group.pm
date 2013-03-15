@@ -4,6 +4,12 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    CreatePlacementGroup              => 'boolean',
+    DeletePlacementGroup              => 'boolean',
+    DescribePlacementGroups           => 'fetch_items,placementGroupSet,VM::EC2::PlacementGroup',
+    );
+
 =head1 NAME VM::EC2::REST::placement_group
 
 =head1 SYNOPSIS

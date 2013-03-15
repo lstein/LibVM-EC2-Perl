@@ -4,6 +4,12 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    CreateVpc                         => 'fetch_one,vpc,VM::EC2::VPC',
+    DeleteVpc                         => 'boolean',
+    DescribeVpcs                      => 'fetch_items,vpcSet,VM::EC2::VPC',
+    );
+
 =head1 NAME VM::EC2::REST::vpc
 
 =head1 SYNOPSIS

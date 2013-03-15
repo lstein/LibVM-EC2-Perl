@@ -4,6 +4,38 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    DescribeImages    => 'fetch_items,imagesSet,VM::EC2::Image',
+    CreateImage             => sub { 
+	my ($data,$aws) = @_;
+	my $image_id = $data->{imageId} or return;
+	sleep 2; # wait for the thing to register (but sometimes it is not enough)
+	return eval {
+            local $SIG{ALRM} = sub { die 'timeout' };
+            my $image;
+            alarm(60);
+            until ($image = $aws->describe_images($image_id)) { sleep 1 }
+            alarm(0);
+            $image;
+        }},
+    RegisterImage             => sub { 
+	my ($data,$aws) = @_;
+	my $image_id = $data->{imageId} or return;
+	sleep 2; # wait for the thing to register (but sometimes it is not enough)
+	return eval {
+            local $SIG{ALRM} = sub { die 'timeout' };
+            my $image;
+            alarm(60);
+            until ($image = $aws->describe_images($image_id)) { sleep 1 }
+            alarm(0);
+            $image;
+        };
+    },
+    DeregisterImage         => 'boolean',
+    ModifyImageAttribute    => 'boolean',
+    ResetImageAttribute     => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::ami
 
 =head1 SYNOPSIS
@@ -67,7 +99,6 @@ sub describe_images {
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeImages',@params);
 }
-VM::EC2::Dispatch->register(DescribeImages    => 'fetch_items,imagesSet,VM::EC2::Image');
 
 =head2 $image = $ec2->create_image(-instance_id=>$id,-name=>$name,%other_args)
 
@@ -103,21 +134,6 @@ sub create_image {
     push @param,$self->block_device_parm($args{-block_device_mapping});
     return $self->call('CreateImage',@param);
 }
-VM::EC2::Dispatch->register(
-    CreateImage             => sub { 
-	my ($data,$aws) = @_;
-	my $image_id = $data->{imageId} or return;
-	sleep 2; # wait for the thing to register (but sometimes it is not enough)
-	return eval {
-            local $SIG{ALRM} = sub { die 'timeout' };
-            my $image;
-            alarm(60);
-            until ($image = $aws->describe_images($image_id)) { sleep 1 }
-            alarm(0);
-            $image;
-        };
-    }
-    );
 
 =head2 $image = $ec2->register_image(-name=>$name,%other_args)
 
@@ -179,21 +195,6 @@ sub register_image {
 
     return $self->call('RegisterImage',@param);
 }
-VM::EC2::Dispatch->register(
-    RegisterImage             => sub { 
-	my ($data,$aws) = @_;
-	my $image_id = $data->{imageId} or return;
-	sleep 2; # wait for the thing to register (but sometimes it is not enough)
-	return eval {
-            local $SIG{ALRM} = sub { die 'timeout' };
-            my $image;
-            alarm(60);
-            until ($image = $aws->describe_images($image_id)) { sleep 1 }
-            alarm(0);
-            $image;
-        };
-    },
-    );
 
 =head2 $result = $ec2->deregister_image($image_id)
 
@@ -207,7 +208,6 @@ sub deregister_image {
     my @param = $self->single_parm(ImageId=>\%args);
     return $self->call('DeregisterImage',@param);
 }
-VM::EC2::Dispatch->register(DeregisterImage      => 'boolean');
 
 =head2 @data = $ec2->describe_image_attribute($image_id,$attribute)
 
@@ -303,7 +303,6 @@ sub modify_image_attribute {
     push @param,$self->launch_perm_parm('Remove','Group', $args{-launch_remove_group});
     return $self->call('ModifyImageAttribute',@param);
 }
-VM::EC2::Dispatch->register(ModifyImageAttribute    => 'boolean');
 
 =head2 $boolean = $ec2->reset_image_attribute($image_id,$attribute_name)
 
@@ -326,7 +325,6 @@ sub reset_image_attribute {
 		       ImageId    => $image_id,
 		       Attribute  => $attribute);
 }
-VM::EC2::Dispatch->register(ResetImageAttribute     => 'boolean');
 
 =head1 SEE ALSO
 

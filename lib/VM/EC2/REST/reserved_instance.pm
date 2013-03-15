@@ -4,6 +4,15 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    DescribeReservedInstances          => 'fetch_items,reservedInstancesSet,VM::EC2::ReservedInstance',
+    DescribeReservedInstancesOfferings  => 'fetch_items,reservedInstancesOfferingsSet,VM::EC2::ReservedInstance::Offering',
+    PurchaseReservedInstancesOffering  => sub { my ($data,$ec2) = @_;
+						my $ri_id = $data->{reservedInstancesId} or return;
+						return $ec2->describe_reserved_instances($ri_id);
+    },
+    );
+
 =head1 NAME VM::EC2::REST::reserved_instance
 
 =head1 SYNOPSIS
@@ -15,15 +24,14 @@ package VM::EC2;  # add methods to VM::EC2
 These methods apply to describing, purchasing and using Reserved Instances.
 
 Implemented:
- CancelReservedInstancesListing
- CreateReservedInstancesListing
  DescribeReservedInstances
- DescribeReservedInstancesListings
  DescribeReservedInstancesOfferings
  PurchaseReservedInstancesOffering
 
 Unimplemented:
- (none)
+ CancelReservedInstancesListing
+ CreateReservedInstancesListing
+ DescribeReservedInstancesListings
 
 =head2 @offerings = $ec2->describe_reserved_instances_offerings(@offering_ids)
 

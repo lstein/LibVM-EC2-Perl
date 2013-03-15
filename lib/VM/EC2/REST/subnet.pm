@@ -4,6 +4,12 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    CreateSubnet                      => 'fetch_one,subnet,VM::EC2::VPC::Subnet',
+    DeleteSubnet                      => 'boolean',
+    DescribeSubnets                   => 'fetch_items,subnetSet,VM::EC2::VPC::Subnet',
+);
+
 =head1 NAME VM::EC2::REST::subnet
 
 =head1 SYNOPSIS

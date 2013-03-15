@@ -4,6 +4,14 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    CreateVpnConnection               => 'fetch_one,vpnConnection,VM::EC2::VPC::VpnConnection',
+    CreateVpnConnectionRoute          => 'boolean',
+    DeleteVpnConnection               => 'boolean',
+    DeleteVpnConnectionRoute          => 'boolean',
+    DescribeVpnConnections            => 'fetch_items,vpnConnectionSet,VM::EC2::VPC::VpnConnection',
+    );
+
 =head1 NAME VM::EC2::REST::vpn
 
 =head1 SYNOPSIS
@@ -17,7 +25,9 @@ Network (VPN) to Amazon Virtual Private Clouds (VPC).
 
 Implemented:
  CreateVpnConnection
+ CreateVpnConnectionRoute
  DeleteVpnConnection
+ DeleteVpnConnectionRoute
  DescribeVpnConnections
 
 Unimplemented:
@@ -134,6 +144,68 @@ sub delete_vpn_connection {
         croak "delete_vpn_connection(): -vpn_connection_id argument missing";
     my @params = $self->single_parm('VpnConnectionId',\%args);
     return $self->call('DeleteVpnConnection',@params);
+}
+
+=head2 $success = $ec2->create_vpn_connection_route(-destination_cidr_block=>$cidr,
+                                                    -vpn_connection_id     =>$id)
+
+Creates a new static route associated with a VPN connection between an existing
+virtual private gateway and a VPN customer gateway. The static route allows
+traffic to be routed from the virtual private gateway to the VPN customer
+gateway.
+
+Arguments:
+
+ -destination_cidr_block     -- The CIDR block associated with the local subnet
+                                 of the customer data center.
+
+ -vpn_connection_id           -- The ID of the VPN connection.
+
+Returns true on successsful creation.
+
+=cut
+
+sub create_vpn_connection_route {
+    my $self = shift;
+    my %args = @_;
+    $args{-destination_cidr_block} or
+        croak "create_vpn_connection_route(): -destination_cidr_block argument missing";
+    $args{-vpn_connection_id} or
+        croak "create_vpn_connection_route(): -vpn_connection_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(DestinationCidrBlock VpnConnectionId);
+    return $self->call('CreateVpnConnectionRoute',@params);
+}
+
+=head2 $success = $ec2->delete_vpn_connection_route(-destination_cidr_block=>$cidr,
+                                                    -vpn_connection_id     =>$id)
+
+Deletes a static route associated with a VPN connection between an existing
+virtual private gateway and a VPN customer gateway. The static route allows
+traffic to be routed from the virtual private gateway to the VPN customer
+gateway.
+
+Arguments:
+
+ -destination_cidr_block     -- The CIDR block associated with the local subnet
+                                 of the customer data center.
+
+ -vpn_connection_id           -- The ID of the VPN connection.
+
+Returns true on successsful deletion.
+
+=cut
+
+sub delete_vpn_connection_route {
+    my $self = shift;
+    my %args = @_;
+    $args{-destination_cidr_block} or
+        croak "delete_vpn_connection_route(): -destination_cidr_block argument missing";
+    $args{-vpn_connection_id} or
+        croak "delete_vpn_connection_route(): -vpn_connection_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(DestinationCidrBlock VpnConnectionId);
+    return $self->call('DeleteVpnConnectionRoute',@params);
 }
 
 =head1 SEE ALSO

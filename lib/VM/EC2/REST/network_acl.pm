@@ -4,6 +4,16 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    CreateNetworkAcl                  => 'fetch_one,networkAcl,VM::EC2::VPC::NetworkAcl',
+    CreateNetworkAclEntry             => 'boolean',
+    DeleteNetworkAcl                  => 'boolean',
+    DeleteNetworkAclEntry             => 'boolean',
+    DescribeNetworkAcls               => 'fetch_items,networkAclSet,VM::EC2::VPC::NetworkAcl',
+    ReplaceNetworkAclAssociation      => sub { shift->{newAssociationId} },
+    ReplaceNetworkAclEntry            => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::network_acl
 
 =head1 SYNOPSIS

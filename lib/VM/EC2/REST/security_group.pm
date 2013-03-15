@@ -4,6 +4,16 @@ use strict;
 use VM::EC2 '';   # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    DescribeSecurityGroups   => 'fetch_items,securityGroupInfo,VM::EC2::SecurityGroup',
+    CreateSecurityGroup      => 'VM::EC2::SecurityGroup',
+    DeleteSecurityGroup      => 'boolean',
+    AuthorizeSecurityGroupIngress  => 'boolean',
+    AuthorizeSecurityGroupEgress   => 'boolean',
+    RevokeSecurityGroupIngress  => 'boolean',
+    RevokeSecurityGroupEgress   => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::security_group
 
 =head1 SYNOPSIS

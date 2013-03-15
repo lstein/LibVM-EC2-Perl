@@ -4,6 +4,13 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    DescribeDhcpOptions               => 'fetch_items,dhcpOptionsSet,VM::EC2::VPC::DhcpOptions,nokey',
+    CreateDhcpOptions                 => 'fetch_one,dhcpOptions,VM::EC2::VPC::DhcpOptions,nokey',
+    DeleteDhcpOptions                 => 'boolean',
+    AssociateDhcpOptions              => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::dhcp
 
 =head1 SYNOPSIS

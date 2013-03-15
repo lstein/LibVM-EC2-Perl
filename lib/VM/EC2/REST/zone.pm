@@ -4,6 +4,11 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    DescribeRegions   => 'fetch_items,regionInfo,VM::EC2::Region',
+    DescribeAvailabilityZones  => 'fetch_items,availabilityZoneInfo,VM::EC2::AvailabilityZone',
+);
+
 =head1 NAME VM::EC2::REST::zone
 
 =head1 SYNOPSIS
@@ -41,7 +46,6 @@ sub describe_regions {
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeRegions',@params);
 }
-VM::EC2::Dispatch->register(DescribeRegions   => 'fetch_items,regionInfo,VM::EC2::Region');
 
 =head2 @zones = $ec2->describe_availability_zones(@names)
 
@@ -74,7 +78,6 @@ sub describe_availability_zones {
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeAvailabilityZones',@params);
 }
-VM::EC2::Dispatch->register(DescribeAvailabilityZones  => 'fetch_items,availabilityZoneInfo,VM::EC2::AvailabilityZone');
 
 =head1 SEE ALSO
 

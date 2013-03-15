@@ -13,9 +13,9 @@ VM::EC2::Dispatch - Create Perl objects from AWS XML requests
 
   use VM::EC2;
 
-  VM::EC2::Dispatch->add_override('DescribeRegions'=>\&mysub);
+  VM::EC2::Dispatch->register('DescribeRegions'=>\&mysub);
 
-  VM::EC2::Dispatch->add_override('DescribeTags'=>'My::Type');
+  VM::EC2::Dispatch->replace('DescribeRegions'=>'My::Type');
   
   sub mysub {
       my ($parsed_xml_object,$ec2) = @_;
@@ -27,17 +27,17 @@ VM::EC2::Dispatch - Create Perl objects from AWS XML requests
 
 This class handles turning the XML response to AWS requests into perl
 objects. Only one method is likely to be useful to developers, the
-add_override() class method. This allows you to replace the handlers
+replace() class method. This allows you to replace the handlers
 used to map the response onto objects.
 
-=head2 VM::EC2::Dispatch->add_override($request_name => \&sub)
+=head2 VM::EC2::Dispatch->replace($request_name => \&sub)
 
-=head2 VM::EC2::Dispatch->add_override($request_name => 'Class::Name')
+=head2 VM::EC2::Dispatch->replace($request_name => 'Class::Name')
 
-=head2 VM::EC2::Dispatch->add_override($request_name => 'method_name,arg1,arg2,...')
+=head2 VM::EC2::Dispatch->replace($request_name => 'method_name,arg1,arg2,...')
 
 Before invoking a VM::EC2 request you wish to customize, call the
-add_override() method with two arguments. The first argument is the
+replace() method with two arguments. The first argument is the
 name of the request you wish to customize, such as
 "DescribeVolumes". The second argument is either a code reference, a
 VM::EC2::Dispatch method name and arguments (separated by commas), or
@@ -95,6 +95,15 @@ has been parsed. Look at the calls to VM::EC2::Dispatch->register() in
 the various VM/EC2/REST/*.pm modules for many examples of how this
 works.
 
+Note that the replace() method was called add_override() in previous
+versions of this module. add_override() is recognized as an alias for
+backward compatibility.
+
+=head2 VM::EC2::Dispatch->register($request_name1 => \&sub1,$request_name2 => \&sub2,...)
+
+Similar to replace() but if the request name is already registered
+does not overwrite it. You may provide multiple request=>handler pairs.
+
 =head1 OBJECT CREATION METHODS
 
 The following methods perform simple pre-processing of the parsed XML
@@ -107,6 +116,7 @@ VM::EC2::Dispatch->register().
 
 my $REGISTRATION = {};
 VM::EC2::Dispatch->register(Error => 'VM::EC2::Error');
+*add_override    = \&replace; # backward compatibility
 
 # Not clear that you ever need to instantiate this object as it has
 # no instance data.
@@ -118,14 +128,16 @@ sub new {
 
 sub replace {
     my $self = shift;
-    my ($request_name,$object_creator) = @_;
-    $REGISTRATION->{$request_name} = $object_creator;
+    while (my ($request_name,$object_creator) = splice(@_,0,2)) {
+	$REGISTRATION->{$request_name} = $object_creator;
+    }
 }
 
 sub register {
     my $self = shift;
-    my ($request_name,$object_creator) = @_;
-    $REGISTRATION->{$request_name} ||= $object_creator;
+    while (my ($request_name,$object_creator) = splice(@_,0,2)) {
+	$REGISTRATION->{$request_name} ||= $object_creator;
+    }
 }
 
 sub response2objects {
@@ -193,13 +205,13 @@ This is used for XML responses like this:
 It looks inside the structure for the tag named $tag ("return" if not
 provided), and returns a true value if the contents equals "true".
 
-Pass it to add_override() like this:
+Pass it to replace() like this:
 
-  VM::EC2::Dispatch->add_override(DeleteVolume => 'boolean,return';
+  VM::EC2::Dispatch->replace(DeleteVolume => 'boolean,return';
 
 or, since "return" is the default tag:
 
-  VM::EC2::Dispatch->add_override(DeleteVolume => 'boolean';
+  VM::EC2::Dispatch->replace(DeleteVolume => 'boolean';
 
 =cut
 
@@ -318,9 +330,9 @@ contents to $object_class->new(). The optional $nokey argument is used
 to suppress XML::Simple's default flattening behavior turning tags
 named "key" into hash keys.
 
-Pass it to add_override() like this:
+Pass it to replace() like this:
 
-  VM::EC2::Dispatch->add_override(DescribeVolumes => 'fetch_items,volumeSet,VM::EC2::Volume')
+  VM::EC2::Dispatch->replace(DescribeVolumes => 'fetch_items,volumeSet,VM::EC2::Volume')
 
 =cut
 
@@ -438,8 +450,8 @@ Now subclass VM::EC2 to add the appropriate overrides to the new() method:
 
  sub new {
    my $class = shift;
-   VM::EC2::Dispatch->add_override(CreateVolume   =>'MyVolume');
-   VM::EC2::Dispatch->add_override(DescribeVolumes=>'fetch_items,volumeSet,MyVolume');
+   VM::EC2::Dispatch->replace(CreateVolume   =>'MyVolume');
+   VM::EC2::Dispatch->replace(DescribeVolumes=>'fetch_items,volumeSet,MyVolume');
    return $class->SUPER::new(@_);
  }
 

@@ -4,6 +4,17 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    DescribeAddresses => 'fetch_items,addressesSet,VM::EC2::ElasticAddress',
+    AssociateAddress  => sub {
+	my $data = shift;
+	return $data->{associationId} || ($data->{return} eq 'true');
+    },
+    DisassociateAddress => 'boolean',
+    AllocateAddress   => 'VM::EC2::ElasticAddress',
+    ReleaseAddress    => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::elastic_ip
 
 =head1 SYNOPSIS

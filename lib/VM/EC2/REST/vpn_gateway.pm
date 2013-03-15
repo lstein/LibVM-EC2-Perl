@@ -4,6 +4,16 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    AttachVpnGateway                  => sub { shift->{attachment}{state} },
+    CreateVpnGateway                  => 'fetch_one,vpnGateway,VM::EC2::VPC::VpnGateway',
+    DeleteVpnGateway                  => 'boolean',
+    DescribeVpnGateways               => 'fetch_items,vpnGatewaySet,VM::EC2::VPC::VpnGateway',
+    DetachVpnGateway                  => 'boolean',
+    DisableVgwRoutePropagation        => 'boolean',
+    EnableVgwRoutePropagation         => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::vpn_gateway
 
 =head1 SYNOPSIS
@@ -12,13 +22,15 @@ package VM::EC2;  # add methods to VM::EC2
 
 =head1 METHODS
 
-These methods create and manage Virtual Private Network (VPN) Gateways.
+These methods create and manage Virtual Private Network Gateways (VGW).
 
 Implemented:
  AttachVpnGateway
  CreateVpnGateway
  DeleteVpnGateway
  DescribeVpnGateways
+ DisableVgwRoutePropagation
+ EnableVgwRoutePropagation
 
 Unimplemented:
  (none)
@@ -177,6 +189,66 @@ sub detach_vpn_gateway {
     push @params, $self->single_parm('VpcId',\%args);
     return $self->call('DetachVpnGateway',@params);
 }
+
+=head2 $success = $ec2->enable_vgw_route_propagation(-route_table_id=>$rt_id,
+                                                     -gateway_id    =>$gtwy_id)
+
+Enables a virtual private gateway (VGW) to propagate routes to the routing
+tables of an Amazon VPC.
+
+Arguments:
+
+ -route_table_id        -- The ID of the routing table.
+
+ -gateway_id            -- The ID of the virtual private gateway.
+
+Returns true on successful enablement.
+
+=cut
+
+sub enable_vgw_route_propagation {
+    my $self = shift;
+    my %args = @_;
+    $args{-route_table_id} or
+        croak "enable_vgw_route_propagation(): -route_table_id argument missing";
+    $args{-gateway_id} or
+        croak "enable_vgw_route_propagation(): -gateway_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(RouteTableId GatewayId);
+    return $self->call('EnableVgwRoutePropagation',@params);
+}
+
+=head2 $success = $ec2->disable_vgw_route_propagation(-route_table_id=>$rt_id,
+                                                      -gateway_id    =>$gtwy_id)
+
+Disables a virtual private gateway (VGW) from propagating routes to the routing
+tables of an Amazon VPC.
+
+Arguments:
+
+ -route_table_id        -- The ID of the routing table.
+
+ -gateway_id            -- The ID of the virtual private gateway.
+
+Returns true on successful disablement.
+
+=cut
+
+sub disable_vgw_route_propagation {
+    my $self = shift;
+    my %args = @_;
+    $args{-route_table_id} or
+        croak "disable_vgw_route_propagation(): -route_table_id argument missing";
+    $args{-gateway_id} or
+        croak "disable_vgw_route_propagation(): -gateway_id argument missing";
+    my @params = $self->single_parm($_,\%args)
+        foreach qw(RouteTableId GatewayId);
+    return $self->call('DisableVgwRoutePropagation',@params);
+}
+
+# aliases for backward compatibility to a typo
+*enable_vgw_route_propogation = \&enable_vgw_route_propagation;
+*disable_vgw_route_propogation =\&dispable_vgw_route_propagation;
 
 =head1 SEE ALSO
 

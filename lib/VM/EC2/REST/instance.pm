@@ -1,8 +1,23 @@
 package VM::EC2::REST::instance;
 
 use VM::EC2 '';  # important not to import anything!
-
 package VM::EC2;  # add methods to VM::EC2
+
+VM::EC2::Dispatch->register(
+    RunInstances      => sub { VM::EC2::Dispatch::load_module('VM::EC2::Instance::Set');
+						       my $s = VM::EC2::Instance::Set->new(@_) or return;
+						       return $s->instances;
+			    },
+    StartInstances       => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
+    StopInstances        => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
+    TerminateInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
+    RebootInstances      => 'boolean',
+    ConfirmProductInstance      => 'boolean',
+    ConfirmProductInstance => 'boolean',
+    ModifyInstanceAttribute => 'boolean',
+    ResetInstanceAttribute => 'boolean',
+    DescribeInstanceStatus => 'fetch_items_iterator,instanceStatusSet,VM::EC2::Instance::StatusItem,instance_status',
+    );
 
 =head1 NAME
 
@@ -402,12 +417,6 @@ sub run_instances {
     return $self->call('RunInstances',@p);
 }
 
-VM::EC2::Dispatch->register(RunInstances      => sub { VM::EC2::Dispatch::load_module('VM::EC2::Instance::Set');
-						       my $s = VM::EC2::Instance::Set->new(@_) or return;
-						       return $s->instances;
-			    });
-
-
 =head2 @s = $ec2->start_instances(@instance_ids)
 
 =head2 @s = $ec2->start_instances(-instance_id=>\@instance_ids)
@@ -453,7 +462,6 @@ sub start_instances {
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
     return $self->call('StartInstances',@params);
 }
-VM::EC2::Dispatch->register(StartInstances       => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change');
 
 =head2 @s = $ec2->stop_instances(@instance_ids)
 
@@ -504,7 +512,6 @@ sub stop_instances {
     push @params,Force=>1 if $force;
     return $self->call('StopInstances',@params);
 }
-VM::EC2::Dispatch->register(StopInstances        => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change');
 
 =head2 @s = $ec2->terminate_instances(@instance_ids)
 
@@ -539,7 +546,6 @@ sub terminate_instances {
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
     return $self->call('TerminateInstances',@params);
 }
-VM::EC2::Dispatch->register(TerminateInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change');
 
 =head2 @s = $ec2->reboot_instances(@instance_ids)
 
@@ -565,7 +571,6 @@ sub reboot_instances {
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
     return $self->call('RebootInstances',@params);
 }
-VM::EC2::Dispatch->register(RebootInstances      => 'boolean');
 
 =head2 $boolean = $ec2->confirm_product_instance($instance_id,$product_code)
 
@@ -582,7 +587,6 @@ sub confirm_product_instance {
 		  ProductCode=>$product_code);
     return $self->call('ConfirmProductInstance',@params);
 }
-VM::EC2::Dispatch->register(ConfirmProductInstance      => 'boolean');
 
 =head2 $password_data = $ec2->get_password_data($instance_id);
 
@@ -600,7 +604,6 @@ sub get_password_data {
     my @params = $self->single_parm('InstanceId',\%args);
     return $self->call('GetPasswordData',@params);
 }
-VM::EC2::Dispatch->register(ConfirmProductInstance => 'boolean',);
 
 =head2 $meta = VM::EC2->instance_metadata
 
@@ -657,7 +660,6 @@ sub describe_instance_attribute {
     my $result = $self->call('DescribeInstanceAttribute',@param);
     return $result && $result->attribute($attribute);
 }
-# no special dispatch needed - we go to generic object
 
 =head2 $boolean = $ec2->modify_instance_attribute($instance_id,-$attribute_name=>$value)
 
@@ -719,7 +721,6 @@ sub modify_instance_attribute {
 
     return $self->call('ModifyInstanceAttribute',@param);
 }
-VM::EC2::Dispatch->register(ModifyInstanceAttribute => 'boolean');
 
 =head2 $boolean = $ec2->reset_instance_attribute($instance_id,$attribute)
 
@@ -738,7 +739,6 @@ sub reset_instance_attribute {
     $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
     return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
 }
-VM::EC2::Dispatch->register(ResetInstanceAttribute => 'boolean');
 
 =head2 @status_list = $ec2->describe_instance_status(@instance_ids);
 
@@ -821,7 +821,6 @@ sub describe_instance_status {
     }
     return $self->call('DescribeInstanceStatus',@parms);
 }
-VM::EC2::Dispatch->register(DescribeInstanceStatus => 'fetch_items_iterator,instanceStatusSet,VM::EC2::Instance::StatusItem,instance_status');
 
 =head2 $t = $ec2->token
 

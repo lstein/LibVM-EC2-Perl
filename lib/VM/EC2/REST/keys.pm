@@ -4,6 +4,13 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    DescribeKeyPairs     => 'fetch_items,keySet,VM::EC2::KeyPair',
+    CreateKeyPair        => 'VM::EC2::KeyPair',
+    ImportKeyPair        => 'VM::EC2::KeyPair',
+    DeleteKeyPair        => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::keys
 
 =head1 SYNOPSIS

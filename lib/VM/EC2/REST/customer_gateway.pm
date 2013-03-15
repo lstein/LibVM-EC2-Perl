@@ -4,11 +4,17 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    DescribeCustomerGateways          => 'fetch_items,customerGatewaySet,VM::EC2::VPC::CustomerGateway',
+    CreateCustomerGateway             => 'fetch_one,customerGateway,VM::EC2::VPC::CustomerGateway',
+    DeleteCustomerGateway             => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::customer_gateway
 
 =head1 SYNOPSIS
 
- use VM::EC2 ':vpn';
+ use VM::EC2 ':vpc';
 
 =head1 METHODS
 

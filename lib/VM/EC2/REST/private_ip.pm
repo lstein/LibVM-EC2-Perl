@@ -4,6 +4,11 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    AssignPrivateIpAddresses          => 'boolean',
+    UnassignPrivateIpAddresses        => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::private_ip
 
 =head1 SYNOPSIS

@@ -4,6 +4,14 @@ use strict;
 use VM::EC2 '';   # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    CreateInternetGateway             => 'fetch_one,internetGateway,VM::EC2::VPC::InternetGateway',
+    DescribeInternetGateways          => 'fetch_items,internetGatewaySet,VM::EC2::VPC::InternetGateway',
+    DeleteInternetGateway             => 'boolean',
+    AttachInternetGateway             => 'boolean',
+    DetachInternetGateway             => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::internet_gateway
 
 =head1 SYNOPSIS

@@ -4,6 +4,27 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    AttachVolume      => 'VM::EC2::BlockDevice::Attachment',
+    CopySnapshot      => sub { shift->{snapshotId} },
+    CreateSnapshot    => 'VM::EC2::Snapshot',
+    CreateVolume      => 'VM::EC2::Volume',
+    DeleteSnapshot    => 'boolean',
+    DeleteVolume      => 'boolean',
+    DescribeAvailabilityZones  => 'fetch_items,availabilityZoneInfo,VM::EC2::AvailabilityZone',
+    DescribeImages    => 'fetch_items,imagesSet,VM::EC2::Image',
+    DescribeInstanceStatus => 'fetch_items_iterator,instanceStatusSet,VM::EC2::Instance::StatusItem,instance_status',
+    DescribeRegions   => 'fetch_items,regionInfo,VM::EC2::Region',
+    DescribeSecurityGroups   => 'fetch_items,securityGroupInfo,VM::EC2::SecurityGroup',
+    DescribeSnapshots => 'fetch_items,snapshotSet,VM::EC2::Snapshot',
+    DescribeVolumeStatus => 'fetch_items_iterator,volumeStatusSet,VM::EC2::Volume::StatusItem,volume_status',
+    DescribeVolumes   => 'fetch_items,volumeSet,VM::EC2::Volume',
+    DetachVolume      => 'VM::EC2::BlockDevice::Attachment',
+    EnableVolumeIO    => 'boolean',
+    ModifySnapshotAttribute => 'boolean',
+    ResetSnapshotAttribute  => 'boolean',
+    );
+
 =head1 NAME VM::EC2::REST::ebs
 
 =head1 SYNOPSIS
@@ -30,7 +51,6 @@ Implemented:
  DescribeVolumeStatus
  DetachVolume
  EnableVolumeIO
- ImportVolume
  ModifySnapshotAttribute
  ModifyVolumeAttribute
  ResetSnapshotAttribute

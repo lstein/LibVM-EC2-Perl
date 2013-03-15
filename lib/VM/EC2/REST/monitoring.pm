@@ -4,6 +4,11 @@ use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(
+    MonitorInstances     => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
+    UnmonitorInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
+    );
+
 =head1 NAME VM::EC2::REST::monitoring
 
 =head1 SYNOPSIS
@@ -30,7 +35,6 @@ sub monitor_instances {
     my @params = $self->list_parm('InstanceId',\%args);
     return $self->call('MonitorInstances',@params);
 }
-VM::EC2::Dispatch->register(MonitorInstances     => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState');
 
 =head2 @monitoring_state = $ec2->unmonitor_instances(@list_of_instanceIds)
 
@@ -48,7 +52,6 @@ sub unmonitor_instances {
     my @params = $self->list_parm('InstanceId',\%args);
     return $self->call('UnmonitorInstances',@params);
 }
-VM::EC2::Dispatch->register(UnmonitorInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState');
 
 =head1 SEE ALSO
 
