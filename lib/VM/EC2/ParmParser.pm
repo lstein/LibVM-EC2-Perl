@@ -34,9 +34,9 @@ sub format_parms {
 
 	croak "Invalid parameter formatting method '$parser'" unless $self->can($parser);
 	my @argkeys = ref $spec->{$format} eq 'ARRAY' ? @{$spec->{$format}} : $spec->{$format};
-	my @p       = map {my $exists =  exists   $args->{$_} || exists $args->{VM::EC2->canonicalize($_)};
-			   my $val    = $exists ? $args->{$_} ||        $args->{VM::EC2->canonicalize($_)} : undef;
-			   $exists ? $self->$parser($_,$val) : ()
+	my @p       = map {
+	    my $canonical = VM::EC2->canonicalize($_);
+	    exists $args->{$canonical} ? $self->$parser($_,$args->{$canonical}) : ()
 	                  } @argkeys;
 	if ($prefix) {
 	    for (my $i=0;$i<@p;$i+=2) { $p[$i] = "$prefix.$p[$i]" }
@@ -50,9 +50,16 @@ sub args {
     my $self = shift;
     my $default_param_name = shift;
     return unless @_;
-    return @_ if $_[0] =~ /^-/;
-    return (-filter=>shift) if @_==1 && ref $_[0] && ref $_[0] eq 'HASH';
-    return ($default_param_name => \@_);
+    my @args = @_;
+
+    for (my $i=0;$i<@_;$i++) {
+	$args[$i] = VM::EC2->canonicalize($args[$i]) if $args[$i] =~/^[A-Z]/;
+    }
+
+    return @args if $args[0] =~ /^-/;
+    return (-filter=>shift) if @args==1 && ref $args[0] && ref $args[0] eq 'HASH';
+    return ($default_param_name => \@args) if $default_param_name;
+    return @_;
 }
 
 sub filter_parm {

@@ -395,7 +395,7 @@ reservationId(), ownerId(), requesterId() and groups() methods.
 
 sub run_instances {
     my $self = shift;
-    my %args = $self->args('-image_id',@_);
+    my %args = VM::EC2::ParmParser->args('-image_id',@_);
     $args{-image_id}  or croak "run_instances(): -image_id argument missing";
     $args{-min_count} ||= 1;
     $args{-max_count} ||= $args{-min_count};
