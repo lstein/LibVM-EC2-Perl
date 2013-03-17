@@ -96,9 +96,12 @@ retrieved from each instance by calling its reservationId() method.
 
 sub describe_instances {
     my $self = shift;
-    my %args = $self->args('-instance_id',@_);
-    my @params = $self->list_parm('InstanceId',\%args);
-    push @params,$self->filter_parm(\%args);
+    my %args = VM::EC2::ParmParser->args(-instance_id,@_);
+    my ($async,@params) = VM::EC2::ParmParser->format_parms(\%args,
+							    {
+								list_parm   => 'InstanceId',
+								filter_parm => 'Filter'
+							    });
     return $self->call('DescribeInstances',@params);
 }
 

@@ -137,6 +137,26 @@ sub delete_tags {
     return $self->call('DeleteTags',@params);    
 }
 
+=head2 @arguments = $ec2->tagcreate_parm(\%args)
+
+=cut
+
+sub tagcreate_parm {
+    my $self = shift;
+    my $args = shift;
+    return $self->key_value_parameters('Tag','Key','Value',$args);
+}
+
+=head2 @arguments = $ec2->tagdelete_parm(\%args)
+
+=cut
+
+sub tagdelete_parm {
+    my $self = shift;
+    my $args = shift;
+    return $self->key_value_parameters('Tag','Key','Value',$args,1);
+}
+
 =head1 SEE ALSO
 
 L<VM::EC2>

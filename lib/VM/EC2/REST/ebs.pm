@@ -25,7 +25,9 @@ VM::EC2::Dispatch->register(
     ResetSnapshotAttribute  => 'boolean',
     );
 
-=head1 NAME VM::EC2::REST::ebs
+=head1 NAME
+
+VM::EC2::REST::ebs - Modules for EC2 EBS volumes
 
 =head1 SYNOPSIS
 

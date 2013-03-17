@@ -414,8 +414,12 @@ methods relevant to error handling.
 use strict;
 
 use VM::EC2::Dispatch;
+use VM::EC2::ParmParser;
+
+# replace with HTTP::AnyEvent
 use LWP::UserAgent;
 use HTTP::Request::Common;
+
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Digest::SHA qw(hmac_sha256 sha1_hex);
 use POSIX 'strftime';
@@ -1119,26 +1123,6 @@ sub filter_parm {
     my $self = shift;
     my $args = shift;
     return $self->key_value_parameters('Filter','Name','Value',$args);
-}
-
-=head2 @arguments = $ec2->tagcreate_parm(\%args)
-
-=cut
-
-sub tagcreate_parm {
-    my $self = shift;
-    my $args = shift;
-    return $self->key_value_parameters('Tag','Key','Value',$args);
-}
-
-=head2 @arguments = $ec2->tagdelete_parm(\%args)
-
-=cut
-
-sub tagdelete_parm {
-    my $self = shift;
-    my $args = shift;
-    return $self->key_value_parameters('Tag','Key','Value',$args,1);
 }
 
 =head2 @arguments = $ec2->key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
