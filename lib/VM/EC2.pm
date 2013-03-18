@@ -331,10 +331,13 @@ following caveats apply:
 The extensive (and growing) Amazon API has many calls that you may
 never need. To avoid the performance overhead of loading the
 interfaces to all these calls, you may use Perl's import mechanism to
-load only those you care about. By default, all methods are loaded.
+load only those modules you care about. By default, all methods are
+loaded.
 
 Loading is controlled by the "use" import list, and follows the
 conventions described in the Exporter module:
+
+ use VM::EC2;                     # load all methods!
 
  use VM::EC2 'key','elastic_ip';  # load Key Pair and Elastic IP
 				  # methods only
@@ -350,9 +353,6 @@ can read their documentation by running perldoc VM::EC2::REST::"name
 of module":
 
  perldoc VM::EC2::REST::elastic_ip
-
-or using the VM::EC2 documentation script "ec2doc" (still to be
-implemented!).
 
 The groups that you can import are as follows:
  
@@ -373,7 +373,41 @@ The groups that you can import are as follows:
  :all      => :standard, :vpn, :misc
 
  :DEFAULT  => :all
- 
+
+The individual modules are:
+
+ ami               -- Control Amazon Machine Images
+ autoscaling       -- Control autoscaling
+ customer_gateway  -- VPC/VPN gateways
+ devpay            -- DevPay API
+ dhcp              -- VPC DHCP options
+ ebs               -- Elastic Block Store volumes & snapshots
+ elastic_ip        -- Elastic IP addresses
+ elastic_load_balancer -- The Elastic Load Balancer service
+ elastic_network_interface -- VPC Elastic Network Interfaces
+ general           -- Get console output and account attributes
+ instance          -- Control EC2 instances
+ internet_gateway  -- VPC connections to the internet
+ keys              -- Manage SSH keypairs
+ monitoring        -- Control instance monitoring
+ network_acl       -- Control VPC network access control lists
+ placement_group   -- Control the placement of HPC instances
+ private_ip        -- VPC private IP addresses
+ reserved_instance -- Reserve instances and view reservations
+ route_table       -- VPC network routing
+ security_group    -- Security groups for VPCs and normal instances
+ security_token    -- Temporary credentials for use with IAM roles
+ spot_instance     -- Request and manage spot instances
+ subnet            -- VPC subnets
+ tag               -- Create and interrogate resource tags.
+ vm_export         -- Export VMs
+ vm_import         -- Import VMs
+ vpc               -- Create and manipulate virtual private clouds
+ vpn_gateway       -- Create and manipulate VPN gateways within VPCs
+ vpn               -- Create and manipulate VPNs within VPCs
+ windows           -- Windows operating system-specific API calls.
+ zone              -- Interrogate availability zones
+  
 =head1 EXAMPLE SCRIPT
 
 The script sync_to_snapshot.pl, distributed with this module,
@@ -815,113 +849,200 @@ sub clone {
     return bless \%contents,ref $self;
 }
 
-=head1 Waiting for State Changes
+=head1 INSTANCES
 
-The methods in this section allow your script to wait in an efficient
-manner for desired state changes in instances, volumes and other
-objects.
+Load the 'instances' module to bring in methods for interrogating,
+launching and manipulating EC2 instances. This module is part of
+the ':standard' API group. The methods are described in detail in
+L<VM::EC2::REST::instance>. Briefly:
 
-=head2 $ec2->wait_for_instances(@instances)
+ @i = $ec2->describe_instances(-instance_id=>\@ids,-filter=>\%filters)
+ @i = $ec2->run_instances(-image_id=>$id,%other_args)
+ @s = $ec2->start_instances(-instance_id=>\@instance_ids)
+ @s = $ec2->stop_instances(-instance_id=>\@instance_ids,-force=>1)
+ @s = $ec2->reboot_instances(-instance_id=>\@instance_ids)
+ $b = $ec2->confirm_product_instance($instance_id,$product_code)
+ $m = $ec2->instance_metadata
+ @d = $ec2->describe_instance_attribute($instance_id,$attribute)
+ $b = $ec2->modify_instance_attribute($instance_id,-$attribute_name=>$value)
+ $b = $ec2->reset_instance_attribute($instance_id,$attribute)
+ @s = $ec2->describe_instance_status(-instance_id=>\@ids,-filter=>\%filters,%other_args);
 
-Wait for all members of the provided list of instances to reach some
-terminal state ("running", "stopped" or "terminated"), and then return
-a hash reference that maps each instance ID to its final state.
+=head1 VOLUMES
 
-Typical usage:
+Load the 'ebs' module to bring in methods specific for elastic block
+storage volumes and snapshots. This module is part of the ':standard'
+API group. The methods are described in detail in
+L<VM::EC2::REST::ebs>. Briefly:
 
- my @instances = $image->run_instances(-key_name      =>'My_key',
-                                       -security_group=>'default',
-                                       -min_count     =>2,
-                                       -instance_type => 't1.micro')
-           or die $ec2->error_str;
- my $status = $ec2->wait_for_instances(@instances);
- my @failed = grep {$status->{$_} ne 'running'} @instances;
- print "The following failed: @failed\n";
+ @v = $ec2->describe_volumes(-volume_id=>\@ids,-filter=>\%filters)
+ $v = $ec2->create_volume(%args)
+ $b = $ec2->delete_volume($volume_id)
+ $a = $ec2->attach_volume($volume_id,$instance_id,$device)
+ $a = $ec2->detach_volume($volume_id)
+ $ec2->wait_for_attachments(@attachment)
+ @v = $ec2->describe_volume_status(-volume_id=>\@ids,-filter=>\%filters)
+ $ec2->wait_for_volumes(@volumes)
+ @d = $ec2->describe_volume_attribute($volume_id,$attribute)
+ $b = $ec2->enable_volume_io(-volume_id=>$volume_id)
+ @s = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_args)
+ @d = $ec2->describe_snapshot_attribute($snapshot_id,$attribute)
+ $b = $ec2->modify_snapshot_attribute($snapshot_id,-$argument=>$value)
+ $b = $ec2->reset_snapshot_attribute($snapshot_id,$attribute)
+ $s = $ec2->create_snapshot(-volume_id=>$vol,-description=>$desc)
+ $b = $ec2->delete_snapshot($snapshot_id) 
+ $s = $ec2->copy_snapshot(-source_region=>$region,-source_snapshot_id=>$id,-description=>$desc)
+ $ec2->wait_for_snapshots(@snapshots)
 
-If no terminal state is reached within a set timeout, then this method
-returns undef and sets $ec2->error_str() to a suitable message. The
-timeout, which defaults to 10 minutes (600 seconds), can be get or set
-with $ec2->wait_for_timeout().
+=head1 AMAZON MACHINE IMAGES
 
-=cut
+Load the 'ami' module to bring in methods for creating and
+manipulating Amazon Machine Images. This module is part of the
+':standard" group. Full details are in L<VM::EC2::REST::ami>. Briefly:
 
-sub wait_for_instances {
-    my $self = shift;
-    $self->wait_for_terminal_state(\@_,
-				   ['running','stopped','terminated'],
-				   $self->wait_for_timeout);
-}
+ @i = $ec2->describe_images(@image_ids)
+ $i = $ec2->create_image(-instance_id=>$id,-name=>$name,%other_args)
+ $i = $ec2->register_image(-name=>$name,%other_args)
+ $r = $ec2->deregister_image($image_id)
+ @d = $ec2->describe_image_attribute($image_id,$attribute)
+ $b = $ec2->modify_image_attribute($image_id,-$attribute_name=>$value)
+ $b = $ec2->reset_image_attribute($image_id,$attribute_name)
 
-=head2 $ec2->wait_for_snapshots(@snapshots)
+=head1 KEYS
 
-Wait for all members of the provided list of snapshots to reach some
-terminal state ("completed", "error"), and then return a hash
-reference that maps each snapshot ID to its final state.
+Load the 'keys' module to bring in methods for creating and
+manipulating SSH keypairs. This module is loaded with the ':standard'
+group and documented in L<VM::EC2::REST::keys.
 
-This method may potentially wait forever. It has no set timeout. Wrap
-it in an eval{} and set alarm() if you wish to timeout.
+ @k = $ec2->describe_key_pairs(@names);
+ $k = $ec2->create_key_pair($name)
+ $k = $ec2->import_key_pair($name,$public_key) 
+ $b = $ec2->delete_key_pair($name)
 
-=cut
+=head1 TAGS
 
-sub wait_for_snapshots {
-    my $self = shift;
-    $self->wait_for_terminal_state(\@_,
-				   ['completed','error'],
-				   0);  # no timeout on snapshots -- they may take days
-}
+The methods in this module (loaded with ':standard') allow you to
+create, delete and fetch resource tags. You may find that you rarely
+need to use these methods directly because every object produced by
+VM::EC2 supports a simple tag interface:
+ 
+  $object = $ec2->describe_volumes(-volume_id=>'vol-12345'); # e.g.
+  $tags = $object->tags();
+  $name = $tags->{Name};
+  $object->add_tags(Role => 'Web Server', Status=>'development);
+  $object->delete_tags(Name=>undef);
 
-=head2 $ec2->wait_for_volumes(@volumes)
+See L<VM::EC2::Generic> for a full description of the uniform object
+tagging interface, and L<VM::EC2::REST::tag> for methods that allow
+you to manipulate the tags on multiple objects simultaneously. The
+methods defined by this module are:
 
-Wait for all members of the provided list of volumes to reach some
-terminal state ("available", "in-use", "deleted" or "error"), and then
-return a hash reference that maps each volume ID to its final state.
+ @t = $ec2->describe_tags(-filter=>\%filters);
+ $b = $ec2->create_tags(-resource_id=>\@ids,-tag=>{key1=>value1...})
+ $b = $ec2->delete_tags(-resource_id=>$id1,-tag=>{key1=>value1...})
+ 
+=head1 VIRTUAL PRIVATE CLOUDS
 
-If no terminal state is reached within a set timeout, then this method
-returns undef and sets $ec2->error_str() to a suitable message. The
-timeout, which defaults to 10 minutes (600 seconds), can be get or set
-with $ec2->wait_for_timeout().
+EC2 virtual private clouds (VPCs) provide facilities for creating
+tiered applications combining public and private subnetworks, and for
+extending your home/corporate network into the cloud. VPC-related
+methods are defined in the customer_gateway, dhcp,
+elastic_network_interface, private_ip, internet_gateway, network_acl,
+route_table, vpc, vpn, and vpn_gateway modules, and are loaded by
+importing ':vpc'. See L<VM::EC2::REST::vpc> for an introduction.
 
-=cut
+The L<VM::EC2::VPC> and L<VM::EC2::VPC::Subnet> modules define
+convenience methods that simplify working with VPC objects. This
+allows for steps that typically follow each other, such as creating a
+route table and associating it with a subnet, happen
+automatically. For example, this series of calls creates a VPC with a
+single subnet, creates an Internet gateway attached to the VPC,
+associates a new route table with the subnet and then creates a
+default route from the subnet to the Internet gateway:
 
-sub wait_for_volumes {
-    my $self = shift;
-    $self->wait_for_terminal_state(\@_,
-				   ['available','in-use','deleted','error'],
-				   $self->wait_for_timeout);
-}
+ $vpc       = $ec2->create_vpc('10.0.0.0/16')     or die $ec2->error_str;
+ $subnet1   = $vpc->create_subnet('10.0.0.0/24')  or die $vpc->error_str;
+ $gateway   = $vpc->create_internet_gateway       or die $vpc->error_str;
+ $routeTbl  = $subnet->create_route_table         or die $vpc->error_str;
+ $routeTbl->create_route('0.0.0.0/0' => $gateway) or die $vpc->error_str;
 
-=head2 $ec2->wait_for_attachments(@attachment)
+=head1 ELASTIC LOAD BALANCERS (ELB) AND AUTOSCALING
 
-Wait for all members of the provided list of
-VM::EC2::BlockDevice::Attachment objects to reach some terminal state
-("attached" or "detached"), and then return a hash reference that maps
-each attachment to its final state.
+The methods in the 'elastic_load_balancer' and 'autoscaling' modules
+allow you to retrieve information about Elastic Load Balancers, create
+new ELBs, and change the properties of the ELBs, as well as define
+autoscaling groups and their launch configurations. These modules are
+both imported by the ':scaling' import group. See
+L<VM::EC2::REST::elastic_load_balancer> and
+L<VM::EC2::REST::autoscaling> for descriptions of the facilities
+enabled by this module.
 
-Typical usage:
+=head1 AWS SECURITY POLICY
 
-    my $i = 0;
-    my $instance = 'i-12345';
-    my @attach;
-    foreach (@volume) {
-	push @attach,$_->attach($instance,'/dev/sdf'.$i++;
-    }
-    my $s = $ec2->wait_for_attachments(@attach);
-    my @failed = grep($s->{$_} ne 'attached'} @attach;
-    warn "did not attach: ",join ', ',@failed;
+The VM::EC2::Security::Policy module provides a simple Identity and
+Access Management (IAM) policy statement generator geared for use with
+AWS security tokens (see next section). Its facilities are defined in
+L<VM::EC2::Security::Token>.
 
-If no terminal state is reached within a set timeout, then this method
-returns undef and sets $ec2->error_str() to a suitable message. The
-timeout, which defaults to 10 minutes (600 seconds), can be get or set
-with $ec2->wait_for_timeout().
+=head1 AWS SECURITY TOKENS
 
-=cut
+AWS security tokens provide a way to grant temporary access to
+resources in your EC2 space without giving them permanent
+accounts. They also provide the foundation for mobile services and
+multifactor authentication devices (MFA). These methods are defined in
+'security_token', which is part of the ':standard' group. See
+L<VM::EC2::REST::security_token> for details. Here is a quick example:
 
-sub wait_for_attachments {
-    my $self = shift;
-    $self->wait_for_terminal_state(\@_,
-				   ['attached','detached'],
-				   $self->wait_for_timeout);
-}
+Here is an example:
+
+ # on your side of the connection
+ $ec2 = VM::EC2->new(...);  # as usual
+ my $policy = VM::EC2::Security::Policy->new;
+ $policy->allow('DescribeImages','RunInstances');
+ my $token = $ec2->get_federation_token(-name     => 'TemporaryUser',
+                                        -duration => 60*60*3, # 3 hrs, as seconds
+                                        -policy   => $policy);
+ my $serialized = $token->credentials->serialize;
+ send_data_to_user_somehow($serialized);
+
+ # on the temporary user's side of the connection
+ my $serialized = get_data_somehow();
+ my $token = VM::EC2::Security::Credentials->new_from_serialized($serialized);
+ my $ec2   = VM::EC2->new(-security_token => $token);
+ print $ec2->describe_images(-owner=>'self');
+
+=head1 SPOT AND RESERVED INSTANCES
+
+The 'spot_instance' and 'reserved_instance' modules allow you to
+create and manipulate spot and reserved instances. They are both part
+of the ':misc' import group. See L<VM::EC2::REST::spot_instance> and
+L<VM::EC2::REST::reserved_instance>. For example:
+
+ @offerings = $ec2->describe_reserved_instances_offerings(
+          {'availability-zone'   => 'us-east-1a',
+           'instance-type'       => 'c1.medium',
+           'product-description' =>'Linux/UNIX',
+           'duration'            => 31536000,  # this is 1 year
+           });
+ $offerings[0]->purchase(5) and print "Five reserved instances purchased\n";
+
+
+
+=head1 WAITING FOR STATE CHANGES
+
+VM::EC2 provides a series of methods that allow your script to wait in
+an efficient manner for desired state changes in instances, volumes
+and other objects. They are described in detail the individual modules
+to which they apply, but in each case the method will block until each
+member of a list of objects transitions to a terminal state
+(e.g. "completed" in the case of a snapshot). Briefly:
+
+ $ec2->wait_for_instances(@instances)
+ $ec2->wait_for_snapshots(@snapshots) 
+ $ec2->wait_for_volumes(@volumes) 
+ $ec2->wait_for_attachments(@attachment)
+
+There is also a generic version of this defined in the VM::EC2 core:
 
 =head2 $ec2->wait_for_terminal_state(\@objects,['list','of','states'] [,$timeout])
 
@@ -977,18 +1098,6 @@ sub wait_for_timeout {
     $self->{wait_for_timeout} = shift if @_;
     return $d;
 }
-
-=head1 TAGS
-
-=head1 VIRTUAL PRIVATE CLOUDS
-
-=head1 Elastic Load Balancers (ELB)
-
-=head1 AWS SECURITY TOKENS
-
-
-=head1 AUTOSCALING GROUPS
-=head2 LAUNCH CONFIGURATIONS
 
 # ------------------------------------------------------------------------------------------
 

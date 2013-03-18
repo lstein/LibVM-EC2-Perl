@@ -821,6 +821,37 @@ sub token {
     return $seed;
 }
 
+=head2 $ec2->wait_for_instances(@instances)
+
+Wait for all members of the provided list of instances to reach some
+terminal state ("running", "stopped" or "terminated"), and then return
+a hash reference that maps each instance ID to its final state.
+
+Typical usage:
+
+ my @instances = $image->run_instances(-key_name      =>'My_key',
+                                       -security_group=>'default',
+                                       -min_count     =>2,
+                                       -instance_type => 't1.micro')
+           or die $ec2->error_str;
+ my $status = $ec2->wait_for_instances(@instances);
+ my @failed = grep {$status->{$_} ne 'running'} @instances;
+ print "The following failed: @failed\n";
+
+If no terminal state is reached within a set timeout, then this method
+returns undef and sets $ec2->error_str() to a suitable message. The
+timeout, which defaults to 10 minutes (600 seconds), can be get or set
+with $ec2->wait_for_timeout().
+
+=cut
+
+sub wait_for_instances {
+    my $self = shift;
+    $self->wait_for_terminal_state(\@_,
+				   ['running','stopped','terminated'],
+				   $self->wait_for_timeout);
+}
+
 
 =head1 SEE ALSO
 

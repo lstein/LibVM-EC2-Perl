@@ -243,6 +243,39 @@ sub detach_volume {
     return $self->call('DetachVolume',@param);
 }
 
+=head2 $ec2->wait_for_attachments(@attachment)
+
+Wait for all members of the provided list of
+VM::EC2::BlockDevice::Attachment objects to reach some terminal state
+("attached" or "detached"), and then return a hash reference that maps
+each attachment to its final state.
+
+Typical usage:
+
+    my $i = 0;
+    my $instance = 'i-12345';
+    my @attach;
+    foreach (@volume) {
+	push @attach,$_->attach($instance,'/dev/sdf'.$i++;
+    }
+    my $s = $ec2->wait_for_attachments(@attach);
+    my @failed = grep($s->{$_} ne 'attached'} @attach;
+    warn "did not attach: ",join ', ',@failed;
+
+If no terminal state is reached within a set timeout, then this method
+returns undef and sets $ec2->error_str() to a suitable message. The
+timeout, which defaults to 10 minutes (600 seconds), can be get or set
+with $ec2->wait_for_timeout().
+
+=cut
+
+sub wait_for_attachments {
+    my $self = shift;
+    $self->wait_for_terminal_state(\@_,
+				   ['attached','detached'],
+				   $self->wait_for_timeout);
+}
+
 =head2 @v = $ec2->describe_volume_status(@volume_ids)
 
 =head2 @v = $ec2->describe_volume_status(\%filters)
@@ -307,6 +340,26 @@ sub describe_volume_status {
 
     }
     return $self->call('DescribeVolumeStatus',@parms);
+}
+
+=head2 $ec2->wait_for_volumes(@volumes)
+
+Wait for all members of the provided list of volumes to reach some
+terminal state ("available", "in-use", "deleted" or "error"), and then
+return a hash reference that maps each volume ID to its final state.
+
+If no terminal state is reached within a set timeout, then this method
+returns undef and sets $ec2->error_str() to a suitable message. The
+timeout, which defaults to 10 minutes (600 seconds), can be get or set
+with $ec2->wait_for_timeout().
+
+=cut
+
+sub wait_for_volumes {
+    my $self = shift;
+    $self->wait_for_terminal_state(\@_,
+				   ['available','in-use','deleted','error'],
+				   $self->wait_for_timeout);
 }
 
 =head2 @data = $ec2->describe_volume_attribute($volume_id,$attribute)
@@ -572,6 +625,24 @@ sub copy_snapshot {
             alarm(0);
             $snapshot;
     };
+}
+
+=head2 $ec2->wait_for_snapshots(@snapshots)
+
+Wait for all members of the provided list of snapshots to reach some
+terminal state ("completed", "error"), and then return a hash
+reference that maps each snapshot ID to its final state.
+
+This method may potentially wait forever. It has no set timeout. Wrap
+it in an eval{} and set alarm() if you wish to timeout.
+
+=cut
+
+sub wait_for_snapshots {
+    my $self = shift;
+    $self->wait_for_terminal_state(\@_,
+				   ['completed','error'],
+				   0);  # no timeout on snapshots -- they may take days
 }
 
 =head1 SEE ALSO
