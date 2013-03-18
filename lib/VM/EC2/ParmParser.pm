@@ -14,6 +14,7 @@ VM::EC2::ParmParser - Format parameters for passing to the API
 =cut
 
 use Carp 'croak';
+use MIME::Base64 qw(encode_base64 decode_base64);
 
 sub new { return bless {},ref $_[0] || $_[0] }
 
@@ -46,17 +47,26 @@ sub format_parms {
     return $args->{-cb},@param;
 }
 
+sub simple_arglist {
+    my $self = shift;
+    my ($parameter_name,@args) = @_;
+    my %args           = VM::EC2::ParmParser->args(VM::EC2->canonicalize($parameter_name) => @args);
+    my ($async,@param) = VM::EC2::ParmParser->format_parms(\%args,{list_parm => $parameter_name});
+    return ($async,@param);
+}
+
 sub args {
     my $self = shift;
     my $default_param_name = shift;
     return unless @_;
     my @args = @_;
 
-    for (my $i=0;$i<@_;$i++) {
-	$args[$i] = VM::EC2->canonicalize($args[$i]) if $args[$i] =~/^[A-Z]/;
+    if ($args[0] =~ /^-/) {
+	for (my $i=0;$i<@_;$i+=2) {
+	    $args[$i] = VM::EC2->canonicalize($args[$i]) if $args[$i]=~/^-?[A-Z]/;
+	}
+	return @args 
     }
-
-    return @args if $args[0] =~ /^-/;
     return (-filter=>shift) if @args==1 && ref $args[0] && ref $args[0] eq 'HASH';
     return ($default_param_name => \@args) if $default_param_name;
     return @_;
@@ -103,6 +113,7 @@ sub name_value_parm {
 sub single_parm {
     my $self = shift;
     my ($argname,$val) = @_;
+    return unless $val;
     my $v = ref $val  && ref $val eq 'ARRAY' ? $val->[0] : $val;
     return ($argname=>$v);
 }
@@ -110,13 +121,19 @@ sub single_parm {
 sub list_parm {
     my $self = shift;
     my ($argname,$val) = @_;
-
+    return unless $val;
     my @params;
     my $c = 1;
     for (ref $val && ref $val eq 'ARRAY' ? @$val : $val) {
 	push @params,("$argname.".$c++ => $_);
     }
     return @params;
+}
+
+sub base64_parm {
+    my $self = shift;
+    my ($argname,$val) = @_;
+    return ($argname => encode_base64($val));
 }
 
 sub block_device_parm {

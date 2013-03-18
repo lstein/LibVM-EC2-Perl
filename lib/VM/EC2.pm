@@ -1004,10 +1004,10 @@ documentation (yet).
 sub canonicalize {
     my $self = shift;
     my $name = shift;
-    while ($name =~ /\w[A-Z]/) {
-	$name    =~ s/([a-zA-Z])([A-Z])/\L$1_$2/g or last;
+    while ($name =~ /\w[A-Z.]/) {
+	$name    =~ s/([a-zA-Z])\.?([A-Z])/\L$1_$2/g or last;
     }
-    return '-'.lc $name;
+    return $name =~ /^-/ ? lc $name : '-'.lc $name;
 }
 
 sub uncanonicalize {

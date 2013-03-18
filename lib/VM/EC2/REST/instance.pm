@@ -4,6 +4,15 @@ use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
 VM::EC2::Dispatch->register(
+    ConfirmProductInstance      => 'boolean',
+    DescribeInstances => sub { VM::EC2::Dispatch::load_module('VM::EC2::ReservationSet');
+			       my $r = VM::EC2::ReservationSet->new(@_) or return;
+						       return $r->instances;
+    },
+    DescribeInstanceStatus => 'fetch_items_iterator,instanceStatusSet,VM::EC2::Instance::StatusItem,instance_status',
+    ModifyInstanceAttribute => 'boolean',
+    RebootInstances      => 'boolean',
+    ResetInstanceAttribute => 'boolean',
     RunInstances      => sub { VM::EC2::Dispatch::load_module('VM::EC2::Instance::Set');
 						       my $s = VM::EC2::Instance::Set->new(@_) or return;
 						       return $s->instances;
@@ -11,13 +20,9 @@ VM::EC2::Dispatch->register(
     StartInstances       => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
     StopInstances        => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
     TerminateInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
-    RebootInstances      => 'boolean',
-    ConfirmProductInstance      => 'boolean',
-    ConfirmProductInstance => 'boolean',
-    ModifyInstanceAttribute => 'boolean',
-    ResetInstanceAttribute => 'boolean',
-    DescribeInstanceStatus => 'fetch_items_iterator,instanceStatusSet,VM::EC2::Instance::StatusItem,instance_status',
     );
+
+my $VEP = 'VM::EC2::ParmParser;
 
 =head1 NAME
 
@@ -96,19 +101,14 @@ retrieved from each instance by calling its reservationId() method.
 
 sub describe_instances {
     my $self = shift;
-    my %args = VM::EC2::ParmParser->args(-instance_id,@_);
-    my ($async,@params) = VM::EC2::ParmParser->format_parms(\%args,
+    my %args = $VEP->args(-instance_id,@_);
+    my ($async,@params) = $VEP->format_parms(\%args,
 							    {
 								list_parm   => 'InstanceId',
 								filter_parm => 'Filter'
 							    });
     return $self->call('DescribeInstances',@params);
 }
-
-VM::EC2::Dispatch->register(DescribeInstances => sub { VM::EC2::Dispatch::load_module('VM::EC2::ReservationSet');
-						       my $r = VM::EC2::ReservationSet->new(@_) or return;
-						       return $r->instances;
-			    });
 
 =head2 @i = $ec2->run_instances($ami_id)
 
@@ -395,28 +395,31 @@ reservationId(), ownerId(), requesterId() and groups() methods.
 
 sub run_instances {
     my $self = shift;
-    my %args = VM::EC2::ParmParser->args('-image_id',@_);
+    my %args = $VEP->args('-image_id',@_);
     $args{-image_id}  or croak "run_instances(): -image_id argument missing";
     $args{-min_count} ||= 1;
     $args{-max_count} ||= $args{-min_count};
-    $args{-availability_zone} ||= $args{-zone};
-    $args{-availability_zone} ||= $args{-placement_zone};
+    $args{-availability_zone}  ||= $args{-zone};
+    $args{-availability_zone}  ||= $args{-placement_zone};
+    $args{-monitoring_enabled} ||= $args{-monitoring};
+    $args{-instance_initiated_shutdown_behavior} ||= $args{-shutdown_behavior};
+    $args{-block_device_mapping} ||= $args{-block_devices};
+    $args{-network_interface}    ||= $args{-network_interfaces};
+    $args{-iam_instance_profile_arn}  ||= $args{-iam_arn};
+    $args{-iam_instance_profile_name} ||= $args{-iam_name};
 
-    my @p = map {$self->single_parm($_,\%args) }
-       qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIpAddress
-          InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
-    push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
-    push @p,('UserData' =>encode_base64($args{-user_data},''))        if $args{-user_data};
-    push @p,('Placement.AvailabilityZone'=>$args{-availability_zone}) if $args{-availability_zone};
-    push @p,('Placement.GroupName'=>$args{-placement_group})          if $args{-placement_group};
-    push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-placement_tenancy};
-    push @p,('Monitoring.Enabled'   =>'true')                         if $args{-monitoring};
-    push @p,('DisableApiTermination'=>'true')                         if $args{-termination_protection};
-    push @p,('EbsOptimized'=>'true')                                  if $args{-ebs_optimized};
-    push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
-    push @p,$self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
-    push @p,$self->network_interface_parm(\%args);
-    push @p,$self->iam_parm(\%args);
+    my ($async,@param) = $VEP->format_parms(\%args,{
+	single_parm => [qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIpAddress
+                           InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType
+                           IamInstanceProfile.Arn IamInstanceProfile.Name
+                           )],
+	list_parm   => [qw(SecurityGroup SecurityGroupId)],
+        'Placement.single_parm'   => [qw(AvailabilityZone GroupName Tenancy PlacementGroup)],
+	base64_parm => 'UserData',
+	boolean_parm=> [qw(DisableApiTermination EbsOptimized Monitoring.Enabled)],
+	block_device_parm         => 'BlockDeviceMapping',
+	network_interface_parm    => 'NetworkInterface',
+							   });
     return $self->call('RunInstances',@p);
 }
 
@@ -459,10 +462,7 @@ method:
 
 sub start_instances {
     my $self = shift;
-    my @instance_ids = $self->instance_parm(@_)
-	or croak "usage: start_instances(\@instance_ids)";
-    my $c = 1;
-    my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
+    my ($async,@param) = $VEP->simple_arglist('InstanceId' => @_);
     return $self->call('StartInstances',@params);
 }
 
@@ -498,21 +498,14 @@ You can also stop an instance by calling the object's start() method:
 
 sub stop_instances {
     my $self = shift;
-    my (@instance_ids,$force);
 
-    if ($_[0] =~ /^-/) {
-	my %argv   = @_;
-	@instance_ids = ref $argv{-instance_id} ?
-	               @{$argv{-instance_id}} : $argv{-instance_id};
-	$force     = $argv{-force};
-    } else {
-	@instance_ids = @_;
-    }
-    @instance_ids or croak "usage: stop_instances(\@instance_ids)";    
+    my %args = $VEP->args('-instance_id' => @_);
+    $args{-instance_ids} or croak "usage: stop_instances(\@instance_ids)";
 
-    my $c = 1;
-    my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
-    push @params,Force=>1 if $force;
+    my ($async,@params) = $VEP->format_format_parms(\%args,{
+	single_parm => 'Force',
+	list_parm   => 'InstanceId'});
+
     return $self->call('StopInstances',@params);
 }
 
@@ -543,10 +536,8 @@ You can also terminate an instance by calling its terminate() method:
 
 sub terminate_instances {
     my $self = shift;
-    my @instance_ids = $self->instance_parm(@_)
-	or croak "usage: start_instances(\@instance_ids)";
-    my $c = 1;
-    my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
+    my ($async,@params) = $VEP->simple_arglist('-instance_id'=>@_);
+    @params or croak 'Usage: terminate_instances(\@instance_ids)';
     return $self->call('TerminateInstances',@params);
 }
 
