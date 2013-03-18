@@ -2,6 +2,7 @@ package VM::EC2::REST::instance;
 
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
+use strict;
 
 VM::EC2::Dispatch->register(
     ConfirmProductInstance      => 'boolean',
@@ -22,7 +23,7 @@ VM::EC2::Dispatch->register(
     TerminateInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
     );
 
-my $VEP = 'VM::EC2::ParmParser;
+my $VEP = 'VM::EC2::ParmParser';
 
 =head1 NAME
 
@@ -397,6 +398,8 @@ sub run_instances {
     my $self = shift;
     my %args = $VEP->args('-image_id',@_);
     $args{-image_id}  or croak "run_instances(): -image_id argument missing";
+
+    # the following define argument aliases
     $args{-min_count} ||= 1;
     $args{-max_count} ||= $args{-min_count};
     $args{-availability_zone}  ||= $args{-zone};
@@ -420,7 +423,7 @@ sub run_instances {
 	block_device_parm         => 'BlockDeviceMapping',
 	network_interface_parm    => 'NetworkInterface',
 							   });
-    return $self->call('RunInstances',@p);
+    return $self->call('RunInstances',@param);
 }
 
 =head2 @s = $ec2->start_instances(@instance_ids)
@@ -463,7 +466,7 @@ method:
 sub start_instances {
     my $self = shift;
     my ($async,@param) = $VEP->simple_arglist('InstanceId' => @_);
-    return $self->call('StartInstances',@params);
+    return $self->call('StartInstances',@param);
 }
 
 =head2 @s = $ec2->stop_instances(@instance_ids)
@@ -500,9 +503,9 @@ sub stop_instances {
     my $self = shift;
 
     my %args = $VEP->args('-instance_id' => @_);
-    $args{-instance_ids} or croak "usage: stop_instances(\@instance_ids)";
+    $args{-instance_id} or croak "usage: stop_instances(\@instance_ids)";
 
-    my ($async,@params) = $VEP->format_format_parms(\%args,{
+    my ($async,@params) = $VEP->format_parms(\%args,{
 	single_parm => 'Force',
 	list_parm   => 'InstanceId'});
 
@@ -559,14 +562,13 @@ You can also reboot an instance by calling its terminate() method:
 
 sub reboot_instances {
     my $self = shift;
-    my @instance_ids = $self->instance_parm(@_)
-	or croak "Usage: reboot_instances(\@instance_ids)";
-    my $c = 1;
-    my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
+    my ($async,@params) = $VEP->simple_arglist('-instance_id'=>@_);    
     return $self->call('RebootInstances',@params);
 }
 
-=head2 $boolean = $ec2->confirm_product_instance($instance_id,$product_code)
+=head2 $boolean = $ec2->confirm_product_instance($instance_id,$product_code,$callback)
+
+=head2 $boolean = $ec2->confirm_product_instance(-instance_id=>$instance_id,-product_code=>$product_code,-cb=>$callback)
 
 Return "true" if the instance indicated by $instance_id is associated
 with the given product code.
@@ -575,28 +577,12 @@ with the given product code.
 
 sub confirm_product_instance {
     my $self = shift;
-    @_ == 1 or croak "Usage: confirm_product_instance(\$instance_id,\$product_code)";
-    my ($instance_id,$product_code) = @_;
-    my @params = (InstanceId=>$instance_id,
-		  ProductCode=>$product_code);
+    @_ >= 2 or croak "Usage: confirm_product_instance(\$instance_id,\$product_code)";
+    my %args = $_[0] =~ /^-/ ? @_ : (-instance_id=>$_[0],-product_code=>$_[1],-cb=>$_[2]);
+    my ($async,@params) = $VEP->format_parms(\%args,{
+	single_parm => [qw(InstanceId ProductCode)]}
+	);
     return $self->call('ConfirmProductInstance',@params);
-}
-
-=head2 $password_data = $ec2->get_password_data($instance_id);
-
-=head2 $password_data = $ec2->get_password_data(-instance_id=>$id);
-
-For Windows instances, get the administrator's password as a
-L<VM::EC2::Instance::PasswordData> object.
-
-=cut
-
-sub get_password_data {
-    my $self = shift;
-    my %args = $self->args(-instance_id=>@_);
-    $args{-instance_id} or croak "Usage: get_password_data(-instance_id=>\$id)";
-    my @params = $self->single_parm('InstanceId',\%args);
-    return $self->call('GetPasswordData',@params);
 }
 
 =head2 $meta = VM::EC2->instance_metadata
@@ -621,7 +607,7 @@ sub instance_metadata {
     return VM::EC2::Instance::Metadata->new();
 }
 
-=head2 @data = $ec2->describe_instance_attribute($instance_id,$attribute)
+=head2 @data = $ec2->describe_instance_attribute($instance_id,$attribute,$callback)
 
 This method returns instance attributes. Only one attribute can be
 retrieved at a time. The following is the list of attributes that can be
@@ -648,11 +634,12 @@ objects. Therefore, some of the attributes, in particular
 
 sub describe_instance_attribute {
     my $self = shift;
-    @_ == 2 or croak "Usage: describe_instance_attribute(\$instance_id,\$attribute_name)";
-    my ($instance_id,$attribute) = @_;
-    my @param  = (InstanceId=>$instance_id,Attribute=>$attribute);
+    @_ >= 2 or croak "Usage: describe_instance_attribute(\$instance_id,\$attribute_name)";
+    my %args = $_[0]=~/^-/ ? @_ : (-instance_id=>$_[0],-attribute=>$_[1],-cb=>$_[2]);
+    my ($async,@param)  = $VEP->format_parms(\%args,
+					     {single_parm => [qw(InstanceId Attribute)]});
     my $result = $self->call('DescribeInstanceAttribute',@param);
-    return $result && $result->attribute($attribute);
+    return $result && $result->attribute($args{-attribute});
 }
 
 =head2 $boolean = $ec2->modify_instance_attribute($instance_id,-$attribute_name=>$value)
@@ -702,21 +689,22 @@ sub modify_instance_attribute {
     my $self = shift;
     my $instance_id = shift or croak "Usage: modify_instance_attribute(\$instanceId,%param)";
     my %args   = @_;
+    $args{-instance_id}             =                $instance_id;
+    $args{-block_device_mapping}  ||=                $args{-block_devices};
+    $args{-disable_api_termination} = 'true'      if $args{-termination_protection};
+    $args{-instance_initiated_shutdown_behavior} ||= $args{-shutdown_behavior};
 
-    my @param  = (InstanceId=>$instance_id);
-    push @param,$self->value_parm($_,\%args) foreach 
-	qw(InstanceType Kernel Ramdisk UserData DisableApiTermination
-           InstanceInitiatedShutdownBehavior SourceDestCheck);
-    push @param,$self->list_parm('GroupId',\%args);
-    push @param,('DisableApiTermination.Value'=>'true') if $args{-termination_protection};
-    push @param,('InstanceInitiatedShutdownBehavior.Value'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
-    my $block_devices = $args{-block_devices} || $args{-block_device_mapping};
-    push @param,$self->block_device_parm($block_devices);
-
+    my ($async,@param) = $VEP->format_parms(\%args,{
+	single_parm => 'InstanceId',
+	value_parm  => [qw(InstanceType Kernel Ramdisk UserData DisableApiTermination
+                           InstanceInitiatedShutdownBehavior SourceDestCheck)],
+	list_parm   => 'GroupId',
+	block_device_parm => 'BlockDeviceMapping',
+					   });
     return $self->call('ModifyInstanceAttribute',@param);
 }
 
-=head2 $boolean = $ec2->reset_instance_attribute($instance_id,$attribute)
+=head2 $boolean = $ec2->reset_instance_attribute($instance_id,$attribute [,$callback])
 
 This method resets an attribute of the given instance to its default
 value. Valid attributes are "kernel", "ramdisk" and
@@ -727,8 +715,8 @@ successful.
 
 sub reset_instance_attribute {
     my $self = shift;
-    @_      == 2 or croak "Usage: reset_instance_attribute(\$instanceId,\$attribute_name)";
-    my ($instance_id,$attribute) = @_;
+    @_      >= 2 or croak "Usage: reset_instance_attribute(\$instanceId,\$attribute_name)";
+    my ($instance_id,$attribute,$async) = @_;
     my %valid = map {$_=>1} qw(kernel ramdisk sourceDestCheck);
     $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
     return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
@@ -794,22 +782,25 @@ sub more_instance_status {
 
 sub describe_instance_status {
     my $self = shift;
-    my @parms;
+    my ($async,@parms);
 
     if (!@_ && $self->{instance_status_token} && $self->{instance_status_args}) {
 	@parms = (@{$self->{instance_status_args}},NextToken=>$self->{instance_status_token});
+	$async = $self->{instance_status_async};
     }
     
     else {
-	my %args = $self->args('-instance_id',@_);
-	push @parms,$self->list_parm('InstanceId',\%args);
-	push @parms,$self->filter_parm(\%args);
-	push @parms,$self->boolean_parm('IncludeAllInstances',\%args);
-	push @parms,$self->single_parm('MaxResults',\%args);
-	
+	my %args = $VEP->args('-instance_id',@_);
+	($async,@parms) = $VEP->format_parms(\%args,{
+	    list_parm   => 'InstanceId',
+	    filter_parm => 'Filter',
+	    boolean_parm=> 'IncludeAllInstances',
+	    single_parm => 'MaxResults'});
+
 	if ($args{-max_results}) {
 	    $self->{instance_status_token} = 'xyzzy'; # dummy value
-	    $self->{instance_status_args} = \@parms;
+	    $self->{instance_status_args}  = \@parms;
+	    $self->{instance_status_async} = $async;
 	}
 
     }

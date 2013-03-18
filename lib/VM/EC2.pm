@@ -1372,7 +1372,7 @@ sub call {
 	} else {
 	    my $code = $response->status_line;
 	    my $msg  = $response->decoded_content;
-	    $error = VM::EC2::Error->new({Code=>$code,Message=>"$msg from API call '$_[0]')"},$self);
+	    $error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$_[0]')"},$self);
 	}
 	$self->error($error);
 	carp  "$error" if $self->print_error;

@@ -4,6 +4,8 @@ use strict;
 use VM::EC2 '';   # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
+VM::EC2::Dispatch->register(GetPasswordData      => 'VM::EC2::Instance::PasswordData');
+
 =head1 NAME VM::EC2::REST::windows
 
 =head1 SYNOPSIS
@@ -13,17 +15,36 @@ package VM::EC2;  # add methods to VM::EC2
 =head1 METHODS
 
 These methods control several Windows platform-related
-functions. However, none of them are implemented by VM::EC2
+functions. However, only GetPasswordData is implemented by VM::EC2
 (volunteers welcome).
 
 Implemented:
- (none)
+ GetPasswordData
 
 Unimplemented:
  BundleInstance
  CancelBundleTask
  DescribeBundleTasks
- GetPasswordData
+
+=cut
+
+=head2 $password_data = $ec2->get_password_data($instance_id);
+
+=head2 $password_data = $ec2->get_password_data(-instance_id=>$id);
+
+For Windows instances, get the administrator's password as a
+L<VM::EC2::Instance::PasswordData> object.
+
+=cut
+
+sub get_password_data {
+    my $self = shift;
+    my %args = VM::EC2::ParmParser->args(-instance_id=>@_);
+    $args{-instance_id} or croak "Usage: get_password_data(-instance_id=>\$id)";
+    my ($async,@params) = VM::EC2::ParmParser->format_parms(\%args,{single_parm=>'InstanceId'});
+    return $self->call('GetPasswordData',@params);
+}
+
 
 =head1 SEE ALSO
 

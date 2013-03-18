@@ -78,6 +78,35 @@ sub filter_parm {
     return $self->name_value_parm($parameter_name,$values);
 }
 
+sub single_parm {
+    my $self = shift;
+    my ($argname,$val) = @_;
+    return unless $val;
+    my $v = ref $val  && ref $val eq 'ARRAY' ? $val->[0] : $val;
+    return ($argname=>$v);
+}
+
+sub list_parm {
+    my $self = shift;
+    my ($argname,$val) = @_;
+    return unless $val;
+    my @params;
+    my $c = 1;
+    for (ref $val && ref $val eq 'ARRAY' ? @$val : $val) {
+	next unless defined $_;
+	push @params,("$argname.".$c++ => $_);
+    }
+    return @params;
+}
+
+sub value_parm {
+    my $self = shift;
+    my ($argname,$val) = @_;
+    return unless $val;
+    my $v = ref $val  && ref $val eq 'ARRAY' ? $val->[0] : $val;
+    return ("$argname.Value"=>$v);
+}
+
 sub name_value_parm {
     my $self = shift;
     my ($parameter_name,$values,$skip_undef_values) = @_;
@@ -110,26 +139,6 @@ sub name_value_parm {
     return @params;
 }
 
-sub single_parm {
-    my $self = shift;
-    my ($argname,$val) = @_;
-    return unless $val;
-    my $v = ref $val  && ref $val eq 'ARRAY' ? $val->[0] : $val;
-    return ($argname=>$v);
-}
-
-sub list_parm {
-    my $self = shift;
-    my ($argname,$val) = @_;
-    return unless $val;
-    my @params;
-    my $c = 1;
-    for (ref $val && ref $val eq 'ARRAY' ? @$val : $val) {
-	push @params,("$argname.".$c++ => $_);
-    }
-    return @params;
-}
-
 sub base64_parm {
     my $self = shift;
     my ($argname,$val) = @_;
@@ -144,7 +153,7 @@ sub block_device_parm {
     my @p;
     my $c = 1;
     for my $d (@dev) {
-	next unless $d;
+	next unless defined $d;
 	$d =~ /^([^=]+)=([^=]+)$/ or croak "block device mapping must be in format /dev/sdXX=device-name";
 
 	my ($devicename,$blockdevice) = ($1,$2);
@@ -193,7 +202,8 @@ sub network_interface_parm {
     my @p;
     my $c = 0;
     for my $d (@dev) {
-	$d =~ /^eth(\d+)\s*=\s*([^=]+)$/ or croak "network device mapping must be in format ethX=option-string";
+	next unless defined $d;
+	$d =~ /^eth(\d+)\s*=\s*([^=]+)$/ or croak "network device mapping must be in format ethX=option-string; you passed $d";
 
 	my ($device_index,$device_options) = ($1,$2);
 	push @p,("$argname.$c.DeviceIndex" => $device_index);

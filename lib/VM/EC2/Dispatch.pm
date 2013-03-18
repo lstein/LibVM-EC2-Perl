@@ -416,7 +416,7 @@ sub create_error_object {
     my $parsed = $self->new_xml_parser->XMLin($content);
     if (defined $API_call) {
 	$parsed->{Errors}{Error}{Message} =~ s/\.$//;
-	$parsed->{Errors}{Error}{Message} .= " from API call '$API_call'";
+	$parsed->{Errors}{Error}{Message} .= ", at API call '$API_call'";
     }
     return $class->new($parsed->{Errors}{Error},$ec2,@{$parsed}{'xmlns','requestId'});
 }
