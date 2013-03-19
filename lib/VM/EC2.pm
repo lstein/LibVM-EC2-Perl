@@ -1455,6 +1455,28 @@ sub ua {
     return $self->{ua} ||= LWP::UserAgent->new;
 }
 
+sub async_call {
+    my $self  = shift;
+    my $cb    = shift;
+    my $post  = $self->_signature(@_);
+    my $u     = URI->new($self->endpoint);
+    $u->query_form(@$post);
+    http_post($self->endpoint,
+	      $u->query,
+	      headers => {'Content-Type' => 'application/x-www-form-urlencoded'},
+	      sub {
+		  my ($body,$hdr) = @_;
+		  if ($hdr->{status} =~ /^2/) { # success
+		      # do something
+		  } else {
+		      # do something else
+		  }
+	      }
+	);
+	      
+}
+
+
 =head2 @obj = $ec2->call($action,@param);
 
 Make a call to Amazon using $action and the passed arguments, and
@@ -1547,6 +1569,12 @@ Create and sign an HTTP::Request.
 
 # adapted from Jeff Kim's Net::Amazon::EC2 module
 sub _sign {
+    my $self = shift;
+    my $signature = $self->_signature(@_);
+    return POST $self->endpoint,$signature;
+}
+
+sub _signature {
     my $self    = shift;
     my @args    = @_;
 
@@ -1571,11 +1599,7 @@ sub _sign {
 		       $action,$host,$path,join('&',@param));
     my $signature = encode_base64(hmac_sha256($to_sign,$self->secret),'');
     $sign_hash{Signature} = $signature;
-
-    my $uri = URI->new($self->endpoint);
-    $uri->query_form(\%sign_hash);
-
-    return POST $self->endpoint,[%sign_hash];
+    return [%sign_hash];
 }
 
 =head2 @param = $ec2->args(ParamName=>@_)
