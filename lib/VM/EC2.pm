@@ -467,6 +467,7 @@ our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
                    VM::EC2::ReservedInstance);
+our $ASYNC;
 
 # hard-coded timeout for several wait_for_terminal_state() calls.
 use constant WAIT_FOR_TIMEOUT => 600;
@@ -477,10 +478,19 @@ sub AUTOLOAD {
     return if $func_name eq 'DESTROY';
     my $proper = VM::EC2->canonicalize($func_name);
     $proper =~ s/^-//;
+
+    my $async=0;
+    if ($proper =~ /^(\w+)_async$/i) {
+	$proper = $1;
+	$async++;
+    }
+
     if ($self->can($proper)) {
-	eval "sub $pack\:\:$func_name {shift->$proper(\@_)}";
+	eval "sub $pack\:\:$func_name {local \$ASYNC=$async; shift->$proper(\@_)}; 1" or die $@;
 	$self->$func_name(@_);
-    } else {
+    } 
+
+    else {
 	croak "Can't locate object method \"$func_name\" via package \"$pack\"";
     }
 }
@@ -1486,6 +1496,7 @@ return a list of objects.
 
 sub call {
     my $self    = shift;
+    warn "async = $ASYNC";
     my $response  = $self->make_request(@_);
 
     my $sleep_time = 2;
