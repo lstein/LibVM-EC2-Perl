@@ -1467,15 +1467,33 @@ sub ua {
 
 sub async_call {
     my $self  = shift;
-    my $cb    = shift;
     my $post  = $self->_signature(@_);
     my $u     = URI->new($self->endpoint);
     $u->query_form(@$post);
-    http_post($self->endpoint,
-	      $u->query,
+    $self->async_post($self->endpoint,$u->query);
+}
+
+sub async_post {
+    my $self = shift;
+    my ($endpoint,$query,$cv,$delay) = @_;
+    $cv    ||= AnyEvent->condvar;
+    $delay ||= 2;
+    http_post($endpoint,
+	      $query,
 	      headers => {'Content-Type' => 'application/x-www-form-urlencoded'},
 	      sub {
 		  my ($body,$hdr) = @_;
+		  if ($body =~ /RequestLimitExceeded/) {
+		      if ($delay < 64) {
+			  $delay *= 2;
+			  AnyEvent->timer(after=>$delay,cb=>sub {$self->async_post($endpoint,$query,$delay)});
+		      } else {
+			  $self->error(VM::EC2::Error->new('RequestLimitExceeded','Request limit exceeded'));
+			  $cv->send();
+		      }
+		      return;
+		  }
+
 		  if ($hdr->{status} =~ /^2/) { # success
 		      # do something
 		  } else {
