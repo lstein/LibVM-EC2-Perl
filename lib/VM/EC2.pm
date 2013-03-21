@@ -1486,37 +1486,46 @@ sub async_post {
 		  my ($body,$hdr) = @_;
 		  if ($body =~ /RequestLimitExceeded/) {
 		      if ($delay < 64) {
-			  AnyEvent->timer(after=>$delay,cb=>sub {$self->async_post($action,$endpoint,$query,$cb,$delay*2)});
+			  AnyEvent->timer(after=>$delay,cb=>sub {$self->async_post($action,$endpoint,$query,$cv,$delay*2)});
 		      } else {
-			  $self->error(VM::EC2::Error->new('RequestLimitExceeded','Request limit exceeded'));
-			  $cv->send();
+			  $self->async_send_error($action,$hdr,$body,$cv);
 		      }
 		      return;
 		  }
 
 		  if ($hdr->{status} =~ /^2/) { # success
 		      $self->error(undef);
-		      my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
+		      my @obj = VM::EC2::Dispatch->content2objects($action,$hdr,$body,$self);
 		      $cv->send(@obj);
 		  } else { # an error
-		      if ($content =~ /<Response>/) {
-			  $error = VM::EC2::Dispatch->create_error_object($body,$self,$action);
-		      } else {
-			  my $code = $hdr->{status};
-			  my $msg  = $body;
-			  $error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$action')"},$self);
-		      }
-		      $self->error($error);
-		      if (my $cb = $cv->cb) {
-			  my $error_sub = sub {$self->error($error); $cb->(undef); };
-			  $cv->cb($error_sub);
-		      }  else {
-			  $cv->cb($self->error($error));
-		      }
-		      $cv->send;
+		      $self->async_send_error($action,$body,$cv);
 		  }
+		  return;
 	      }
 	);
+}
+
+sub async_send_error {
+    my $self = shift;
+    my ($action,$hdr,$body,$cv) = @_;
+    my $error;
+
+    if ($body =~ /<Response>/) {
+	$error = VM::EC2::Dispatch->create_error_object($body,$self,$action);
+    } else {
+	my $code = $hdr->{status};
+	my $msg  = $body;
+	$error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$action')"},$self);
+    }
+
+    $self->error($error);# not right
+#    if (my $cb = $cv->cb) {
+#	my $error_sub = sub {$self->error($error); $cb->(undef); };
+#	$cv->cb($error_sub);
+#    }  else {
+#	$cv->cb($self->error($error));
+#    }
+    $cv->send;
 }
 
 
