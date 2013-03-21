@@ -459,6 +459,8 @@ use Digest::SHA qw(hmac_sha256 sha1_hex);
 use POSIX 'strftime';
 use URI;
 use URI::Escape;
+use AnyEvent;
+use AnyEvent::HTTP;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
@@ -1465,7 +1467,12 @@ sub ua {
     return $self->{ua} ||= LWP::UserAgent->new;
 }
 
-sub async_call {
+sub call {
+    my $self = shift;
+    return $ASYNC ? $self->_call_async(@_) : $self->_call_sync(@_);
+}
+
+sub _call_async {
     my $self  = shift;
     my ($action,@param) = @_;
     my $post  = $self->_signature(Action=>$action,@param);
@@ -1481,7 +1488,10 @@ sub async_post {
     $delay ||= 2;
     http_post($endpoint,
 	      $query,
-	      headers => {'Content-Type' => 'application/x-www-form-urlencoded'},
+	      headers => {
+		  'Content-Type' => 'application/x-www-form-urlencoded',
+		  'User-Agent'   => 'VM::EC2-perl',
+	      },
 	      sub {
 		  my ($body,$hdr) = @_;
 		  if ($body =~ /RequestLimitExceeded/) {
@@ -1493,16 +1503,17 @@ sub async_post {
 		      return;
 		  }
 
-		  if ($hdr->{status} =~ /^2/) { # success
+		  if ($hdr->{Status} =~ /^2/) { # success
 		      $self->error(undef);
-		      my @obj = VM::EC2::Dispatch->content2objects($action,$hdr,$body,$self);
+		      my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
 		      $cv->send(@obj);
 		  } else { # an error
-		      $self->async_send_error($action,$body,$cv);
+		      $self->async_send_error($action,$hdr,$body,$cv);
 		  }
 		  return;
 	      }
 	);
+    return $cv;
 }
 
 sub async_send_error {
@@ -1513,7 +1524,7 @@ sub async_send_error {
     if ($body =~ /<Response>/) {
 	$error = VM::EC2::Dispatch->create_error_object($body,$self,$action);
     } else {
-	my $code = $hdr->{status};
+	my $code = $hdr->{Status};
 	my $msg  = $body;
 	$error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$action')"},$self);
     }
@@ -1536,9 +1547,8 @@ return a list of objects.
 
 =cut
 
-sub call {
+sub _call_sync {
     my $self    = shift;
-    warn "async = $ASYNC";
     my $response  = $self->make_request(@_);
 
     my $sleep_time = 2;
