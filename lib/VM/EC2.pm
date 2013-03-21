@@ -1467,15 +1467,16 @@ sub ua {
 
 sub async_call {
     my $self  = shift;
-    my $post  = $self->_signature(@_);
+    my ($action,@param) = @_;
+    my $post  = $self->_signature(Action=>$action,@param);
     my $u     = URI->new($self->endpoint);
     $u->query_form(@$post);
-    $self->async_post($self->endpoint,$u->query);
+    $self->async_post($action,$self->endpoint,$u->query);
 }
 
 sub async_post {
     my $self = shift;
-    my ($endpoint,$query,$cv,$delay) = @_;
+    my ($action,$endpoint,$query,$cv,$delay) = @_;
     $cv    ||= AnyEvent->condvar;
     $delay ||= 2;
     http_post($endpoint,
@@ -1485,8 +1486,7 @@ sub async_post {
 		  my ($body,$hdr) = @_;
 		  if ($body =~ /RequestLimitExceeded/) {
 		      if ($delay < 64) {
-			  $delay *= 2;
-			  AnyEvent->timer(after=>$delay,cb=>sub {$self->async_post($endpoint,$query,$delay)});
+			  AnyEvent->timer(after=>$delay,cb=>sub {$self->async_post($action,$endpoint,$query,$cb,$delay*2)});
 		      } else {
 			  $self->error(VM::EC2::Error->new('RequestLimitExceeded','Request limit exceeded'));
 			  $cv->send();
@@ -1495,13 +1495,28 @@ sub async_post {
 		  }
 
 		  if ($hdr->{status} =~ /^2/) { # success
-		      # do something
-		  } else {
-		      # do something else
+		      $self->error(undef);
+		      my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
+		      $cv->send(@obj);
+		  } else { # an error
+		      if ($content =~ /<Response>/) {
+			  $error = VM::EC2::Dispatch->create_error_object($body,$self,$action);
+		      } else {
+			  my $code = $hdr->{status};
+			  my $msg  = $body;
+			  $error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$action')"},$self);
+		      }
+		      $self->error($error);
+		      if (my $cb = $cv->cb) {
+			  my $error_sub = sub {$self->error($error); $cb->(undef); };
+			  $cv->cb($error_sub);
+		      }  else {
+			  $cv->cb($self->error($error));
+		      }
+		      $cv->send;
 		  }
 	      }
 	);
-	      
 }
 
 
