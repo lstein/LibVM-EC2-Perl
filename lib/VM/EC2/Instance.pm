@@ -771,13 +771,14 @@ sub refresh {
     my $self = shift;
     my $i   = shift;
     local $self->aws->{raise_error} = 1;
-    ($i) = $self->aws->describe_instances(-instance_id=>$self->instanceId) unless $i;
+    ($i) = $self->aws->describe_instances_sync(-instance_id=>$self->instanceId) unless $i;
     %$self  = %$i;
 }
 
 sub console_output {
     my $self = shift;
-    my $output = $self->aws->get_console_output(-instance_id=>$self->instanceId);
+    VM::EC2::Dispatch::load_module('VM::EC2::REST::general');
+    my $output = $self->aws->get_console_output_sync(-instance_id=>$self->instanceId);
     return $output->output;
 }
 
@@ -808,8 +809,19 @@ sub attach_volume {
     $args{-volume_id} && $args{-device}
        or croak "usage: \$vol->attach(\$instance_id,\$device)";
     $args{-instance_id} = $self->instanceId;
+
     my $result = $self->aws->attach_volume(%args);
-    $self->refresh if $result;
+
+    if ($VM::EC2::ASYNC) {
+	$result->cb(
+	    sub {
+		my $attach = shift->recv;
+		$self->refresh if $attach;
+	    });
+    } else {
+	$self->refresh if $result;
+    }
+
     return $result;
 }
 
@@ -833,7 +845,16 @@ sub detach_volume {
     }
     $args{-instance_id} = $self->instanceId;
     my $result = $self->aws->detach_volume(%args);
-    $self->refresh if $result;
+    if ($VM::EC2::ASYNC) {
+	$result->cb(
+	    sub {
+		my $attach = shift->recv;
+		$self->refresh if $attach;
+	    });
+    } else {
+	$self->refresh if $result;
+    }
+
     return $result;
 }
 
@@ -849,9 +870,23 @@ sub attach_network_interface {
        or croak "usage: \$instance->attach_network_interface(\$network_interface_id,\$device_index)";
 
     $args{-instance_id} = $self->instanceId;
+
     my $result = $self->aws->attach_network_interface(%args);
-    $self->refresh if $result;
-    eval {$args{-network_interface_id}->refresh} if $result;
+    if ($VM::EC2::ASYNC) {
+	$result->cb(
+	    sub {
+		my $attach = shift->recv;
+		if ($attach) {
+		    $self->refresh;
+		    eval {$args{-network_interface_id}->refresh};
+		}
+	    });
+    }
+    elsif ($result) {
+	$self->refresh;
+	eval {$args{-network_interface_id}->refresh};
+    }
+
     return $result;
 }
 
@@ -862,8 +897,22 @@ sub detach_network_interface {
     my ($attachment) = map {$_->attachment} grep { $_->networkInterfaceId eq $nid } $self->network_interfaces;
     $attachment or croak "$self is not attached to $nid";
     my $result = $self->aws->detach_network_interface($attachment,$force);
-    $self->refresh if $result;
-    eval {$nid->refresh} if $result;
+
+    if ($VM::EC2::ASYNC) {
+	$result->cb(
+	    sub {
+		my $attach = shift->recv;
+		if ($attach) {
+		    $self->refresh;
+		    eval {$nid->refresh};
+		}
+	    });
+    }
+    elsif ($result) {
+	$self->refresh;
+	eval {$nid->refresh} if $result;
+    }
+
     return $result;
 }
 

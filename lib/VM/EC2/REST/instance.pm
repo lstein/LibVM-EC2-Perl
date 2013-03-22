@@ -103,7 +103,7 @@ retrieved from each instance by calling its reservationId() method.
 sub describe_instances {
     my $self = shift;
     my %args = $VEP->args(-instance_id,@_);
-    my ($async,@params) = $VEP->format_parms(\%args,
+    my @params = $VEP->format_parms(\%args,
 							    {
 								list_parm   => 'InstanceId',
 								filter_parm => 'Filter'
@@ -411,7 +411,7 @@ sub run_instances {
     $args{-iam_instance_profile_arn}  ||= $args{-iam_arn};
     $args{-iam_instance_profile_name} ||= $args{-iam_name};
 
-    my ($async,@param) = $VEP->format_parms(\%args,{
+    my (@param) = $VEP->format_parms(\%args,{
 	single_parm => [qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIpAddress
                            InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType
                            IamInstanceProfile.Arn IamInstanceProfile.Name
@@ -465,7 +465,7 @@ method:
 
 sub start_instances {
     my $self = shift;
-    my ($async,@param) = $VEP->simple_arglist('InstanceId' => @_);
+    my (@param) = $VEP->simple_arglist('InstanceId' => @_);
     return $self->call('StartInstances',@param);
 }
 
@@ -505,7 +505,7 @@ sub stop_instances {
     my %args = $VEP->args('-instance_id' => @_);
     $args{-instance_id} or croak "usage: stop_instances(\@instance_ids)";
 
-    my ($async,@params) = $VEP->format_parms(\%args,{
+    my @params = $VEP->format_parms(\%args,{
 	single_parm => 'Force',
 	list_parm   => 'InstanceId'});
 
@@ -539,7 +539,7 @@ You can also terminate an instance by calling its terminate() method:
 
 sub terminate_instances {
     my $self = shift;
-    my ($async,@params) = $VEP->simple_arglist('-instance_id'=>@_);
+    my @params = $VEP->simple_arglist('-instance_id'=>@_);
     @params or croak 'Usage: terminate_instances(\@instance_ids)';
     return $self->call('TerminateInstances',@params);
 }
@@ -562,7 +562,7 @@ You can also reboot an instance by calling its terminate() method:
 
 sub reboot_instances {
     my $self = shift;
-    my ($async,@params) = $VEP->simple_arglist('-instance_id'=>@_);    
+    my @params = $VEP->simple_arglist('-instance_id'=>@_);    
     return $self->call('RebootInstances',@params);
 }
 
@@ -579,7 +579,7 @@ sub confirm_product_instance {
     my $self = shift;
     @_ >= 2 or croak "Usage: confirm_product_instance(\$instance_id,\$product_code)";
     my %args = $_[0] =~ /^-/ ? @_ : (-instance_id=>$_[0],-product_code=>$_[1],-cb=>$_[2]);
-    my ($async,@params) = $VEP->format_parms(\%args,{
+    my @params = $VEP->format_parms(\%args,{
 	single_parm => [qw(InstanceId ProductCode)]}
 	);
     return $self->call('ConfirmProductInstance',@params);
@@ -636,7 +636,7 @@ sub describe_instance_attribute {
     my $self = shift;
     @_ >= 2 or croak "Usage: describe_instance_attribute(\$instance_id,\$attribute_name)";
     my %args = $_[0]=~/^-/ ? @_ : (-instance_id=>$_[0],-attribute=>$_[1],-cb=>$_[2]);
-    my ($async,@param)  = $VEP->format_parms(\%args,
+    my (@param)  = $VEP->format_parms(\%args,
 					     {single_parm => [qw(InstanceId Attribute)]});
     my $result = $self->call('DescribeInstanceAttribute',@param);
     return $result && $result->attribute($args{-attribute});
@@ -694,7 +694,7 @@ sub modify_instance_attribute {
     $args{-disable_api_termination} = 'true'      if $args{-termination_protection};
     $args{-instance_initiated_shutdown_behavior} ||= $args{-shutdown_behavior};
 
-    my ($async,@param) = $VEP->format_parms(\%args,{
+    my (@param) = $VEP->format_parms(\%args,{
 	single_parm => 'InstanceId',
 	value_parm  => [qw(InstanceType Kernel Ramdisk UserData DisableApiTermination
                            InstanceInitiatedShutdownBehavior SourceDestCheck)],
@@ -716,7 +716,7 @@ successful.
 sub reset_instance_attribute {
     my $self = shift;
     @_      >= 2 or croak "Usage: reset_instance_attribute(\$instanceId,\$attribute_name)";
-    my ($instance_id,$attribute,$async) = @_;
+    my ($instance_id,$attribute) = @_;
     my %valid = map {$_=>1} qw(kernel ramdisk sourceDestCheck);
     $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
     return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
@@ -782,16 +782,15 @@ sub more_instance_status {
 
 sub describe_instance_status {
     my $self = shift;
-    my ($async,@parms);
+    my @parms;
 
     if (!@_ && $self->{instance_status_token} && $self->{instance_status_args}) {
 	@parms = (@{$self->{instance_status_args}},NextToken=>$self->{instance_status_token});
-	$async = $self->{instance_status_async};
     }
     
     else {
 	my %args = $VEP->args('-instance_id',@_);
-	($async,@parms) = $VEP->format_parms(\%args,{
+	(@parms) = $VEP->format_parms(\%args,{
 	    list_parm   => 'InstanceId',
 	    filter_parm => 'Filter',
 	    boolean_parm=> 'IncludeAllInstances',
@@ -800,7 +799,6 @@ sub describe_instance_status {
 	if ($args{-max_results}) {
 	    $self->{instance_status_token} = 'xyzzy'; # dummy value
 	    $self->{instance_status_args}  = \@parms;
-	    $self->{instance_status_async} = $async;
 	}
 
     }

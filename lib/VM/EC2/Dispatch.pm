@@ -162,38 +162,6 @@ sub content2objects {
     }
 }
 
-# old way
-sub response2objects {
-    my $self     = shift;
-    my ($response,$ec2) = @_;
-
-    my $handler  = $self->class_from_response($response) or return;
-    my $content  = $response->decoded_content;
-
-    my ($method,@params) = split /,/,$handler;
-
-    if (ref $handler eq 'CODE') {
-	my $parsed = $self->new_xml_parser->XMLin($content);
-	$handler->($parsed,$ec2,@{$parsed}{'xmlns','requestId'});
-    }
-    elsif ($self->can($method)) {
-	return $self->$method($content,$ec2,@params);
-    }
-    else {
-	load_module($handler);
-	my $parser   = $self->new();
-	$parser->parse($content,$ec2,$handler);
-    }
-}
-
-sub class_from_response {
-    my $self     = shift;
-    my $response = shift;
-    my ($action) = $response->request->content =~ /Action=([^&]+)/;
-    $action      = uri_unescape($action);
-    return $REGISTRATION->{$action} || 'VM::EC2::Generic';
-}
-
 sub parser { 
     my $self = shift;
     return $self->{xml_parser} ||=  $self->new_xml_parser;

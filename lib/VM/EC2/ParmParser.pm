@@ -44,7 +44,7 @@ sub format_parms {
 	}
 	push @param,@p;
     }
-    return $args->{-cb},@param;
+    return @param;
 }
 
 sub simple_arglist {

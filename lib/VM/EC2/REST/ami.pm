@@ -6,31 +6,8 @@ package VM::EC2;  # add methods to VM::EC2
 
 VM::EC2::Dispatch->register(
     DescribeImages    => 'fetch_items,imagesSet,VM::EC2::Image',
-    CreateImage             => sub { 
-	my ($data,$aws) = @_;
-	my $image_id = $data->{imageId} or return;
-	sleep 2; # wait for the thing to register (but sometimes it is not enough)
-	return eval {
-            local $SIG{ALRM} = sub { die 'timeout' };
-            my $image;
-            alarm(60);
-            until ($image = $aws->describe_images($image_id)) { sleep 1 }
-            alarm(0);
-            $image;
-        }},
-    RegisterImage             => sub { 
-	my ($data,$aws) = @_;
-	my $image_id = $data->{imageId} or return;
-	sleep 2; # wait for the thing to register (but sometimes it is not enough)
-	return eval {
-            local $SIG{ALRM} = sub { die 'timeout' };
-            my $image;
-            alarm(60);
-            until ($image = $aws->describe_images($image_id)) { sleep 1 }
-            alarm(0);
-            $image;
-        };
-    },
+    CreateImage             => sub { shift->{imageId} },
+    RegisterImage           => sub { shift->{imageId} },
     DeregisterImage         => 'boolean',
     ModifyImageAttribute    => 'boolean',
     ResetImageAttribute     => 'boolean',
@@ -132,7 +109,26 @@ sub create_image {
     push @param,$self->single_parm('Description',\%args);
     push @param,$self->boolean_parm('NoReboot',\%args);
     push @param,$self->block_device_parm($args{-block_device_mapping});
-    return $self->call('CreateImage',@param);
+
+    my $cv = $self->condvar;
+    {
+	local $VM::EC2::ASYNC = 1;
+	$self->call('CreateImage',@param)->cb(
+	    sub {
+		my $img_id = shift->recv;
+		my $timer; $timer = AnyEvent->timer(after    => 0.5,
+						    interval => 1,
+						    cb => sub {
+							my $di = $self->describe_images_async($img_id);
+							$di->cb(sub {
+							    if (my $img = shift->recv) {
+								$cv->send($img);
+								undef $timer;
+							    }});
+						    });
+	    });
+    }
+    return $VM::EC2::ASYNC ? $cv : $cv->recv;
 }
 
 =head2 $image = $ec2->register_image(-name=>$name,%other_args)
