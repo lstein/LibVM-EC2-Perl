@@ -1,4 +1,4 @@
-package VM::EC2::State::Reason;
+package VM::EC2::Instance::State::Reason;
 
 =head1 NAME
 
