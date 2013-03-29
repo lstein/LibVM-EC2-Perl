@@ -680,6 +680,20 @@ sub current_status {
     return $i->instanceState;
 }
 
+sub current_status_async {
+    my $self = shift;
+    my $to_caller = VM::EC2->condvar;
+
+    my $cv = $self->aws->describe_instances_async(-instance_id=>$self->instanceId);
+
+    $cv->cb(sub {
+	my $i = shift->recv;
+	$to_caller->send($i->instanceState)
+	    });
+
+    return $to_caller;
+}
+
 sub current_state { shift->current_status } # alias
 sub status        { shift->current_status } # legacy
 

@@ -1187,25 +1187,38 @@ sub wait_for_terminal_state {
     my %terminal_state = map {$_=>1} @$terminal_states;
     my %status = ();
     my @pending = grep {defined $_} @$objects; # in case we're passed an undef
-    my $status = eval {
-	local $SIG{ALRM};
-	if ($timeout && $timeout > 0) {
-	    $SIG{ALRM} = sub {die "timeout"};
-	    alarm($timeout);
-	}
-	while (@pending) {
-	    sleep 3;
-	    $status{$_} = $_->current_status foreach @pending;
-	    @pending    = grep { !$terminal_state{$status{$_}} } @pending;
-	}
-	alarm(0);
-	\%status;
-    };
-    if ($@ =~ /timeout/) {
-	$self->error('timeout waiting for terminal state');
-	return;
+
+    my %timers;
+    my $done = $self->condvar();
+    $done->begin(sub{my $cv = shift;
+		     $cv->send($cv->error ? undef : \%status)});
+    
+    for my $obj (@pending) {
+	$done->begin;
+	my $timer = AnyEvent->timer(interval => 3,
+				    cb       => sub { $obj->current_status_async->cb( 
+							  sub {
+							      my $state = shift->recv;
+							      if ($terminal_state{$state}) {
+								  $status{$obj} = $state;
+								  $done->end;
+								  undef $timers{$obj};
+							      }})});
+	$timers{$obj} = $timer;
     }
-    return $status;
+
+    # timeout
+    my $timeout_event;
+    $timeout_event = AnyEvent->timer(after=> $timeout,
+				     cb   => sub {
+					 undef %timers; # cancel all timers
+					 undef $timeout_event;
+					 $done->error('timeout waiting for terminal state');
+					 $done->end foreach @pending;
+				     });
+
+
+    return $ASYNC ? $done : $done->recv;
 }
 
 =head2 $timeout = $ec2->wait_for_timeout([$new_timeout]);
