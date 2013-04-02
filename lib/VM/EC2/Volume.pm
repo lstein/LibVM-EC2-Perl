@@ -271,7 +271,11 @@ sub current_status_async {
 
     $cv->cb(sub {
 	my $i = shift->recv;
-	$to_caller->send($i->status)
+	if ($i) {
+	    $to_caller->send($i->status);
+	} else {
+	    $to_caller->send;
+	}
 	    });
 
     return $to_caller;

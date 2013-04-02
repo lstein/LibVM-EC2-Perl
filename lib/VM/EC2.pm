@@ -1209,7 +1209,7 @@ sub wait_for_terminal_state {
 					$obj->current_status_async->cb( 
 					    sub {
 						my $state = shift->recv;
-						if ($terminal_state{$state}) {
+						if (!$state || $terminal_state{$state}) {
 						    $status{$obj} = $state;
 						    $done->end;
 						    undef $timers{$obj};

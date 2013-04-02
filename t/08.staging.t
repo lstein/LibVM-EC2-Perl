@@ -85,7 +85,8 @@ is($listing[0],'01.describe.t','put copied files with correct structure');
 # (need lots more tests of syntactic correctness of the rsync methods)
 
 my $used_zone   = $server1->placement;
-my ($new_zone)  = grep {$_ ne $used_zone} $manager->ec2->describe_availability_zones({state=>'available'});
+my ($new_zone)  = grep {$_ ne $used_zone} 
+                  $manager->ec2->describe_availability_zones({state=>'available'});
 
 print STDERR "# spinning up a second test server...\n";
 my $server2 = $manager->get_server(-name              => 'test_server2',
