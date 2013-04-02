@@ -322,6 +322,21 @@ sub current_status {
     return $self->status;
 }
 
+sub current_status_async {
+    my $self = shift;
+    my $to_caller = VM::EC2->condvar;
+
+    my $cv = $self->aws->describe_snapshots_async(-snapshot_id=>$self->snapshotId);
+
+    $cv->cb(sub {
+	my $i = shift->recv;
+	$to_caller->send($i->status)
+	    });
+
+    return $to_caller;
+}
+
+
 sub createVolumePermissions {
     my $self = shift;
     return map {VM::EC2::Snapshot::CreateVolumePermission->new($_,$self->aws)}

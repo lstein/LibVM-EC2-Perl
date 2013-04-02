@@ -1172,9 +1172,10 @@ There is also a generic version of this defined in the VM::EC2 core:
 
 =head2 $ec2->wait_for_terminal_state(\@objects,['list','of','states'] [,$timeout])
 
-Generic version of the last four methods. Wait for all members of the provided list of Amazon objects 
-instances to reach some terminal state listed in the second argument, and then return
-a hash reference that maps each object ID to its final state.
+Generic version of the last four methods. Wait for all members of the
+provided list of Amazon objects instances to reach some terminal state
+listed in the second argument, and then return a hash reference that
+maps each object ID to its final state.
 
 If a timeout is provided, in seconds, then the method will abort after
 waiting the indicated time and return undef.
@@ -1190,20 +1191,29 @@ sub wait_for_terminal_state {
 
     my %timers;
     my $done = $self->condvar();
-    $done->begin(sub{my $cv = shift;
-		     $cv->send($cv->error ? undef : \%status)});
+    $done->begin(sub {
+	my $cv = shift;
+	if ($cv->error) {
+	    $self->error($cv->error);
+	    $cv->send();
+	} else {
+	    $cv->send(\%status);
+	}
+		 }
+	);
     
     for my $obj (@pending) {
 	$done->begin;
 	my $timer = AnyEvent->timer(interval => 3,
-				    cb       => sub { $obj->current_status_async->cb( 
-							  sub {
-							      my $state = shift->recv;
-							      if ($terminal_state{$state}) {
-								  $status{$obj} = $state;
-								  $done->end;
-								  undef $timers{$obj};
-							      }})});
+				    cb       => sub {
+					$obj->current_status_async->cb( 
+					    sub {
+						my $state = shift->recv;
+						if ($terminal_state{$state}) {
+						    $status{$obj} = $state;
+						    $done->end;
+						    undef $timers{$obj};
+						}})});
 	$timers{$obj} = $timer;
     }
 
@@ -1216,7 +1226,7 @@ sub wait_for_terminal_state {
 					 $done->error('timeout waiting for terminal state');
 					 $done->end foreach @pending;
 				     });
-
+    $done->end;
 
     return $ASYNC ? $done : $done->recv;
 }

@@ -263,6 +263,21 @@ sub current_status {
     $self->status;
 }
 
+sub current_status_async {
+    my $self = shift;
+    my $to_caller = VM::EC2->condvar;
+
+    my $cv = $self->aws->describe_volumes_async($self->volumeId);
+
+    $cv->cb(sub {
+	my $i = shift->recv;
+	$to_caller->send($i->status)
+	    });
+
+    return $to_caller;
+}
+
+
 sub refresh {
     my $self = shift;
     local $self->aws->{raise_error} = 1;

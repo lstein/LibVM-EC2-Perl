@@ -539,7 +539,7 @@ You can also terminate an instance by calling its terminate() method:
 
 sub terminate_instances {
     my $self = shift;
-    my @params = $VEP->simple_arglist('-instance_id'=>@_);
+    my @params = $VEP->simple_arglist('InstanceId'=>@_);
     @params or croak 'Usage: terminate_instances(\@instance_ids)';
     return $self->call('TerminateInstances',@params);
 }
@@ -562,7 +562,7 @@ You can also reboot an instance by calling its terminate() method:
 
 sub reboot_instances {
     my $self = shift;
-    my @params = $VEP->simple_arglist('-instance_id'=>@_);    
+    my @params = $VEP->simple_arglist('InstanceId'=>@_);    
     return $self->call('RebootInstances',@params);
 }
 
@@ -789,7 +789,7 @@ sub describe_instance_status {
     }
     
     else {
-	my %args = $VEP->args('-instance_id',@_);
+	my %args = $VEP->args('InstanceId',@_);
 	(@parms) = $VEP->format_parms(\%args,{
 	    list_parm   => 'InstanceId',
 	    filter_parm => 'Filter',
