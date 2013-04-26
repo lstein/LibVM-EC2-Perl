@@ -266,7 +266,8 @@ sub current_status {
 sub refresh {
     my $self = shift;
     my $v    = $self->aws->describe_volumes($self->volumeId);
-    %$self   = %$v;
+    %$self   = %$v if $v;
+    return defined $v;
 }
 
 sub auto_enable_io {

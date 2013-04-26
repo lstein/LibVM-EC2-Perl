@@ -123,8 +123,9 @@ sub current_status {
 sub refresh {
     my $self = shift;
     my $v    = $self->aws->describe_volumes($self->volumeId);
-    my $a    = $v->attachment;
-    %$self   = %$a;
+    my $a    = $v && $v->attachment;
+    %$self   = %$a if $a;
+    return defined $a;
 }
 
 sub deviceName { shift->device }

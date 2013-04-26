@@ -146,7 +146,8 @@ sub fault {
 sub refresh {
     my $self = shift;
     my $r    = $self->ec2->describe_spot_instance_requests($self->spotInstanceRequestId);
-    %$self   = %$r;
+    %$self   = %$r if $r;
+    return defined $r;
 }
 
 sub current_status {

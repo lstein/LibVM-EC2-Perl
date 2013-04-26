@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2012-12-01 version of the Amazon AWS API
+This is an interface to the 2013-02-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -2049,6 +2049,57 @@ sub reset_image_attribute {
 		       Attribute  => $attribute);
 }
 
+=head2 $image = $ec2->copy_image(-source_region   => $src,
+                                 -source_image_id => $id,
+                                 -name            => $name,
+                                 -description     => $desc,
+                                 -client_token    => $token)
+
+Initiates the copy of an AMI from the specified source region to the
+region in which the API call is executed.
+
+Required arguments:
+
+ -source_region       -- The ID of the AWS region that contains the AMI to be
+                         copied (source).
+
+ -source_image_id     -- The ID of the Amazon EC2 AMI to copy.
+
+Optional arguments:
+
+ -name                -- The name of the new EC2 AMI in the destination region.
+
+ -description         -- A description of the new AMI in the destination region.
+
+ -client_token        -- Unique, case-sensitive identifier you provide to ensure
+                         idempotency of the request.
+
+Returns a L<VM::EC2::Image> object on success;
+
+=cut
+
+sub copy_image {
+    my $self = shift;
+    my %args = @_;
+    $args{-description} ||= $args{-desc};
+    $args{-source_region} ||= $args{-region};
+    $args{-source_image_id} ||= $args{-image_id};
+    $args{-source_region} or croak "copy_image(): -source_region argument required";
+    $args{-source_image_id} or croak "copy_image(): -source_image_id argument required";
+    my @params;
+    push @params, $self->single_parm($_,\%args)
+        foreach qw(SourceRegion SourceImageId Name Description ClientToken);
+    my $image_id = $self->call('CopyImage',@params) or return;
+    return eval {
+            my $image;
+            local $SIG{ALRM} = sub {die "timeout"};
+            alarm(60);
+            until ($image = $self->describe_images($image_id)) { sleep 1 }
+            alarm(0);
+            $image;
+    };
+}
+
 =head1 EC2 VOLUMES AND SNAPSHOTS
 
 The methods in this section allow you to query and manipulate EC2 EBS
@@ -2541,7 +2592,7 @@ Required arguments:
 Optional arguments:
  -description  -- A description of the new snapshot
 
-The return value is a VM::EC2::Snapshot object that can be queried
+The return value is a L<VM::EC2::Snapshot> object that can be queried
 through its current_status() interface to follow the progress of the
 snapshot operation.
 
@@ -3839,6 +3890,69 @@ sub delete_vpc {
     my %args  = $self->args(-vpc_id => @_);
     my @param = $self->single_parm(VpcId=>\%args);
     return $self->call('DeleteVpc',@param);
+}
+
+=head2 $success = $ec2->modify_vpc_attribute(-vpc_id               => $id,
+                                             -enable_dns_support   => $boolen,
+                                             -enable_dns_hostnames => $boolean)
+
+Modify attributes of a VPC.
+
+Required Arguments:
+
+ -vpc_id                  The ID of the VPC.
+
+ -enable_dns_support      Specifies whether the DNS server provided
+                          by Amazon is enabled for the VPC.
+
+Optional arguments:
+
+ -enable_dns_hostnames    Specifies whether DNS hostnames are provided
+                          for the instances launched in this VPC. You
+                          can only set this attribute to true if
+                          -enable_dns_support is also true.
+
+Returns true on success.
+
+=cut
+
+sub modify_vpc_attribute {
+    my $self = shift;
+    my %args  = @_;
+    $args{-vpc_id} or croak "modify_vpc_attribute(): -vpc_id argument missing";
+    $args{-enable_dns_support} or
+        croak "modify_vpc_attribute(): -enable_dns_support argument missing";
+    my @param = $self->single_parm(VpcId=>\%args);
+    push @param, $self->boolean_parm($_,\%args)
+        foreach qw(enableDnsSupport enableDnsHostnames);
+    return $self->call('ModifyVpcAttribute',@param);
+}
+
+=head2 $attr = $ec2->describe_vpc_attribute(-vpc_id => $id, -attribute => $attr)
+
+Describes an attribute of the specified VPC.
+
+Required arguments:
+
+ -vpc_id                  The ID of the VPC.
+
+ -attribute               The VPC attribute.
+                          Valid values:
+                          enableDnsSupport | enableDnsHostnames
+
+Returns true if attribute is set.
+
+=cut
+
+sub describe_vpc_attribute {
+    my $self = shift;
+    my %args  = @_;
+    $args{-vpc_id} or croak "modify_vpc_attribute(): -vpc_id argument missing";
+    $args{-attribute} or croak "modify_vpc_attribute(): -attribute argument missing";
+    my @param = $self->single_parm(VpcId=>\%args);
+    push @param, $self->single_parm('Attribute',\%args);
+    my $result = $self->call('DescribeVpcAttribute',@param);
+    return $result && $result->attribute($args{-attribute}) eq 'true';
 }
 
 =head1 VPC Subnets and Routing
@@ -7197,7 +7311,7 @@ API version.
 
 sub version  { 
     my $self = shift;
-    return $self->{version} ||=  '2012-12-01';
+    return $self->{version} ||=  '2013-02-01';
 }
 
 =head2 $ts = $ec2->timestamp
@@ -7243,6 +7357,8 @@ sub call {
 	my $error;
 	if ($content =~ /<Response>/) {
 	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self);
+	} elsif ($content =~ /<ErrorResponse xmlns="http:\/\//) {
+	    $error = VM::EC2::Dispatch->create_alt_error_object($response->decoded_content,$self);
 	} else {
 	    my $code = $response->status_line;
 	    my $msg  = $response->decoded_content;

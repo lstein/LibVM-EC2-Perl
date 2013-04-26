@@ -129,9 +129,9 @@ sub current_state { shift->current_status } # alias
 
 sub refresh {
     my $self = shift;
-    my $i = $self->ec2->describe_reserved_instances($self->reservedInstancesId)
-	or die $self->ec2->error_str;
-    %$self  = %$i;
+    my $i = $self->ec2->describe_reserved_instances($self->reservedInstancesId);
+    %$self = %$i if $i;
+    return defined $i;
 }
 
 

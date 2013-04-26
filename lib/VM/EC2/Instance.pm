@@ -767,7 +767,8 @@ sub refresh {
     my $self = shift;
     my $i   = shift;
     ($i) = $self->aws->describe_instances(-instance_id=>$self->instanceId) unless $i;
-    %$self  = %$i;
+    %$self  = %$i if $i;
+    return defined $i;
 }
 
 sub console_output {

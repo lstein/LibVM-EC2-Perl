@@ -104,7 +104,8 @@ sub refresh {
     my $self = shift;
     my $i   = shift;
     ($i) = $self->aws->describe_internet_gateways($self->internetGatewayId) unless $i;
-    %$self  = %$i;
+    %$self  = %$i if $i;
+    return defined $i;
 }
 
 1;

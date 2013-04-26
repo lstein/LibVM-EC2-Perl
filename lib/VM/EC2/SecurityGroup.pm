@@ -313,8 +313,9 @@ sub write { shift->update }
 
 sub refresh {
     my $self = shift;
-    my $i    = $self->aws->describe_security_groups($self->groupId) or return;
-    %$self   = %$i;
+    my $i    = $self->aws->describe_security_groups($self->groupId);
+    %$self   = %$i if $i;
+    return defined $i;
 }
 
 sub _new_permission {

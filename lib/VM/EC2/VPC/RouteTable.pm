@@ -130,7 +130,8 @@ sub refresh {
     my $self = shift;
     my $i   = shift;
     ($i) = $self->aws->describe_subnets($self->subnetId) unless $i;
-    %$self  = %$i;
+    %$self  = %$i if $i;
+    return defined $i;
 }
 
 sub create_route {
