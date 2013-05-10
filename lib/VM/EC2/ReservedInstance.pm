@@ -129,9 +129,9 @@ sub current_state { shift->current_status } # alias
 
 sub refresh {
     my $self = shift;
-    local $self->aws->{raise_error} = 1;
     my $i = $self->ec2->describe_reserved_instances($self->reservedInstancesId);
-    %$self  = %$i;
+    %$self = %$i if $i;
+    return defined $i;
 }
 
 

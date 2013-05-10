@@ -172,7 +172,8 @@ use constant ObjectRegistration => {
             $image;
         };
     },
-    DeregisterImage      => 'boolean',
+    DeregisterImage   => 'boolean',
+    CopyImage         => sub { shift->{imageId} },
     DescribeAddresses => 'fetch_items,addressesSet,VM::EC2::ElasticAddress',
     AssociateAddress  => sub {
 	my $data = shift;
@@ -220,6 +221,7 @@ use constant ObjectRegistration => {
     CreateVpc                         => 'fetch_one,vpc,VM::EC2::VPC',
     DescribeVpcs                      => 'fetch_items,vpcSet,VM::EC2::VPC',
     DeleteVpc                         => 'boolean',
+    ModifyVpcAttribute                => 'boolean',
     # dhcp options
     DescribeDhcpOptions               => 'fetch_items,dhcpOptionsSet,VM::EC2::VPC::DhcpOptions,nokey',
     CreateDhcpOptions                 => 'fetch_one,dhcpOptions,VM::EC2::VPC::DhcpOptions,nokey',
@@ -283,7 +285,7 @@ use constant ObjectRegistration => {
     EnableVgwRoutePropagation         => 'boolean',
     # elastic load balancers
     DescribeLoadBalancers             => 'fetch_members,LoadBalancerDescriptions,VM::EC2::ELB',
-    ConfigureHealthCheck              => 'elb_fetch_one,HealthCheck,VM::EC2::ELB::HealthCheck',
+    ConfigureHealthCheck              => 'fetch_one_result,HealthCheck,VM::EC2::ELB::HealthCheck',
     CreateAppCookieStickinessPolicy   => sub { exists shift->{CreateAppCookieStickinessPolicyResult} },
     CreateLBCookieStickinessPolicy    => sub { exists shift->{CreateLBCookieStickinessPolicyResult} },
     CreateLoadBalancer                => sub { shift->{CreateLoadBalancerResult}{DNSName} },
@@ -329,6 +331,7 @@ sub response2objects {
 
     my $handler    = $self->class_from_response($response) or return;
     my $content  = $response->decoded_content;
+#print $content,"\n";
 
     my ($method,@params) = split /,/,$handler;
 
@@ -462,9 +465,9 @@ sub elb_member_list {
                            @{$parsed->{$result_key}{$tag}{member}};
 }
 
-# identical to fetch_one, except looks inside the *Result tag that ELB API calls
-# return
-sub elb_fetch_one {
+# identical to fetch_one, except looks inside the (APICallName)Result tag that
+# ELB and RDS API calls return
+sub fetch_one_result {
     my $self = shift;
     my ($content,$ec2,$tag,$class,$nokey) = @_; 
     load_module($class);
@@ -602,6 +605,16 @@ sub create_error_object {
 	$parsed->{Errors}{Error}{Message} .= " from API call '$API_call'";
     }
     return $class->new($parsed->{Errors}{Error},$ec2,@{$parsed}{'xmlns','requestId'});
+}
+
+# alternate method used for ELB, RDS calls
+sub create_alt_error_object {
+    my $self = shift;
+    my ($content,$ec2) = @_;
+    my $class   = ObjectRegistration->{Error};
+    eval "require $class; 1" || die $@ unless $class->can('new');
+    my $parsed = $self->new_xml_parser->XMLin($content);
+    return $class->new($parsed->{Error},$ec2,@{$parsed}{'xmlns','requestId'});
 }
 
 # not a method!

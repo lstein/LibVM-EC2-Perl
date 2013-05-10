@@ -146,7 +146,7 @@ sub as_string {
     my @list;
     foreach my $effect (sort keys %$st) {
         push @list, {
-            Action => [map { "ec2:$_" } keys $st->{$effect}],
+            Action => [map { "ec2:$_" } keys %{$st->{$effect}}],
             Effect => "\u$effect\E",
             Resource => '*',
         };

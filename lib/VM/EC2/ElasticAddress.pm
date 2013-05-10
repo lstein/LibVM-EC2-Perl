@@ -103,8 +103,9 @@ sub disassociate {
 
 sub refresh {
     my $self = shift;
-    my $i  = $self->aws->describe_addresses($self) or return;
-    %$self = %$i;
+    my $i  = $self->aws->describe_addresses($self);
+    %$self = %$i if $i;
+    return defined $i;
 }
 
 1;
