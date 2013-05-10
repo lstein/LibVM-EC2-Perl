@@ -4198,7 +4198,7 @@ sub associate_route_table {
     $args{-subnet_id} && $args{-route_table_id}
        or croak "-subnet_id, and -route_table_id arguments required";
     my @param = ($self->single_parm(SubnetId=>\%args),
-                $self->single_parm(RouteTableId=>\%args));
+		 $self->single_parm(RouteTableId=>\%args));
     return $self->call('AssociateRouteTable',@param);
 }
 
