@@ -286,7 +286,8 @@ sub refresh {
     my $self = shift;
     local $self->aws->{raise_error} = 1;
     my $v    = $self->aws->describe_volumes($self->volumeId);
-    %$self   = %$v;
+    %$self   = %$v if $v;
+    return defined $v;
 }
 
 sub auto_enable_io {
