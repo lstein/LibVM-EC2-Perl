@@ -1250,26 +1250,6 @@ sub wait_for_timeout {
     return $d;
 }
 
-=head2 @asg = $ec2->describe_policies(-auto_scaling_group_name => $name);
-
-Returns information about autoscaling policies
-
-  -auto_scaling_group_name      The name of the Auto Scaling group
-  -policy_names                 An array of policy names or policy ARNs to be described. If this list is omitted, all policy names are described. If an auto scaling group name is provided, the results are limited to that group. The list of requested policy names cannot contain more than 50 items. If unknown policy names are requested, they are ignored with no error.
-  -names                        Alias of -auto_scaling_group_names
-
-Returns a list of L<VM::EC2::ScalingPolicy>.
-
-=cut
-
-sub describe_policies {
-    my ($self, %args) = @_;
-    $args{-auto_scaling_group_name} ||= $args{-name};
-    my @params = $self->member_list_parm('PolicyNames',\%args);
-    push @params, ('AutoScalingGroupName', $args{-auto_scaling_group_name}) if ($args{-auto_scaling_group_name});
-    return $self->asg_call('DescribePolicies', @params);
-}
-
 # ------------------------------------------------------------------------------------------
 
 =head1 INTERNAL METHODS
