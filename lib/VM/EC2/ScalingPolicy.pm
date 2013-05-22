@@ -31,6 +31,7 @@ These properties are supported:
   policy_arn               -- The Amazon Resource Name (ARN) of the policy
   policy_name              -- The name of the scaling policy
   scaling_adjustment       -- The number associated with the specified adjustment type. A positive value adds to the current capacity and a negative value removes from the current capacity
+  name                     -- Alias for policy_name
 
 =head1 SEE ALSO
 
@@ -62,5 +63,7 @@ sub args {
     return @_ if $_[0] =~ /^-/;
     return ($default_param_name => \@_);
 }
+
+sub name { shift->policy_name }
 
 1;

@@ -7,6 +7,7 @@ package VM::EC2;  # add methods to VM::EC2
 VM::EC2::Dispatch->register(
     DescribeLaunchConfigurations      => 'fetch_members,LaunchConfigurations,VM::EC2::LaunchConfiguration',
     DescribeAutoScalingGroups         => 'fetch_members,AutoScalingGroups,VM::EC2::ASG',
+    DescribePolicies                  => 'fetch_members,ScalingPolicies,VM::EC2::ScalingPolicy',
     );
 
 =head1 NAME VM::EC2::REST::autoscaling
@@ -26,9 +27,11 @@ Implemented:
  CreateLaunchConfiguration
  DeleteAutoScalingGroup
  DeleteLaunchConfiguration
+ DeletePolicy
  DescribeAutoScalingGroups
  DescribeLaunchConfigurations
  DescribePolicies
+ PutScalingPolicy
  ResumeProcesses
  SuspendProcesses
  UpdateAutoScalingGroup
@@ -36,7 +39,6 @@ Implemented:
 Unimplemented:
  CreateOrUpdateTags
  DeleteNotificationConfiguration
- DeletePolicy
  DeleteScheduledAction
  DeleteTags
  DescribeAdjustmentTypes
@@ -53,7 +55,6 @@ Unimplemented:
  EnableMetricsCollection
  ExecutePolicy
  PutNotificationConfiguration
- PutScalingPolicy
  PutScheduledUpdateGroupAction
  SetDesiredCapacity
  SetInstanceHealth
@@ -374,6 +375,69 @@ sub describe_policies {
     push @params, ('AutoScalingGroupName', $args{-auto_scaling_group_name})
         if ($args{-auto_scaling_group_name});
     return $self->asg_call('DescribePolicies', @params);
+}
+
+
+=head2 $success = $ec2->put_scaling_policy
+
+Creates or updates a policy for an Auto Scaling group.
+
+Required arguments:
+
+  -policy_name             The name of the policy to update or create.
+  -name                    Alias for -policy_name
+  -auto_scaling_group_name The name or ARN of the Auto Scaling group.
+  -scaling_adjustment      Number of instances by which to scale. 
+  -adjustment_type         Specifies wheter -scaling_adjustment is an absolute 
+                           number or a percentage of the current capacity.
+                           Valid values are:
+        ChangeInCapacity
+        ExactCapacity
+        PercentChangeInCapacity
+
+Optional arguments:
+
+  -cooldown             The amount of time, in seconds, after a scaling
+                        activity completes and before the next scaling acitvity
+                        can start. 
+  -min_adjustment_step  Used with PercentChangeInCapacity as -adjustment_type.
+
+Returns true on success
+
+=cut
+
+sub put_scaling_policy {
+    my ($self, %args) = @_;
+    $args{-policy_name} ||= $args{-name};
+    my @params = map {$self->single_parm($_, \%args) }
+        qw( AdjustmentType AutoScalingGroupName Cooldown MinAdjustmentStep
+            PolicyName ScalingAdjustment );
+
+    return $self->asg_call('PutScalingPolicy', @params);
+}
+
+=head2 $success = $ec2->delete_policy(-policy_name => $name)
+
+Deletes a policy
+
+Required arguments:
+
+  -policy_name                  Name or ARN of the policy
+  -name                         Alias for -policy_name
+  -auto_scaling_group_name      Name of the Auto Scaling Group, required when
+                                specifying policy by name (not by ARN)
+
+Returns true on success
+
+=cut
+
+sub delete_policy {
+    my ($self, %args) = @_;
+    $args{-policy_name} ||= $args{-name};
+    my @params = map { $self->single_parm($_, \%args) }
+        qw( AutoScalingGroupName PolicyName );
+
+    return $self->asg_call('DeletePolicy', @params);
 }
 
 =head1 SEE ALSO
