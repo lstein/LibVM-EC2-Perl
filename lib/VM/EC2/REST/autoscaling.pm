@@ -31,6 +31,7 @@ Implemented:
  DescribeAutoScalingGroups
  DescribeLaunchConfigurations
  DescribePolicies
+ ExecutePolicy
  PutScalingPolicy
  ResumeProcesses
  SuspendProcesses
@@ -53,7 +54,6 @@ Unimplemented:
  DescribeTerminationPolicyTypes
  DisableMetricsCollection
  EnableMetricsCollection
- ExecutePolicy
  PutNotificationConfiguration
  PutScheduledUpdateGroupAction
  SetDesiredCapacity
@@ -438,6 +438,35 @@ sub delete_policy {
         qw( AutoScalingGroupName PolicyName );
 
     return $self->asg_call('DeletePolicy', @params);
+}
+
+=head2 $success = $ec2->execute_policy(-policy_name => $name)
+
+Runs a policy
+
+Required arguments:
+
+  -policy_name                  Name or ARN of the policy
+  -name                         Alias for -policy_name
+  -auto_scaling_group_name      Name of the Auto Scaling Group, required when
+                                specifying policy by name (not by ARN)
+
+Optional arguments:
+
+  -honor_cooldown               Set to true if you want AutoScaling to reject
+                                the request when it is in cooldown
+
+Returns true on success
+
+=cut
+
+sub execute_policy {
+    my ($self, %args) = @_;
+    $args{-policy_name} ||= $args{-name};
+    my @params = map { $self->single_parm($_, \%args) }
+        qw( AutoScalingGroupName HonorCooldown PolicyName );
+
+    return $self->asg_call('ExecutePolicy', @params);
 }
 
 =head1 SEE ALSO
