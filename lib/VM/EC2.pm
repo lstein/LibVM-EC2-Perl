@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2012-12-01 version of the Amazon AWS API
+This is an interface to the 2013-02-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -574,8 +574,10 @@ use URI;
 use URI::Escape;
 use AnyEvent;
 use AnyEvent::HTTP;
+use HTTP::Request::Common;
 use VM::EC2::Error;
 use Carp 'croak','carp';
+use JSON;
 
 our $VERSION = '1.24';
 our $AUTOLOAD;
@@ -1248,6 +1250,26 @@ sub wait_for_timeout {
     return $d;
 }
 
+=head2 @asg = $ec2->describe_policies(-auto_scaling_group_name => $name);
+
+Returns information about autoscaling policies
+
+  -auto_scaling_group_name      The name of the Auto Scaling group
+  -policy_names                 An array of policy names or policy ARNs to be described. If this list is omitted, all policy names are described. If an auto scaling group name is provided, the results are limited to that group. The list of requested policy names cannot contain more than 50 items. If unknown policy names are requested, they are ignored with no error.
+  -names                        Alias of -auto_scaling_group_names
+
+Returns a list of L<VM::EC2::ScalingPolicy>.
+
+=cut
+
+sub describe_policies {
+    my ($self, %args) = @_;
+    $args{-auto_scaling_group_name} ||= $args{-name};
+    my @params = $self->member_list_parm('PolicyNames',\%args);
+    push @params, ('AutoScalingGroupName', $args{-auto_scaling_group_name}) if ($args{-auto_scaling_group_name});
+    return $self->asg_call('DescribePolicies', @params);
+}
+
 # ------------------------------------------------------------------------------------------
 
 =head1 INTERNAL METHODS
@@ -1581,7 +1603,7 @@ API version.
 
 sub version  { 
     my $self = shift;
-    return $self->{version} ||=  '2012-12-01';
+    return $self->{version} ||=  '2013-02-01';
 }
 
 =head2 $ts = $ec2->timestamp
@@ -1620,7 +1642,6 @@ sub call {
     my $self = shift;
     return $ASYNC ? $self->_call_async(@_) : $self->_call_sync(@_);
 }
-
 sub _call_sync {
     my $self = shift;
     my $cv   = $self->_call_async(@_);
@@ -1703,6 +1724,75 @@ sub async_send_error {
     } else {
 	$cv->send;
     }
+}
+
+sub signin_call {
+    my $self = shift;
+    my ($action,%args) = @_;
+    my $endpoint = 'https://signin.aws.amazon.com/federation';
+
+    $args{'Action'} = $action;
+
+    my @param;
+    for my $p (sort keys %args) {
+	    push @param , join '=' , map { uri_escape($_,"^A-Za-z0-9\-_.~") } ($p,$args{$p});
+    }
+ 
+    my $request = GET "$endpoint?" . join '&', @param;
+
+    my $response = $self->ua->request($request);
+
+    return JSON::decode_json($response->content);
+}
+
+=head2 $url = $ec2->login_url(-credentials => $credentials, -issuer => $issuer_url, -destination => $console_url);
+
+Returns an HTTP::Request object that points to the URL to login a user with STS credentials
+
+  -credentials => $fed_token->credentials - Credentials from an $ec2->get_federation_token call
+  -token => $token                        - a SigninToken from $ec2->get_signin_token call
+  -issuer => $issuer_url
+  -destination => $console_url            - URL of the AWS console. Defaults to https://console.aws.amazon.com/console/home
+  -auto_scaling_group_names     List of auto scaling groups to describe
+  -names                        Alias of -auto_scaling_group_names
+
+-credentials or -token are required for this method to work
+
+Usage can be:
+
+  my $fed_token = $ec2->get_federation_token(...);
+  my $token = $ec2->get_signin_token(-credentials => $fed_token->credentials);
+  my $url = $ec2->login_url(-token => $token->{SigninToken}, -issuer => $issuer_url, -destination => $console_url);
+
+Or:
+
+  my $fed_token = $ec2->get_federation_token(...);
+  my $url = $ec2->login_url(-credentials => $fed_token->credentials, -issuer => $issuer_url, -destination => $console_url);
+
+=cut
+
+sub login_url {
+    my $self = shift;
+    my %args = @_;
+    my $endpoint = 'https://signin.aws.amazon.com/federation';
+
+    my %parms; 
+    $parms{Action}      = 'login';
+    $parms{Destination} = $args{-destination} if ($args{-destination});
+    $parms{Issuer}      = $args{-issuer}      if ($args{-issuer});
+    $parms{SigninToken} = $args{-token}       if ($args{-token});
+
+    if (defined $args{-credentials} and not defined $parms{SigninToken}) {
+        $parms{SigninToken} = $self->get_signin_token(-credentials => $args{-credentials})->{SigninToken};
+    }
+
+
+    my @param;
+    for my $p (sort keys %parms) {
+	    push @param , join '=' , map { uri_escape($_,"^A-Za-z0-9\-_.~") } ($p,$parms{$p});
+    }
+
+    GET "$endpoint?" . join '&', @param;
 }
 
 sub sts_call {

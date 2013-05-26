@@ -270,9 +270,9 @@ sub elb_member_list {
                            @{$parsed->{$result_key}{$tag}{member}};
 }
 
-# identical to fetch_one, except looks inside the *Result tag that ELB API calls
-# return
-sub elb_fetch_one {
+# identical to fetch_one, except looks inside the (APICallName)Result tag that
+# ELB and RDS API calls return
+sub fetch_one_result {
     my $self = shift;
     my ($content,$ec2,$tag,$class,$nokey) = @_; 
     load_module($class);
@@ -410,6 +410,16 @@ sub create_error_object {
 	$parsed->{Errors}{Error}{Message} .= ", at API call '$API_call'";
     }
     return $class->new($parsed->{Errors}{Error},$ec2,@{$parsed}{'xmlns','requestId'});
+}
+
+# alternate method used for ELB, RDS calls
+sub create_alt_error_object {
+    my $self = shift;
+    my ($content,$ec2) = @_;
+    my $class   = 'VM::EC2::Error';
+    eval "require $class; 1" || die $@ unless $class->can('new');
+    my $parsed = $self->new_xml_parser->XMLin($content);
+    return $class->new($parsed->{Error},$ec2,@{$parsed}{'xmlns','requestId'});
 }
 
 # not a method!

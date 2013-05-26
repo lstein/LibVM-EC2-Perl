@@ -1,4 +1,3 @@
-bin/delete_on_termination.pl
 bin/migrate-ebs-image.pl
 bin/sync_to_snapshot.pl
 Build.PL
@@ -132,7 +131,6 @@ lib/VM/EC2/VPC/VpnGateway.pm
 lib/VM/EC2/VPC/VpnGateway/Attachment.pm
 lib/VM/EC2/VPC/VpnTunnelTelemetry.pm
 LICENSE
-Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
 META.json

@@ -99,7 +99,8 @@ sub refresh {
     my $i   = shift;
     local $self->aws->{raise_error} = 1;
     ($i) = $self->aws->describe_vpcs(-vpc_id=>$self->vpcId) unless $i;
-    %$self  = %$i;
+    %$self = %$i if $i;
+    return defined $i;
 }
 
 sub current_state {

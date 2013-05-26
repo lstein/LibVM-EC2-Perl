@@ -88,7 +88,8 @@ sub attachments {
 sub availabilityZone {
     my $self = shift;
     my $zone = $self->SUPER::availabilityZone;
-    return $self->aws->describe_availability_zones($zone);
+    return $self->aws->describe_availability_zones($zone) if $zone;
+    return $self->aws->describe_availability_zones();
 }
 
 sub zone { shift->availabilityZone }

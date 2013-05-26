@@ -154,7 +154,8 @@ sub refresh {
     my $self = shift;
     local $self->ec2->{raise_error} = 1;
     my $r    = $self->ec2->describe_spot_instance_requests($self->spotInstanceRequestId);
-    %$self   = %$r;
+    %$self   = %$r if $r;
+    return defined $r;
 }
 
 sub current_status {
