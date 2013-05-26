@@ -1,3 +1,8 @@
+1.24
+    - Big code reorganization -- moved all REST calls into their own dynamically-loaded
+       modules.
+    - Fix bug that popped up when creating security group rules with -port=>0.
+  
 1.23 Thu Jan 24 12:51:07 EST 2013
     - migrate-ebs-image.pl now supports HVM images, including 
       Microsoft Windows and Linux Cluster instances.

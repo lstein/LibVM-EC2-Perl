@@ -139,7 +139,7 @@ Here are some examples:
 
  # ICMP on echo (ping) port from anyone
  $sg->authorize_incoming(-protocol  => 'icmp',
-                         -port      => 0,
+                         -port      => -1,
                          -source_ip => '0.0.0.0/0');
 
  # TCP to port 25 (mail) from instances belonging to
@@ -332,7 +332,7 @@ sub _new_permission {
 
     $args{-source_ip} ||= $args{-source};
 
-    my $ports     = $args{-port} || $args{-ports};
+    my $ports     = defined($args{-port}) ? $args{-port} : $args{-ports};
     my ($from_port,$to_port);
     if ($ports =~ /^(\d+)\.\.(\d+)$/) {
 	$from_port = $1;

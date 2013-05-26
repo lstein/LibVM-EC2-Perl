@@ -170,7 +170,7 @@ For details, see L<VM::EC2::SecurityGroup>. Here is a brief summary:
 
  # ICMP on echo (ping) port from anyone
  $sg->authorize_incoming(-protocol  => 'icmp',
-                         -port      => 0,
+                         -port      => -1,
                          -source_ip => '0.0.0.0/0');
 
  # TCP to port 25 (mail) from instances belonging to
