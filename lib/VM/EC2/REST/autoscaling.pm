@@ -7,6 +7,7 @@ package VM::EC2;  # add methods to VM::EC2
 VM::EC2::Dispatch->register(
     DescribeLaunchConfigurations      => 'fetch_members,LaunchConfigurations,VM::EC2::LaunchConfiguration',
     DescribeAutoScalingGroups         => 'fetch_members,AutoScalingGroups,VM::EC2::ASG',
+    DescribePolicies                  => 'fetch_members,ScalingPolicies,VM::EC2::ScalingPolicy',
     );
 
 =head1 NAME VM::EC2::REST::autoscaling
@@ -26,8 +27,12 @@ Implemented:
  CreateLaunchConfiguration
  DeleteAutoScalingGroup
  DeleteLaunchConfiguration
+ DeletePolicy
  DescribeAutoScalingGroups
  DescribeLaunchConfigurations
+ DescribePolicies
+ ExecutePolicy
+ PutScalingPolicy
  ResumeProcesses
  SuspendProcesses
  UpdateAutoScalingGroup
@@ -35,7 +40,6 @@ Implemented:
 Unimplemented:
  CreateOrUpdateTags
  DeleteNotificationConfiguration
- DeletePolicy
  DeleteScheduledAction
  DeleteTags
  DescribeAdjustmentTypes
@@ -43,7 +47,6 @@ Unimplemented:
  DescribeAutoScalingNotificationTypes
  DescribeMetricCollectionTypes
  DescribeNotificationConfigurations
- DescribePolicies
  DescribeScalingActivities
  DescribeScalingProcessTypes
  DescribeScheduledActions
@@ -51,9 +54,7 @@ Unimplemented:
  DescribeTerminationPolicyTypes
  DisableMetricsCollection
  EnableMetricsCollection
- ExecutePolicy
  PutNotificationConfiguration
- PutScalingPolicy
  PutScheduledUpdateGroupAction
  SetDesiredCapacity
  SetInstanceHealth
@@ -355,7 +356,118 @@ sub autoscaling_tags {
     return @params;
 }
 
+=head2 @asg = $ec2->describe_policies(-auto_scaling_group_name => $name);
 
+Returns information about autoscaling policies
+
+  -auto_scaling_group_name      The name of the Auto Scaling group
+  -policy_names                 An array of policy names or policy ARNs to be described. If this list is omitted, all policy names are described. If an auto scaling group name is provided, the results are limited to that group. The list of requested policy names cannot contain more than 50 items. If unknown policy names are requested, they are ignored with no error.
+  -names                        Alias of -auto_scaling_group_names
+
+Returns a list of L<VM::EC2::ScalingPolicy>.
+
+=cut
+
+sub describe_policies {
+    my ($self, %args) = @_;
+    $args{-auto_scaling_group_name} ||= $args{-name};
+    my @params = $self->member_list_parm('PolicyNames',\%args);
+    push @params, ('AutoScalingGroupName', $args{-auto_scaling_group_name})
+        if ($args{-auto_scaling_group_name});
+    return $self->asg_call('DescribePolicies', @params);
+}
+
+
+=head2 $success = $ec2->put_scaling_policy
+
+Creates or updates a policy for an Auto Scaling group.
+
+Required arguments:
+
+  -policy_name             The name of the policy to update or create.
+  -name                    Alias for -policy_name
+  -auto_scaling_group_name The name or ARN of the Auto Scaling group.
+  -scaling_adjustment      Number of instances by which to scale. 
+  -adjustment_type         Specifies wheter -scaling_adjustment is an absolute 
+                           number or a percentage of the current capacity.
+                           Valid values are:
+        ChangeInCapacity
+        ExactCapacity
+        PercentChangeInCapacity
+
+Optional arguments:
+
+  -cooldown             The amount of time, in seconds, after a scaling
+                        activity completes and before the next scaling acitvity
+                        can start. 
+  -min_adjustment_step  Used with PercentChangeInCapacity as -adjustment_type.
+
+Returns true on success
+
+=cut
+
+sub put_scaling_policy {
+    my ($self, %args) = @_;
+    $args{-policy_name} ||= $args{-name};
+    my @params = map {$self->single_parm($_, \%args) }
+        qw( AdjustmentType AutoScalingGroupName Cooldown MinAdjustmentStep
+            PolicyName ScalingAdjustment );
+
+    return $self->asg_call('PutScalingPolicy', @params);
+}
+
+=head2 $success = $ec2->delete_policy(-policy_name => $name)
+
+Deletes a policy
+
+Required arguments:
+
+  -policy_name                  Name or ARN of the policy
+  -name                         Alias for -policy_name
+  -auto_scaling_group_name      Name of the Auto Scaling Group, required when
+                                specifying policy by name (not by ARN)
+
+Returns true on success
+
+=cut
+
+sub delete_policy {
+    my ($self, %args) = @_;
+    $args{-policy_name} ||= $args{-name};
+    my @params = map { $self->single_parm($_, \%args) }
+        qw( AutoScalingGroupName PolicyName );
+
+    return $self->asg_call('DeletePolicy', @params);
+}
+
+=head2 $success = $ec2->execute_policy(-policy_name => $name)
+
+Runs a policy
+
+Required arguments:
+
+  -policy_name                  Name or ARN of the policy
+  -name                         Alias for -policy_name
+  -auto_scaling_group_name      Name of the Auto Scaling Group, required when
+                                specifying policy by name (not by ARN)
+
+Optional arguments:
+
+  -honor_cooldown               Set to true if you want AutoScaling to reject
+                                the request when it is in cooldown
+
+Returns true on success
+
+=cut
+
+sub execute_policy {
+    my ($self, %args) = @_;
+    $args{-policy_name} ||= $args{-name};
+    my @params = map { $self->single_parm($_, \%args) }
+        qw( AutoScalingGroupName HonorCooldown PolicyName );
+
+    return $self->asg_call('ExecutePolicy', @params);
+}
 
 =head1 SEE ALSO
 
