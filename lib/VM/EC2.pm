@@ -1816,8 +1816,10 @@ sub _signature {
     my @args    = @_;
 
     my $action = 'POST';
-    my $host   = lc URI->new($self->endpoint)->host;
-    my $path   = '/';
+    my $uri    = URI->new($self->endpoint);
+    my $host   = $uri->host_port;
+    $host      =~ s/:(80|443)$//;  # default ports will break
+    my $path   = $uri->path||'/';
 
     my %sign_hash                = @args;
     $sign_hash{AWSAccessKeyId}   = $self->id;

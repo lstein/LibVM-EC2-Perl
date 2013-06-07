@@ -38,7 +38,7 @@ my $v = $ec2->create_volume(-zone=>$zone,-size=>1);
 ok($v,'create_volume()');
 ok($v->add_tag(Name=>VOLUME_NAME,Description=>VOLUME_DESC),'add_tag()');
 
-for (my $cnt=0; $cnt<10 && $v->current_status eq 'creating'; $cnt++) {
+for (my $cnt=0; $cnt<20 && $v->current_status eq 'creating'; $cnt++) {
     sleep 2;
 }
 is($v->current_status,'available','volume becomes available');
