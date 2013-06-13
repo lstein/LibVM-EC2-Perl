@@ -260,6 +260,7 @@ Optional arguments:
   -desired_capacity
   -health_check_type
   -health_check_grace_period
+  -launch_configuration_name
   -placement_group
   -vpc_zone_identifier
   -max_size
@@ -281,7 +282,8 @@ sub update_autoscaling_group {
 
     my @p = map {$self->single_parm($_,\%args) }
        qw( DefaultCooldown DesiredCapacity HealthCheckGracePeriod
-           HealthCheckType PlacementGroup VPCZoneIdentifier MaxSize MinSize );
+           HealthCheckType LaunchConfigurationName PlacementGroup
+           VPCZoneIdentifier MaxSize MinSize );
     push @params, @p;
 
     return $self->asg_call('UpdateAutoScalingGroup',@params);
