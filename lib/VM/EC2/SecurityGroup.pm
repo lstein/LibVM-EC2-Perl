@@ -227,7 +227,10 @@ sub valid_fields {
     return qw(ownerId groupId groupName groupDescription vpcId ipPermissions ipPermissionsEgress tagSet);
 }
 
-sub primary_id { shift->groupId }
+sub primary_id { 
+    my $self = shift;
+    return $self->groupId || $self->groupName;
+}
 
 sub name { shift->groupName }
 

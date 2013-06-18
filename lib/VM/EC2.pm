@@ -1577,13 +1577,31 @@ sub boolean_parm {
 
 =head2 $version = $ec2->version()
 
-API version.
+Returns the API version to be sent to the endpoint. Calls
+guess_version_from_endpoint() to determine this.
 
 =cut
 
 sub version  { 
     my $self = shift;
-    return $self->{version} ||=  '2013-02-01';
+    return $self->{version} ||=  $self->guess_version_from_endpoint();
+}
+
+=head2 $version = $ec2->guess_version_from_endpoint()
+
+This method attempts to guess what version string to use when
+communicating with various endpoints. When talking to endpoints that
+contain the string "Eucalyptus" uses the old EC2 API
+"2009-04-04". When talking to other endpoints, uses the latest EC2
+version string.
+
+=cut
+
+sub guess_version_from_endpoint {
+    my $self = shift;
+    my $endpoint = $self->endpoint;
+    return '2009-04-04' if $endpoint =~ /Eucalyptus/;  # eucalyptus version according to http://www.eucalyptus.com/participate/code
+    return '2013-02-01';                               # most recent AWS version that we support
 }
 
 =head2 $ts = $ec2->timestamp
