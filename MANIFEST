@@ -5,6 +5,7 @@ Changes
 DISCLAIMER.txt
 lib/VM/EC2.pm
 lib/VM/EC2/ASG.pm
+lib/VM/EC2/AccountAttributes.pm
 lib/VM/EC2/AvailabilityZone.pm
 lib/VM/EC2/BlockDevice.pm
 lib/VM/EC2/BlockDevice/Attachment.pm

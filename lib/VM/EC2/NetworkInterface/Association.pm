@@ -29,7 +29,9 @@ These object methods are supported:
 
  associationId
  publicIp
+ publicDnsName
  ipOwnerId
+ allocationId
 
 In addition, this object supports the following convenience method:
 
@@ -65,7 +67,7 @@ use base 'VM::EC2::Generic';
 
 sub valid_fields {
     my $self  = shift;
-    return qw(associationId publicIp ipOwnerId);
+    return qw(associationId publicIp publicDnsName ipOwnerId allocationId);
 }
 
 sub address {

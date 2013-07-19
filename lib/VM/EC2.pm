@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2013-02-01 version of the Amazon AWS API
+This is an interface to the 2013-06-15 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -619,6 +619,7 @@ use constant import_tags => {
                        internet_gateway network_acl route_table subnet vpc vpn vpn_gateway)],
     ':hpc'      => ['placement_group'],
     ':scaling'  => ['elastic_load_balancer','autoscaling'],
+    ':elb'      => ['elastic_load_balancer'],
     ':misc'     => ['devpay','reserved_instance', 'spot_instance','vm_export','vm_import','windows'],
     ':all'      => [qw(:standard :vpc :hpc :scaling :misc)],
     ':DEFAULT'  => [':all'],
@@ -1601,7 +1602,7 @@ sub guess_version_from_endpoint {
     my $self = shift;
     my $endpoint = $self->endpoint;
     return '2009-04-04' if $endpoint =~ /Eucalyptus/;  # eucalyptus version according to http://www.eucalyptus.com/participate/code
-    return '2013-02-01';                               # most recent AWS version that we support
+    return '2013-06-15';                               # most recent AWS version that we support
 }
 
 =head2 $ts = $ec2->timestamp
@@ -1705,6 +1706,8 @@ sub async_send_error {
 
     if ($body =~ /<Response>/) {
 	$error = VM::EC2::Dispatch->create_error_object($body,$self,$action);
+    } elsif ($body =~ /<ErrorResponse xmlns="http:\/\//) {
+        $error = VM::EC2::Dispatch->create_alt_error_object($body,$self,$action);
     } else {
 	my $code = $hdr->{Status};
 	my $msg  = $body;
@@ -1791,29 +1794,6 @@ sub login_url {
     }
 
     GET "$endpoint?" . join '&', @param;
-}
-
-sub sts_call {
-    my $self = shift;
-    local $self->{endpoint} = 'https://sts.amazonaws.com';
-    local $self->{version}  = '2011-06-15';
-    $self->call(@_);
-}
-
-sub elb_call {
-    my $self = shift;
-    (my $endpoint = $self->{endpoint}) =~ s/ec2/elasticloadbalancing/;
-    local $self->{endpoint} = $endpoint;
-    local $self->{version}  = '2012-06-01';
-    $self->call(@_);
-}
-
-sub asg_call {
-    my $self = shift;
-    (my $endpoint = $self->{endpoint}) =~ s/ec2/autoscaling/;
-    local $self->{endpoint} = $endpoint;
-    local $self->{version}  = '2011-01-01';
-    $self->call(@_);
 }
 
 =head2 $request = $ec2->_sign(@args)

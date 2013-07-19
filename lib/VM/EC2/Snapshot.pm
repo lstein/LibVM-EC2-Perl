@@ -141,7 +141,7 @@ Optional Arguments:
                           standard
 
  -iops                 -- The number of I/O operations per second (IOPS) that
-                          the volume supports.  Range is 100 to 2000.  Required
+                          the volume supports.  Range is 100 to 4000.  Required
                           when volume type is io1.
 
 On success, the returned value is a L<VM::EC2::Volume> object.

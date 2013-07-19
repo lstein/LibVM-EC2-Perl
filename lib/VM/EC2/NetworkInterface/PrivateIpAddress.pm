@@ -19,6 +19,7 @@ objects.
 These object methods are supported:
 
  privateIpAddress
+ privateDnsName
  primary
  association
 
@@ -54,7 +55,7 @@ use VM::EC2::NetworkInterface::Association;
 
 sub valid_fields {
     my $self  = shift;
-    return qw(privateIpAddress primary association);
+    return qw(privateIpAddress privateDnsName primary association);
 }
 
 sub primary {
