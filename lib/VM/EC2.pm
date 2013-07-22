@@ -1228,7 +1228,7 @@ sub wait_for_terminal_state {
 					 undef $timeout_event;
 					 $done->error('timeout waiting for terminal state');
 					 $done->end foreach @pending;
-				     });
+				     }) if $timeout;
     $done->end;
 
     return $ASYNC ? $done : $done->recv;
