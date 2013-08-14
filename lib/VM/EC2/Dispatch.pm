@@ -381,8 +381,8 @@ sub fetch_rds_objects {
     }
     my $list = $parsed->{$result_key}{$list_tag}{$tag} or return;
     return ref $list eq 'HASH' ?
-        ($class->new($list,$ec2,@{$parsed}{'xmlns','requestId'})) :
-        map {$class->new($_,$ec2,@{$parsed}{'xmlns','requestId'})} @$list;
+        ($class->new($list,$ec2,@{$parsed}{'xmlns','RequestId'})) :
+        map {$class->new($_,$ec2,@{$parsed}{'xmlns','RequestId'})} @$list;
 }
 
 =head2 @objects = $dispatch->fetch_items_iterator($raw_xml,$ec2,$container_tag,$object_class,$token_name)
