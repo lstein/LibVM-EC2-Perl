@@ -150,7 +150,8 @@ sub content2objects {
 
     if (ref $handler eq 'CODE') {
 	my $parsed = $self->new_xml_parser->XMLin($content);
-	$handler->($parsed,$ec2,@{$parsed}{'xmlns','requestId'});
+	my $req_id_tag = $parsed->{requestId} ? 'requestId' : 'RequestId';
+	$handler->($parsed,$ec2,@{$parsed}{'xmlns',$req_id_tag});
     }
     elsif ($self->can($method)) {
 	return $self->$method($content,$ec2,@params);
@@ -353,7 +354,7 @@ sub fetch_members {
     my $parsed = $parser->XMLin($content);
     my ($result_key) = grep /Result$/,keys %$parsed;
     my $list   = $parsed->{$result_key}{$tag}{member} or return;
-    return map {$class->new($_,$ec2,@{$parsed}{'xmlns','requestId'})} @$list;
+    return map {$class->new($_,$ec2,@{$parsed}{'xmlns','RequestId'})} @$list;
 }
 
 =head2 @objects = $dispatch->fetch_rds_objects($raw_xml,$ec2,$container_tag,$object_class,$nokey)
