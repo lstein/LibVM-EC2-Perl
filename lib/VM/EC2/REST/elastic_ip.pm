@@ -96,7 +96,7 @@ sub release_address {
     my $addr = shift or croak "Usage: release_address(\$addr)";
     my @param = (PublicIp=>$addr);
     if (my $allocationId = eval {$addr->allocationId}) {
-	push @param,(AllocatonId=>$allocationId);
+	@param = (AllocationId=>$allocationId);
     }
     return $self->call('ReleaseAddress',@param);
 }
