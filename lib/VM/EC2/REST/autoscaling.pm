@@ -10,6 +10,14 @@ VM::EC2::Dispatch->register(
     DescribePolicies                  => 'fetch_members,ScalingPolicies,VM::EC2::ScalingPolicy',
     );
 
+sub asg_call {
+    my $self = shift;
+    (my $endpoint = $self->{endpoint}) =~ s/ec2/autoscaling/;
+    local $self->{endpoint} = $endpoint;
+    local $self->{version}  = '2011-01-01';
+    $self->call(@_);
+}
+
 =head1 NAME VM::EC2::REST::autoscaling
 
 =head1 SYNOPSIS

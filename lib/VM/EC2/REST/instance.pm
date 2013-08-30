@@ -161,7 +161,7 @@ defaults. Otherwise, the arguments will be taken as a
                      instance into. Applicable to cluster instances
                      only.
 
-  -placement_tenancy Specify 'dedicated' to launch the instance on a
+  -tenancy           Specify 'dedicated' to launch the instance on a
                      dedicated server. Only applicable for VPC
                      instances.
 
@@ -272,7 +272,7 @@ following:
          - '<volume-type>': The volume type. One of "standard" or "io1".
 
          - '<iops>': The number of I/O operations per second (IOPS) that
-           the volume suports. A number between 100 to 2000. Only valid
+           the volume suports. A number between 100 to 4000. Only valid
            for volumes of type "io1".
           
          Examples: -block_devices => '/dev/sdb=snap-7eb96d16'
@@ -404,6 +404,7 @@ sub run_instances {
     $args{-max_count} ||= $args{-min_count};
     $args{-availability_zone}  ||= $args{-zone};
     $args{-availability_zone}  ||= $args{-placement_zone};
+    $args{-group_name} = $args{-placement_group};
     $args{-monitoring_enabled} ||= $args{-monitoring};
     $args{-instance_initiated_shutdown_behavior} ||= $args{-shutdown_behavior};
     $args{-block_device_mapping} ||= $args{-block_devices};
@@ -417,7 +418,7 @@ sub run_instances {
                            IamInstanceProfile.Arn IamInstanceProfile.Name
                            )],
 	list_parm   => [qw(SecurityGroup SecurityGroupId)],
-        'Placement.single_parm'   => [qw(AvailabilityZone GroupName Tenancy PlacementGroup)],
+        'Placement.single_parm'   => [qw(AvailabilityZone GroupName Tenancy)],
 	base64_parm => 'UserData',
 	boolean_parm=> [qw(DisableApiTermination EbsOptimized Monitoring.Enabled)],
 	block_device_parm         => 'BlockDeviceMapping',

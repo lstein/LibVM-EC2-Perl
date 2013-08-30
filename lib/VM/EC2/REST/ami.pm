@@ -11,6 +11,7 @@ VM::EC2::Dispatch->register(
     DeregisterImage         => 'boolean',
     ModifyImageAttribute    => 'boolean',
     ResetImageAttribute     => 'boolean',
+    CopyImage               => sub { shift->{imageId} },
     );
 
 =head1 NAME VM::EC2::REST::ami
@@ -24,6 +25,7 @@ use VM::EC2 ':standard';
 These are methods that allow you to fetch and manipulate Amazon Machine Images.
 
 Implemented:
+ CopyImage
  CreateImage
  DeregisterImage
  DescribeImageAttribute
@@ -321,6 +323,58 @@ sub reset_image_attribute {
 		       ImageId    => $image_id,
 		       Attribute  => $attribute);
 }
+
+=head2 $image = $ec2->copy_image(-source_region   => $src,
+                                 -source_image_id => $id,
+                                 -name            => $name,
+                                 -description     => $desc,
+                                 -client_token    => $token)
+
+Initiates the copy of an AMI from the specified source region to the
+region in which the API call is executed.
+
+Required arguments:
+
+ -source_region       -- The ID of the AWS region that contains the AMI to be
+                         copied (source).
+
+ -source_image_id     -- The ID of the Amazon EC2 AMI to copy.
+
+Optional arguments:
+
+ -name                -- The name of the new EC2 AMI in the destination region.
+
+ -description         -- A description of the new AMI in the destination region.
+
+ -client_token        -- Unique, case-sensitive identifier you provide to ensure
+                         idempotency of the request.
+
+Returns a L<VM::EC2::Image> object on success;
+
+=cut
+
+sub copy_image {
+    my $self = shift;
+    my %args = @_;
+    $args{-description} ||= $args{-desc};
+    $args{-source_region} ||= $args{-region};
+    $args{-source_image_id} ||= $args{-image_id};
+    $args{-source_region} or croak "copy_image(): -source_region argument required";
+    $args{-source_image_id} or croak "copy_image(): -source_image_id argument required";
+    my @params;
+    push @params, $self->single_parm($_,\%args)
+        foreach qw(SourceRegion SourceImageId Name Description ClientToken);
+    my $image_id = $self->call('CopyImage',@params) or return;
+    return eval {
+            my $image;
+            local $SIG{ALRM} = sub {die "timeout"};
+            alarm(60);
+            until ($image = $self->describe_images($image_id)) { sleep 1 }
+            alarm(0);
+            $image;
+    };
+}
+
 
 =head1 SEE ALSO
 

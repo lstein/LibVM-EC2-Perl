@@ -30,6 +30,7 @@ These object methods are supported:
  dhcpOptionsId -- The ID of the set of DHCP options you've associated
                   with the VPC, or "default".
  instanceTenancy  -- Either "dedicated" or "default"
+ isDefault        -- Indicates if the VPC is a default VPC
 
 In addition, this object supports the following convenience methods:
 
@@ -91,7 +92,7 @@ use Carp 'croak';
 
 sub valid_fields {
     my $self  = shift;
-    return qw(vpcId state cidrBlock dhcpOptionsId instanceTenancy);
+    return qw(vpcId state cidrBlock dhcpOptionsId instanceTenancy isDefault);
 }
 
 sub refresh {
@@ -178,6 +179,12 @@ sub create_internet_gateway {
 	return;
     }
     return $gateway;
+}
+
+sub isDefault {
+    my $self = shift;
+    my $default = $self->SUPER::isDefault;
+    return $default eq 'true';
 }
 
 1;

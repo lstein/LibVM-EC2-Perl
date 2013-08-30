@@ -674,10 +674,14 @@ sub iamInstanceProfile {
 
 sub current_status {
     my $self = shift;
-    my ($i)  = $self->aws->describe_instances(-instance_id=>$self->instanceId);
-    $i or croak "invalid instance: ",$self->instanceId;
-    $self->refresh($i) or return VM::EC2::Instance::State->invalid_state($self->aws);
-    return $i->instanceState;
+    my $retry = 0;
+    until ($self->refresh) {
+        if (++$retry > 10) {
+            croak "invalid instance: ",$self->instanceId;
+	}
+        sleep 2;
+    }
+    return $self->instanceState;
 }
 
 sub current_status_async {
