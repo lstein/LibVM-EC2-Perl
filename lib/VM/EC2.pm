@@ -1665,36 +1665,42 @@ sub _call_async {
 
 sub async_post {
     my $self = shift;
-    my ($action,$endpoint,$query,$cv,$delay) = @_;
-    $cv    ||= $self->condvar;
-    $delay ||= 2;
-    http_post($endpoint,
-	      $query,
-	      headers => {
-		  'Content-Type' => 'application/x-www-form-urlencoded',
-		  'User-Agent'   => 'VM::EC2-perl',
-	      },
-	      sub {
-		  my ($body,$hdr) = @_;
-		  if ($body =~ /RequestLimitExceeded/) {
-		      if ($delay < 64) {
-			  AnyEvent->timer(after=>$delay,cb=>sub {$self->async_post($action,$endpoint,$query,$cv,$delay*2)});
-		      } else {
-			  $self->async_send_error($action,$hdr,$body,$cv);
-		      }
-		      return;
-		  }
+    my ($action,$endpoint,$query) = @_;
 
-		  if ($hdr->{Status} =~ /^2/) { # success
-		      $self->error(undef);
-		      my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
-		      $cv->send(@obj);
-		  } else { # an error
-		      $self->async_send_error($action,$hdr,$body,$cv);
-		  }
-		  return;
-	      }
-	);
+    my $cv    = $self->condvar;
+    my $count = 0;
+    my $timer;
+    $timer = AnyEvent->timer(
+	after    => 0, # invoke immediately
+	interval => 5, # On RequestLimitExceeded try again every 5s for as long as a minute.
+	               # Should do an exponential backoff here, but AnyEvent timers
+                       # don't support this. Could use AnyEvent::RetryTimer, but this
+	               # is not currently an Ubuntu/Deb package and might not actually work
+	               # because AnyEvent timers fail when called in http_post() callbacks
+	cb       => sub {
+	    http_post($endpoint,
+		      $query,
+		      headers => {
+			  'Content-Type' => 'application/x-www-form-urlencoded',
+			  'User-Agent'   => 'VM::EC2-perl',
+		      },
+		      sub {
+			  my ($body,$hdr) = @_;
+			  if ($hdr->{Status} !~ /^2/) { # an error
+			      if ($body =~ /RequestLimitExceeded/ && ++$count < 12) {
+				  return;  # do not undef timer, or send to $cv
+			      } else {
+				  $self->async_send_error($action,$hdr,$body,$cv);
+			      }
+			  } else { # success
+			      $self->error(undef);
+			      my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
+			      $cv->send(@obj);
+			  }
+			  undef $timer; # only execute once unless we got RequestLimitExceeded
+		      })
+	});
+    warn "@$timer";
     return $cv;
 }
 
