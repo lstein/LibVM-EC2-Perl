@@ -1701,7 +1701,6 @@ sub async_post {
 			  undef $timer; # only execute once unless we got RequestLimitExceeded
 		      })
 	});
-    warn "@$timer";
     return $cv;
 }
 
