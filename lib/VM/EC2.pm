@@ -1669,38 +1669,39 @@ sub async_post {
     my ($action,$endpoint,$query) = @_;
 
     my $cv    = $self->condvar;
-    my $count = 0;
-    my $timer;
-    $timer = AnyEvent->timer(
-	after    => 0, # invoke immediately
-	interval => 5, # On RequestLimitExceeded try again every 5s for as long as a minute.
-	               # Should do an exponential backoff here, but AnyEvent timers
-                       # don't support this. Could use AnyEvent::RetryTimer, but this
-	               # is not currently an Ubuntu/Deb package and might not actually work
-	               # because AnyEvent timers fail when called in http_post() callbacks
-	cb       => sub {
-	    http_post($endpoint,
-		      $query,
-		      headers => {
-			  'Content-Type' => 'application/x-www-form-urlencoded',
-			  'User-Agent'   => 'VM::EC2-perl',
-		      },
-		      sub {
-			  my ($body,$hdr) = @_;
-			  if ($hdr->{Status} !~ /^2/) { # an error
-			      if ($body =~ /RequestLimitExceeded/ && ++$count < 12) {
-				  return;  # do not undef timer, or send to $cv
-			      } else {
-				  $self->async_send_error($action,$hdr,$body,$cv);
-			      }
-			  } else { # success
-			      $self->error(undef);
-			      my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
-			      $cv->send(@obj);
+    my $callback = sub {
+	my $timer = shift;
+	http_post($endpoint,
+		  $query,
+		  headers => {
+		      'Content-Type' => 'application/x-www-form-urlencoded',
+		      'User-Agent'   => 'VM::EC2-perl',
+		  },
+		  sub {
+		      my ($body,$hdr) = @_;
+		      if ($hdr->{Status} !~ /^2/) { # an error
+			  if ($body =~ /RequestLimitExceeded/) {
+			      warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
+			      $timer->retry();
+			      return;
+			  } else {
+			      $self->async_send_error($action,$hdr,$body,$cv);
+			      $timer->success();
+			      return;
 			  }
-			  undef $timer; # only execute once unless we got RequestLimitExceeded
-		      })
-	});
+		      } else { # success
+			  $self->error(undef);
+			  my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
+			  $cv->send(@obj);
+			  $timer->success();
+		      }
+		  })
+    };
+    RetryTimer->new(on_retry       => $callback,
+		    interval       => 1,
+		    max_retries    => 12,
+		    on_max_retries => $cv->error(VM::EC2::Error->new({Code=>500,Message=>'RequestLimitExceeded'},$self)));
+
     return $cv;
 }
 
@@ -1861,6 +1862,80 @@ sub args {
 
 sub condvar {
     bless AnyEvent->condvar,'VM::EC2::CondVar';
+}
+
+# utility - retry a call with exponential backoff until it succeeds
+package RetryTimer;
+use AnyEvent;
+use Carp 'croak';
+
+# try a subroutine multiple times with exponential backoff
+# until it succeeds. Subroutine must call timer's success() method
+# if it succeds, retry() otherwise.
+
+# Arguments
+# on_retry=>CODEREF,
+# on_max_retries=>CODEREF,
+# interval => $seconds,    # defaults to 1
+# multiplier=>$fraction,   # defaults to 1.5
+# max_retries=>$integer,   # defaults to 10
+sub new {
+    my $class    = shift;
+    my @args     = @_;
+
+    my $self;
+    $self = bless {
+	timer => AE::timer(0,0, sub {
+	    delete $self->{timer};
+	    $self->{on_retry}->($self) if $self->{on_retry};
+	}),
+	tries            => 0,
+	current_interval => 0,
+	@args,
+    },ref $class || $class;
+
+    croak "need a on_retry argument" unless $self->{on_retry};
+    $self->{interval}     ||= 1;
+    $self->{multiplier}   ||= 1.5;
+    $self->{max_retries}  = 10 unless defined $self->{max_retries};
+    return $self;
+}
+
+sub retry {
+    my $self = shift;
+    return if $self->{timer};
+    $self->{current_interval} = $self->next_interval;
+    $self->{tries}++; 
+
+    if ($self->{max_retries} && $self->{max_retries} <= $self->{tries}) {
+	delete $self->{timer};
+	delete $self->{current_interval};
+	$self->{on_max_retries}->($self) if $self->{on_max_retries};
+	return;
+    }
+    $self->{timer} = AE::timer ($self->{current_interval},0,
+				sub {
+				    delete $self->{timer};
+				    $self->{on_retry}->($self)
+					if $self && $self->{on_retry};
+				});
+}
+
+sub next_interval {
+    my $self = shift;
+    if ($self->{current_interval}) {
+	return $self->{current_interval} * $self->{multiplier};
+    } else {
+	return $self->{interval};
+    }
+}
+
+sub current_interval { shift->{current_interval} };
+
+sub success {
+    my $self = shift;
+    delete $self->{current_interval};
+    delete $self->{timer};
 }
 
 package VM::EC2::CondVar;
