@@ -1716,7 +1716,7 @@ sub async_send_error {
         $error = VM::EC2::Dispatch->create_alt_error_object($body,$self,$action);
     } else {
 	my $code = $hdr->{Status};
-	my $msg  = $body;
+        my $msg  = $code =~ /^59[0-9]/ ? $hdr->{Reason} : $body;
 	$error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$action')"},$self);
     }
 
