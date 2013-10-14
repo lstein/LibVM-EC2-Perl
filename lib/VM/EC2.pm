@@ -1700,7 +1700,7 @@ sub async_post {
     RetryTimer->new(on_retry       => $callback,
 		    interval       => 1,
 		    max_retries    => 12,
-		    on_max_retries => $cv->error(VM::EC2::Error->new({Code=>500,Message=>'RequestLimitExceeded'},$self)));
+		    on_max_retries => sub { $cv->error(VM::EC2::Error->new({Code=>500,Message=>'RequestLimitExceeded'},$self)) });
 
     return $cv;
 }
