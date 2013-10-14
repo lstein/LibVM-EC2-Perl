@@ -305,7 +305,11 @@ The network configuration can be specified using the
 -network_interface parameter:
 
  -network_interfaces => ['eth0=10.10.0.12:subnet-1234567:sg-1234567:true:My Custom Eth0',
-                         'eth1=10.10.1.12,10.10.1.13:subnet-999999:sg-1234567:true:My Custom Eth1',
+                         'eth1=10.10.1.12,10.10.1.13:subnet-999999:sg-1234567:true:My Custom Eth1']
+
+ or
+
+ -network_interfaces => ['eth0=10.10.0.12:subnet-1234567:sg-1234567:true:My Custom Eth0:true']
 
 The format is '<device>=<specification>'. The device is an ethernet
 interface name such as eth0, eth1, eth2, etc. The specification has up
@@ -339,6 +343,11 @@ B<4. DeleteOnTerminate>: True if this ENI should be automatically
 deleted when the instance terminates.
 
 B<5. Description>: A human-readable description of the ENI.
+
+B<6. Associate Public Address>: Indicates whether to assign a public 
+IP address to the ENI on an instance in a VPC.  Can only be specified
+as true when a single network interface of device index 0 is created.
+Defaults to true when launching in a Default VPC.
 
 As an alternative syntax, you may specify the ID of an existing ENI in
 lieu of the primary IP address and other fields. The ENI will be
