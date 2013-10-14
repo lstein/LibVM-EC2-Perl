@@ -190,6 +190,7 @@ sub create_network_acl_entry {
 		croak "create_network_acl_entry(): -port_from argument missing";
 	$args{-port_to} = $args{-port_from} if (! defined $args{-port_to});
     }
+    $args{-egress}    ||= $args{-egress} ? 'true' : 'false';
     $args{'-Icmp.Type'} = $args{-icmp_type};
     $args{'-Icmp.Code'} = $args{-icmp_code};
     $args{'-PortRange.From'} = $args{-port_from};

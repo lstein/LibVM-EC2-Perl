@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2013-06-15 version of the Amazon AWS API
+This is an interface to the 2013-07-15 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -1579,8 +1579,8 @@ sub block_device_parm {
 
 # ['eth0=eni-123456','eth1=192.168.2.1,192.168.3.1,192.168.4.1:subnet-12345:sg-12345:true:My Weird Network']
 # form 1: ethX=network device id
-# form 2: ethX=primary_address,secondary_address1,secondary_address2...:subnetId:securityGroupId:deleteOnTermination:description
-# form 3: ethX=primary_address,secondary_address_count:subnetId:securityGroupId:deleteOnTermination:description
+# form 2: ethX=primary_address,secondary_address1,secondary_address2...:subnetId:securityGroupId:deleteOnTermination:description:AssociatePublicIpAddress
+# form 3: ethX=primary_address,secondary_address_count:subnetId:securityGroupId:deleteOnTermination:description:AssociatePublicIpAddress
 sub network_interface_parm {
     my $self = shift;
     my $args    = shift;
@@ -1599,7 +1599,17 @@ sub network_interface_parm {
 	    push @p,("NetworkInterface.$c.NetworkInterfaceId" => $options[0]);
 	} 
 	else {
-	    my ($ip_addresses,$subnet_id,$security_group_id,$delete_on_termination,$description) = @options;
+	    my ($ip_addresses,$subnet_id,$security_group_id,$delete_on_termination,$description,$assoc_public_ip_addr) = @options;
+            # if assoc_public_ip_addr is true, the following conditions must be met:
+            #  * can only associate a public address with a single network interface with a device index of 0
+            #  * cannot associate a public ip with a second network interface
+            #  * cannot assoicate a public ip when launching more than one network interface
+            # NOTE: This option defaults to true in a default VPC
+            if ($assoc_public_ip_addr) {
+                $assoc_public_ip_addr = (($assoc_public_ip_addr eq 'true') && 
+                                         ($device_index == 0) && 
+                                         (@dev == 1)) ? 'true' : 'false';
+            }
 	    my @addresses = split /\s*,\s*/,$ip_addresses;
 	    for (my $a = 0; $a < @addresses; $a++) {
 		if ($addresses[$a] =~ /^\d+\.\d+\.\d+\.\d+$/ ) {
@@ -1618,6 +1628,7 @@ sub network_interface_parm {
 	    push @p,("NetworkInterface.$c.SubnetId"              => $subnet_id)             if length $subnet_id;
 	    push @p,("NetworkInterface.$c.DeleteOnTermination"   => $delete_on_termination) if length $delete_on_termination;
 	    push @p,("NetworkInterface.$c.Description"           => $description)           if length $description;
+	    push @p,("NetworkInterface.$c.AssociatePublicIpAddress" => $assoc_public_ip_addr) if $assoc_public_ip_addr;
 	}
 	$c++;
     }
@@ -1659,7 +1670,7 @@ sub guess_version_from_endpoint {
     my $self = shift;
     my $endpoint = $self->endpoint;
     return '2009-04-04' if $endpoint =~ /Eucalyptus/;  # eucalyptus version according to http://www.eucalyptus.com/participate/code
-    return '2013-06-15';                               # most recent AWS version that we support
+    return '2013-07-15';                               # most recent AWS version that we support
 }
 
 =head2 $ts = $ec2->timestamp
@@ -1723,36 +1734,42 @@ sub _call_async {
 
 sub async_post {
     my $self = shift;
-    my ($action,$endpoint,$query,$cv,$delay) = @_;
-    $cv    ||= $self->condvar;
-    $delay ||= 2;
-    http_post($endpoint,
-	      $query,
-	      headers => {
-		  'Content-Type' => 'application/x-www-form-urlencoded',
-		  'User-Agent'   => 'VM::EC2-perl',
-	      },
-	      sub {
-		  my ($body,$hdr) = @_;
-		  if ($body =~ /RequestLimitExceeded/) {
-		      if ($delay < 64) {
-			  AnyEvent->timer(after=>$delay,cb=>sub {$self->async_post($action,$endpoint,$query,$cv,$delay*2)});
-		      } else {
-			  $self->async_send_error($action,$hdr,$body,$cv);
-		      }
-		      return;
-		  }
+    my ($action,$endpoint,$query) = @_;
 
-		  if ($hdr->{Status} =~ /^2/) { # success
-		      $self->error(undef);
-		      my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
-		      $cv->send(@obj);
-		  } else { # an error
-		      $self->async_send_error($action,$hdr,$body,$cv);
-		  }
-		  return;
-	      }
-	);
+    my $cv    = $self->condvar;
+    my $callback = sub {
+	my $timer = shift;
+	http_post($endpoint,
+		  $query,
+		  headers => {
+		      'Content-Type' => 'application/x-www-form-urlencoded',
+		      'User-Agent'   => 'VM::EC2-perl',
+		  },
+		  sub {
+		      my ($body,$hdr) = @_;
+		      if ($hdr->{Status} !~ /^2/) { # an error
+			  if ($body =~ /RequestLimitExceeded/) {
+			      warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
+			      $timer->retry();
+			      return;
+			  } else {
+			      $self->async_send_error($action,$hdr,$body,$cv);
+			      $timer->success();
+			      return;
+			  }
+		      } else { # success
+			  $self->error(undef);
+			  my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
+			  $cv->send(@obj);
+			  $timer->success();
+		      }
+		  })
+    };
+    RetryTimer->new(on_retry       => $callback,
+		    interval       => 1,
+		    max_retries    => 12,
+		    on_max_retries => sub { $cv->error(VM::EC2::Error->new({Code=>500,Message=>'RequestLimitExceeded'},$self)) });
+
     return $cv;
 }
 
@@ -1767,7 +1784,7 @@ sub async_send_error {
         $error = VM::EC2::Dispatch->create_alt_error_object($body,$self,$action);
     } else {
 	my $code = $hdr->{Status};
-	my $msg  = $body;
+        my $msg  = $code =~ /^59[0-9]/ ? $hdr->{Reason} : $body;
 	$error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$action')"},$self);
     }
 
@@ -1913,6 +1930,80 @@ sub args {
 
 sub condvar {
     bless AnyEvent->condvar,'VM::EC2::CondVar';
+}
+
+# utility - retry a call with exponential backoff until it succeeds
+package RetryTimer;
+use AnyEvent;
+use Carp 'croak';
+
+# try a subroutine multiple times with exponential backoff
+# until it succeeds. Subroutine must call timer's success() method
+# if it succeds, retry() otherwise.
+
+# Arguments
+# on_retry=>CODEREF,
+# on_max_retries=>CODEREF,
+# interval => $seconds,    # defaults to 1
+# multiplier=>$fraction,   # defaults to 1.5
+# max_retries=>$integer,   # defaults to 10
+sub new {
+    my $class    = shift;
+    my @args     = @_;
+
+    my $self;
+    $self = bless {
+	timer => AE::timer(0,0, sub {
+	    delete $self->{timer};
+	    $self->{on_retry}->($self) if $self->{on_retry};
+	}),
+	tries            => 0,
+	current_interval => 0,
+	@args,
+    },ref $class || $class;
+
+    croak "need a on_retry argument" unless $self->{on_retry};
+    $self->{interval}     ||= 1;
+    $self->{multiplier}   ||= 1.5;
+    $self->{max_retries}  = 10 unless defined $self->{max_retries};
+    return $self;
+}
+
+sub retry {
+    my $self = shift;
+    return if $self->{timer};
+    $self->{current_interval} = $self->next_interval;
+    $self->{tries}++; 
+
+    if ($self->{max_retries} && $self->{max_retries} <= $self->{tries}) {
+	delete $self->{timer};
+	delete $self->{current_interval};
+	$self->{on_max_retries}->($self) if $self->{on_max_retries};
+	return;
+    }
+    $self->{timer} = AE::timer ($self->{current_interval},0,
+				sub {
+				    delete $self->{timer};
+				    $self->{on_retry}->($self)
+					if $self && $self->{on_retry};
+				});
+}
+
+sub next_interval {
+    my $self = shift;
+    if ($self->{current_interval}) {
+	return $self->{current_interval} * $self->{multiplier};
+    } else {
+	return $self->{interval};
+    }
+}
+
+sub current_interval { shift->{current_interval} };
+
+sub success {
+    my $self = shift;
+    delete $self->{current_interval};
+    delete $self->{timer};
 }
 
 package VM::EC2::CondVar;
