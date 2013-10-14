@@ -12,8 +12,6 @@ VM::EC2::Dispatch->register(
     ResetNetworkInterfaceAttribute    => 'boolean',
     AttachNetworkInterface            => sub { shift->{attachmentId}    },
     DetachNetworkInterface            => 'boolean',
-    AssignPrivateIpAddresses          => 'boolean',
-    UnassignPrivateIpAddresses        => 'boolean',
     );
 
 =head1 NAME VM::EC2::REST::elastic_network_interface
