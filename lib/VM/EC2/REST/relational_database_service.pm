@@ -21,11 +21,12 @@ VM::EC2::Dispatch->register(
     DescribeDBParameterGroups         => 'fetch_rds_objects,DBParameterGroup,VM::EC2::DB::Parameter::Group',
     DescribeDBParameters              => 'fetch_rds_objects,Parameter,VM::EC2::DB::Parameter',
     DescribeDBSecurityGroups          => 'fetch_rds_objects,DBSecurityGroup,VM::EC2::DB::SecurityGroup',
-    DescribeDBSubnetGroups            => 'fetch_rds_objects,DBSubnetGroup,VM::EC2::DB::Subnet::Group',
     DescribeDBSnapshots               => 'fetch_rds_objects,DBSnapshot,VM::EC2::DB::Snapshot',
+    DescribeDBSubnetGroups            => 'fetch_rds_objects,DBSubnetGroup,VM::EC2::DB::Subnet::Group',
     DescribeEngineDefaultParameters   => 'fetch_one_result,EngineDefaults,VM::EC2::DB::Engine::Defaults',
     DescribeEventCategories           => 'fetch_rds_objects,EventCategoriesMap,VM::EC2::DB::Event::Category',
     DescribeEventSubscriptions        => 'fetch_rds_objects,EventSubscription,VM::EC2::DB::Event::Subscription',
+    DescribeEvents                    => 'fetch_rds_objects,Event,VM::EC2::DB::Event',
     DescribeOptionGroupOptions        => 'fetch_rds_objects,OptionGroupOption,VM::EC2::DB::Option::Group::Option',
     DescribeOptionGroups              => 'fetch_rds_objects,OptionGroup,VM::EC2::DB::Option::Group',
     DescribeOrderableDBInstanceOptions=> 'fetch_rds_objects,OrderableDBInstanceOption,VM::EC2::DB::Instance::OrderableOption',
@@ -45,18 +46,24 @@ VM::EC2::Dispatch->register(
     ModifyDBParameterGroup            => sub { return shift->{ModifyDBParameterGroupResult}{DBParameterGroupName} },
     ModifyDBSubnetGroup               => 'fetch_one_result,DBSubnetGroup,VM::EC2::DB::Subnet::Group',
     ModifyEventSubscription           => 'fetch_one_result,EventSubscription,VM::EC2::DB::Event::Subscription',
-
+    ModifyOptionGroup                 => 'fetch_one_result,OptionGroup,VM::EC2::DB::Option::Group',
     PromoteReadReplica                => 'fetch_one_result,DBInstance,VM::EC2::DB::Instance',
     PurchaseReservedDBInstancesOffering
                                       => 'fetch_one_result,ReservedDBInstance,VM::EC2::DB::Reserved::Instance',
     RebootDBInstance                  => 'fetch_one_result,DBInstance,VM::EC2::DB::Instance',
+    RemoveSourceIdentifierFromSubscription
+                                      => 'fetch_one_result,EventSubscription,VM::EC2::DB::Event::Subscription',
+    ResetDBParameterGroup             => sub { return shift->{ResetDBParameterGroupResult}{DBParameterGroupName} },
+    RestoreDBInstanceFromDBSnapshot   => 'fetch_one_result,DBInstance,VM::EC2::DB::Instance',
+    RestoreDBInstanceToPointInTime    => 'fetch_one_result,DBInstance,VM::EC2::DB::Instance',
+    RevokeDBSecurityGroupIngress      => 'fetch_one_result,DBSecurityGroup,VM::EC2::DB::SecurityGroup',
     );
 
 sub rds_call {
     my $self = shift;
     (my $endpoint = $self->{endpoint}) =~ s/ec2/rds/;
     local $self->{endpoint} = $endpoint;
-    local $self->{version}  = '2013-02-12';
+    local $self->{version}  = '2013-05-15';
     $self->call(@_);
 }
 
@@ -107,11 +114,9 @@ ModifyDBInstance
 ModifyDBParameterGroup
 ModifyDBSubnetGroup
 ModifyEventSubscription
+ModifyOptionGroup
 PromoteReadReplica
 PurchaseReservedDBInstancesOffering
-
-Unimplemented:
-ModifyOptionGroup
 RebootDBInstance
 RemoveSourceIdentifierFromSubscription
 RemoveTagsFromResource
@@ -119,6 +124,9 @@ ResetDBParameterGroup
 RestoreDBInstanceFromDBSnapshot
 RestoreDBInstanceToPointInTime
 RevokeDBSecurityGroupIngress
+
+Unimplemented:
+ (none)
 
 =head1 SEE ALSO
 
@@ -132,12 +140,12 @@ Adds a source identifier to an existing RDS event notification subscription.
 
 Required arguments:
 
- -source_identifier         The identifier of the event source to be added.
+ -source_identifier                    The identifier of the event source to be added.
 
- -subscription_name         The name of the RDS event notification subscription
-                            you want to add a source identifier to.
+ -subscription_name                    The name of the RDS event notification subscription you want
+                                       to add a source identifier to.
 
-Returns a VM::EC2::DB::Event::Subscription object.
+Returns a L<VM::EC2::DB::Event::Subscription> object.
 
 =cut
 
@@ -152,15 +160,22 @@ sub add_source_identifier_to_subscription {
     return $self->rds_call('AddSourceIdentifierToSubscription',@params);
 }
 
-=head2 $ec2->add_tags_to_db_resource(-resource_name => $name, -tags => \@tags)
+=head2 $ec2->add_tags_to_resource(-resource_name => $name, -tags => \@tags)
 
-Adds metadata tags to a DB Instance.
+Adds metadata tags to an Amazon RDS resource.  These tags can also be used with cost allocation
+reporting to track costs associated with Amazon RDS resources, or used in a Condition statement in
+an IAM policy for Amazon RDS.
 
 Required arguments:
 
- -resource_name     The DB Instance the tags will be added to.
+ -resource_name     The Amazon RDS resource the tags will be removed from.  This value is an Amazon
+                    Resource Name (ARN).  For information about creating an ARN, see Constructing
+                    an RDS Amazon Resource Name (ARN) at:
+                    http://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_Tagging.html#USER_Tagging.ARN
 
  -tags              hashref or arrayref of hashrefs containing tag Key/Value pairs
+
+This method does not return a value but will raise an error if unsuccessful.
 
 =cut
 
@@ -168,7 +183,7 @@ sub add_tags_to_resource {
     my $self = shift;
     my %args = @_;
     $args{-tags} && $args{-resource_name} or
-        croak "add_tags_to_db_resource(): -tags and -resource_name arguments required";
+        croak "add_tags_to_resource(): -tags and -resource_name arguments required";
     my @params;
     push @params,$self->single_parm('ResourceName',\%args);
     push @params,$self->member_list_parm('Tags',\%args);
@@ -177,27 +192,28 @@ sub add_tags_to_resource {
 
 =head2 $sg = $ec2->authorize_db_security_group_ingress(%args)
 
-Enables ingress to a DBSecurityGroup using one of two forms of authorization:
-IP based or EC2 Security Group based.
+Enables ingress to a DBSecurityGroup using one of two forms of authorization.  First, EC2 or VPC
+security groups can be added to the DBSecurityGroup if the application using the database is running
+on EC2 or VPC instances. Second, IP ranges are available if the application accessing your database
+is running on the Internet.
 
 Required arguments:
 
- -db_security_group_name          The name of the DB Security Group to add
-                                  authorization to.
+ -db_security_group_name               The name of the DB Security Group to add authorization to.
 
 Optional arguments:
 
- -cidrip                          The IP range to authorize.
+ -cidrip                               The IP range to authorize.
 
- -ec2_security_group_id           ID of the EC2 Security Group to authorize.
+ -ec2_security_group_id                ID of the EC2 Security Group to authorize.  For VPC DB 
+                                       security groups, EC2SecurityGroupId must be provided.
 
- -ec2_security_group_name         Name of the EC2 Security Group to authorize.
+ -ec2_security_group_name              Name of the EC2 Security Group to authorize.
 
- -ec2_security_group_owner_id     AWS Account Number of the owner of the EC2
-                                  Security Group specified in the
-                                  -ec2_security_group_name parameter.
+ -ec2_security_group_owner_id          AWS Account Number of the owner of the EC2 Security Group
+                                       specified in the -ec2_security_group_name parameter.
 
-Returns a VM::EC2::DB::SecurityGroup object.
+Returns a L<VM::EC2::DB::SecurityGroup> object.
 
 =cut
 
@@ -215,7 +231,9 @@ sub authorize_db_security_group_ingress {
     $args{-EC2SecurityGroupOwnerId} = $args{-ec2_security_group_owner_id};
     $args{-CIDRIP} = $args{-cidrip};
     my @params;
-    push @params,$self->single_parm($_,\%args) foreach qw(CIDRIP DBSecurityGroupName EC2SecurityGroupId EC2SecurityGroupName EC2SecurityGroupOwnerId);
+    push @params,$self->single_parm($_,\%args)
+        foreach qw(CIDRIP DBSecurityGroupName EC2SecurityGroupId
+                   EC2SecurityGroupName EC2SecurityGroupOwnerId);
     return $self->rds_call('AuthorizeDBSecurityGroupIngress',@params);
 }
 
@@ -225,18 +243,18 @@ Copies the specified DBSnapshot. The source DBSnapshot must be in the "available
 
 Required arguments:
 
- -source_db_snapshot_identifier   The identifier for the source DB snapshot.
+ -source_db_snapshot_identifier        The identifier for the source DB snapshot.
 
- -target_db_snapshot_identifier   The identifier for the copied snapshot.
-                                  Constraints:
-                                  * Cannot be null, empty, or blank
-                                  * Must contain from 1 to 255 alphanumeric
-                                    characters or hyphens
-                                  * First character must be a letter
-                                  * Cannot end with a hyphen or contain two
-                                    consecutive hyphens
+ -target_db_snapshot_identifier        The identifier for the copied snapshot.
+                                       Constraints:
+                                       * Cannot be null, empty, or blank
+                                       * Must contain from 1 to 255 alphanumeric
+                                         characters or hyphens
+                                       * First character must be a letter
+                                       * Cannot end with a hyphen or contain two
+                                         consecutive hyphens
 
-Returns a VM::EC2::DB::Snapshot object.
+Returns a L<VM::EC2::DB::Snapshot> object.
 
 =cut
 
@@ -248,7 +266,8 @@ sub copy_db_snapshot {
     $args{-SourceDBSnapshotIdentifier} = $args{-source_db_snapshot_identifier} || $args{-source};
     $args{-TargetDBSnapshotIdentifier} = $args{-target_db_snapshot_identifier} || $args{-target};
     my @params;
-    push @params,$self->single_parm($_,\%args) foreach qw(SourceDBSnapshotIdentifier TargetDBSnapshotIdentifier);
+    push @params,$self->single_parm($_,\%args)
+        foreach qw(SourceDBSnapshotIdentifier TargetDBSnapshotIdentifier);
     return $self->rds_call('CopyDBSnapshot',@params);
 }
 
@@ -435,12 +454,31 @@ Optional arguments:
                                        Valid Days: Mon, Tue, Wed, Thu, Fri, Sat, Sun
                                        Constraints: Minimum 30-minute window.
 
- -publicly_accessible                  Is the DB instance publicly accessible.
+ -publicly_accessible                  Specifies the accessibility options for the DB instance. A
+                                       value of true specifies an Internet-facing instance with a
+                                       publicly resolvable DNS name, which resolves to a public IP
+                                       address. A value of false specifies an internal instance with
+                                       a DNS name that resolves to a private IP address.
+
+                                       Default: The default behavior varies depending on whether a
+                                       VPC has been requested or not. The following list shows the 
+                                       default behavior in each case.
+                                       * DefaultVPC:true
+                                       * VPC:false
+
+                                       If no DB subnet group has been specified as part of the
+                                       request and the -publicly_accessible value has not been set,
+                                       the DB instance will be publicly accessible. If a specific DB
+                                       subnet group has been specified as part of the request and
+                                       the PubliclyAccessible value has not been set, the DB
+                                       instance will be private.
+
+ -tags                                 hashref or arrayref of hashrefs containing Key/Value pairs
 
  -vpc_security_group_ids               A list of EC2 VPC Security Groups to associate with this
                                        DB Instance.
 
-This method returns a VM::EC2::DB:Instance object.
+This method returns a L<VM::EC2::DB:Instance> object.
 
 =cut
 
@@ -449,12 +487,18 @@ sub create_db_instance {
     my $self = shift;
     my %args = @_;
     my @params;
-    $args{-allocated_storage} or croak "create_db_instance(): -allocated_storage required argument missing";
-    $args{-db_instance_class} or croak "create_db_instance(): -db_instance_class required argument missing";
-    $args{-db_instance_identifier} or croak "create_db_instance(): -db_instance_identifier required argument missing";
-    $args{-engine} or croak "create_db_instance(): -engine required argument missing";
-    $args{-master_user_password} or croak "create_db_instance(): -master_user_password required argument missing";
-    $args{-master_username} or croak "create_db_instance(): -master_username required argument missing";
+    $args{-allocated_storage} or
+        croak "create_db_instance(): -allocated_storage required argument missing";
+    $args{-db_instance_class} or
+        croak "create_db_instance(): -db_instance_class required argument missing";
+    $args{-db_instance_identifier} or
+        croak "create_db_instance(): -db_instance_identifier required argument missing";
+    $args{-engine} or
+        croak "create_db_instance(): -engine required argument missing";
+    $args{-master_user_password} or
+        croak "create_db_instance(): -master_user_password required argument missing";
+    $args{-master_username} or
+        croak "create_db_instance(): -master_username required argument missing";
     $args{-MultiAZ} = $args{-multi_az};
     $args{-DBInstanceClass} = $args{-db_instance_class};
     $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
@@ -473,65 +517,76 @@ sub create_db_instance {
                    PreferredMaintenanceWindow);
     push @params,$self->member_list_parm($_,\%args)
         foreach qw(VpcSecurityGroupIds DBSecurityGroups);
+    push @params,$self->member_list_parm('Tags',\%args);
     return $self->rds_call('CreateDBInstance',@params);
 }
 
 =head2 $instance = $ec2->create_db_instance_read_replica(%args)
 
-Creates a DB Instance that acts as a Read Replica of a source DB Instance.
-All Read Replica DB Instances are created as Single-AZ deployments with backups
-disabled. All other DB Instance attributes (including DB Security Groups and DB
-Parameter Groups) are inherited from the source DB Instance, except as
-specified below.
+Creates a DB Instance that acts as a Read Replica of a source DB Instance.  All Read Replica DB
+Instances are created as Single-AZ deployments with backups disabled. All other DB Instance
+attributes (including DB Security Groups and DB Parameter Groups) are inherited from the source DB
+Instance, except as specified below.
 IMPORTANT:  The source DB Instance must have backup retention enabled.
 
 Required arguments:
 
- -db_instance_identifier             The DB Instance identifier of the Read
-                                     Replica. This is the unique key that
-                                     identifies a DB Instance. This parameter
-                                     is stored as a lowercase string.
+ -db_instance_identifier               The DB Instance identifier of the Read Replica. This is the
+                                       unique key that identifies a DB Instance. This parameter is
+                                       stored as a lowercase string.
 
- -source_db_instance_identifier      The identifier of the DB Instance that will
-                                     act as the source for the Read Replica.
-                                     Each DB Instance can have up to five Read
-                                     Replicas.
-                                     Constraints: Must be the identifier of an
-                                     existing DB Instance that is not already a
-                                     Read Replica DB Instance.
+ -source_db_instance_identifier        The identifier of the DB Instance that will act as the source
+                                       for the Read Replica.  Each DB Instance can have up to five
+                                       Read Replicas.  Constraints: Must be the identifier of an
+                                       existing DB Instance that is not already a Read Replica DB
+                                       Instance.
 
 Optional arguments:
 
- -auto_minor_version_upgrade         Indicates that minor engine upgrades will
-                                     be applied automatically to the Read
-                                     Replica during the maintenance window.
-                                     (Boolean)
+ -auto_minor_version_upgrade           Indicates that minor engine upgrades will be applied
+                                       automatically to the Read Replica during the maintenance
+                                       window.  (Boolean)
 
- -availability_zone                  The Amazon EC2 Availability Zone that the
-                                     Read Replica will be created in.
-                                     Default: A random, system-chosen
-                                     Availability Zone in the endpoint's region.
+ -availability_zone                    The Amazon EC2 Availability Zone that the Read Replica will
+                                       be created in.  Default: A random, system-chosen
+                                       Availability Zone in the endpoint's region.
 
- -db_instance_class                  The compute and memory capacity of the Read
-                                     Replica.
-                                     Valid Values: db.m1.small | db.m1.medium |
-                                     db.m1.large | db.m1.xlarge | db.m2.xlarge |
-                                     db.m2.2xlarge | db.m2.4xlarge
+ -db_instance_class                    The compute and memory capacity of the Read
+                                       Replica.
+                                       Valid Values: db.m1.small | db.m1.medium |
+                                       db.m1.large | db.m1.xlarge | db.m2.xlarge |
+                                       db.m2.2xlarge | db.m2.4xlarge
 
- -iops                               The amount of Provisioned IOPS to be
-                                     initially allocated for the DB Instance.
+ -iops                                 The amount of Provisioned IOPS to be initially allocated for
+                                       the DB Instance.
 
- -option_group_name                  The option group the DB instance will be
-                                     associated with. If omitted, the default
-                                     Option Group for the engine specified will
-                                     be used.
+ -option_group_name                    The option group the DB instance will be associated with. If
+                                       omitted, the default Option Group for the engine specified
+                                       will be used.
 
- -port                               The port number that the DB Instance uses
-                                     for connections.
-                                     Default: Inherits from the source instance
-                                     Valid Values: 1150-65535
+ -port                                 The port number that the DB Instance uses for connections.
+                                       Default: Inherits from the source instance
+                                       Valid Values: 1150-65535
 
- -publicly_accessible                (Boolean)
+ -publicly_accessible                  Specifies the accessibility options for the DB instance. A
+                                       value of true specifies an Internet-facing instance with a
+                                       publicly resolvable DNS name, which resolves to a public IP
+                                       address. A value of false specifies an internal instance with
+                                       a DNS name that resolves to a private IP address.
+
+                                       Default: The default behavior varies depending on whether a
+                                       VPC has been requested or not. The following list shows the 
+                                       default behavior in each case.
+                                       * DefaultVPC:true
+                                       * VPC:false
+
+                                       If no DB subnet group has been specified as part of the
+                                       request and the -publicly_accessible value has not been set,
+                                       the DB instance will be publicly accessible. If a specific DB
+                                       subnet group has been specified as part of the request and
+                                       the PubliclyAccessible value has not been set, the DB
+                                       instance will be private.
+
 
 Returns a L<VM::EC2::DB::Instance> object on success.
 
@@ -560,34 +615,29 @@ sub create_db_instance_read_replica {
 
 Creates a new DB Parameter Group.
 
-A DB Parameter Group is initially created with the default parameters for the
-database engine used by the DB Instance. To provide custom values for any of the
-parameters, you must modify the group after creating it using
-modify_parameter_group(). Once you've created a DB Parameter Group, you need to
-associate it with your DB Instance using modify_db_instance().  When you
-associate a new DB Parameter Group with a running DB Instance, you need to
-reboot the DB Instance for the new DB Parameter Group and associated settings to
-take effect.
+A DB Parameter Group is initially created with the default parameters for the database engine used
+by the DB Instance. To provide custom values for any of the parameters, you must modify the group
+after creating it using modify_parameter_group(). Once you've created a DB Parameter Group, you need
+to associate it with your DB Instance using modify_db_instance().  When you associate a new DB
+Parameter Group with a running DB Instance, you need to reboot the DB Instance for the new DB
+Parameter Group and associated settings to take effect.
 
 Required arguments:
 
- -db_parameter_group_family      The DB Parameter Group Family name. A DB
-                                 Parameter Group can be associated with one and
-                                 only one DB Parameter Group Family, and can be
-                                 applied only to a DB Instance running a
-                                 database engine and engine version compatible
-                                 with that DB Parameter Group Family.
+ -db_parameter_group_family            The DB Parameter Group Family name. A DB Parameter Group can
+                                       be associated with one and only one DB Parameter Group
+                                       Family, and can be applied only to a DB Instance running a
+                                       database engine and engine version compatible with that DB
+                                       Parameter Group Family.
 
- -db_parameter_group_name        The name of the DB Parameter Group.
-                                 Constraints:
-                                 * Must be 1 to 255 alphanumeric characters
-                                 * First character must be a letter
-                                 * Cannot end with a hyphen or contain two
-                                   consecutive hyphens
-                                 NOTE: This value is stored as a lower-case
-                                       string.
+ -db_parameter_group_name              The name of the DB Parameter Group.
+                                       Constraints:
+                                       * Must be 1 to 255 alphanumeric characters
+                                       * First character must be a letter
+                                       * Cannot end with a hyphen or contain two consecutive hyphens
+                                       NOTE: This value is stored as a lower-case string.
 
- -description                    The description for the DB Parameter Group.
+ -description                          The description for the DB Parameter Group.
 
 Returns a L<VM::EC2::DB::Parameter::Group> object.
 
@@ -612,22 +662,21 @@ sub create_db_parameter_group {
 
 =head2 $group = $ec2->create_db_security_group(%args)
 
-Creates a new DB Security Group. DB Security Groups control access to a DB
-Instance if not in a VPC.
+Creates a new DB Security Group. DB Security Groups control access to a DB Instance if not in a VPC.
 
 Required arguments:
 
- -db_security_group_description      The description for the DB Security Group.
+ -db_security_group_description        The description for the DB Security Group.
 
- -db_security_group_name             The name for the DB Security Group. This
-                                     value is stored as a lowercase string.
-                                     Constraints: Must contain no more than 255
-                                     alphanumeric characters or hyphens.
-                                     Must not be "Default".
+ -db_security_group_name               The name for the DB Security Group. This value is stored as a
+                                       lowercase string.
+                                       Constraints: Must contain no more than 255
+                                       alphanumeric characters or hyphens.
+                                       Must not be "Default".
 
- -name                               Alias for -db_security_group_name
+ -name                                 Alias for -db_security_group_name
 
- -description                        Alias for -db_security_group_description
+ -description                          Alias for -db_security_group_description
 
 Returns a L<VM::EC2::DB::SecurityGroup> object.
 
@@ -654,30 +703,30 @@ Creates a DB snapshot. The source DB instance must be in "available" state.
 
 Required arguments:
 
- -db_instance_identifier          The DB instance identifier. This is the unique
-                                  key that identifies a DB instance. This
-                                  parameter is not case sensitive.
+ -db_instance_identifier               The DB instance identifier. This is the unique key that
+                                       identifies a DB instance. This parameter is not case
+                                       sensitive.
 
-                                  Constraints:
-                                  * Must contain from 1 to 63 alphanumeric
-                                    characters or hyphens
-                                  * First character must be a letter
-                                  * Cannot end with a hyphen or contain two
-                                    consecutive hyphens
+                                       Constraints:
+                                       * Must contain from 1 to 63 alphanumeric
+                                         characters or hyphens
+                                       * First character must be a letter
+                                       * Cannot end with a hyphen or contain two
+                                         consecutive hyphens
 
- -db_snapshot_identifier          The identifier for the DB snapshot.
+ -db_snapshot_identifier               The identifier for the DB snapshot.
 
-                                  Constraints:
-                                  * Cannot be null, empty, or blank
-                                  * Must contain from 1 to 255 alphanumeric
-                                    characters or hyphens
-                                  * First character must be a letter
-                                  * Cannot end with a hyphen or contain two
-                                    consecutive hyphens
+                                       Constraints:
+                                       * Cannot be null, empty, or blank
+                                       * Must contain from 1 to 255 alphanumeric
+                                         characters or hyphens
+                                       * First character must be a letter
+                                       * Cannot end with a hyphen or contain two
+                                         consecutive hyphens
 
- -db_id                           Alias for -db_instance_identifier
+ -db_id                                Alias for -db_instance_identifier
 
- -snapshot_id                     Alias for -db_snapshot_identifier
+ -snapshot_id                          Alias for -db_snapshot_identifier
 
 Returns a L<VM::EC2::DB::Snapshot> object on success.
 
@@ -689,7 +738,8 @@ sub create_db_snapshot {
     my @params;
     my $db_id = $args{-db_instance_identifier} || $args{-db_id};
     my $snapshot_id = $args{-db_snapshot_identifier} || $args{-snapshot_id};
-    $db_id or croak "create_db_snapshot(): -db_instance_identifier required argument missing";
+    $db_id or 
+        croak "create_db_snapshot(): -db_instance_identifier required argument missing";
     $snapshot_id or croak "create_db_snapshot(): -db_snapshot_identifier required argument missing";
     $args{-DBInstanceIdentifier} = $db_id;
     $args{-DBSnapshotIdentifier} = $snapshot_id;
@@ -700,26 +750,26 @@ sub create_db_snapshot {
 
 =head2 $subnet_group = $ec2->create_db_subnet_group(%args)
 
-Creates a new DB subnet group. DB subnet groups must contain at least one subnet
-in at least two availability zones in the region.
+Creates a new DB subnet group. DB subnet groups must contain at least one subnet in at least two
+availability zones in the region.
 
 Required arguments:
 
- -db_subnet_group_description    The description for the DB subnet group.
+ -db_subnet_group_description          The description for the DB subnet group.
 
- -db_subnet_group_name           The name for the DB Subnet Group. This value is
-                                 stored as a lowercase string.
+ -db_subnet_group_name                 The name for the DB Subnet Group. This value is stored as a
+                                       lowercase string.
 
-                                 Constraints:
-                                 * Must contain no more than 255 alphanumeric
-                                   characters or hyphens.
-                                 * Must not be "Default".
+                                       Constraints:
+                                       * Must contain no more than 255 alphanumeric
+                                         characters or hyphens.
+                                       * Must not be "Default".
 
- -subnet_ids                     Arrayref of subnet IDs for the subnet group.
+ -subnet_ids                           Arrayref of subnet IDs for the subnet group.
 
- -description                    Alias for -db_subnet_group_description
+ -description                          Alias for -db_subnet_group_description
 
- -name                           Alias -db_subnet_group_name
+ -name                                 Alias -db_subnet_group_name
 
 Returns a L<VM::EC2::DB::Subnet::Group> object on success.
 
@@ -1239,7 +1289,7 @@ All arguments are optional but some conditions apply.
                           For more information on ISO 8601, visit:
                           http://en.wikipedia.org/wiki/ISO_8601
 
-Returns an array of VM::EC2::DB::Event objects.
+Returns an array of L<VM::EC2::DB::Event> objects.
 
 =cut
 
@@ -1247,7 +1297,8 @@ sub describe_events {
     my $self = shift;
     my %args = @_;
     my @params;
-    push @params,$self->single_parm($_,\%args) foreach qw(Duration EndTime SourceIdentifier SourceType StartTime);
+    push @params,$self->single_parm($_,\%args)
+        foreach qw(Duration EndTime SourceIdentifier SourceType StartTime);
     push @params,$self->member_list_parm('EventCategories',\%args);
     push @params,$self->single_parm('Marker',\%args);
     push @params,$self->single_parm('MaxRecords',\%args);
@@ -1709,7 +1760,7 @@ Optional arguments:
                                        DB Instance.  This change is asynchronously applied as soon
                                        as possible.
 
-This method returns a VM::EC2::DB:Instance object.
+This method returns a L<VM::EC2::DB:Instance> object.
 
 =cut
 
@@ -1866,12 +1917,6 @@ sub modify_event_subscription {
 
 Modifies an existing Option Group.
 
-Note that persistent options, such as the TDE_SQLServer option for Microsoft SQL Server, cannot be
-removed from an option group while DB instances are associated with the option group. Permanent
-options, such as the TDE option for Oracle Advanced Security TDE, cannot be removed from an option
-group, and that option group cannot be removed from a DB instance once it is associated with a DB
-instance.
-
 Required arguments:
 
  -option_group_name                   The name of the option group to be modified.
@@ -1882,13 +1927,97 @@ Optional arguments:
                                       or during the next maintenance window for each instance
                                       associated with the Option Group. (Boolean)
 
- -options_to_include                  Arrayref of options 
+ -options_to_include                  An arrayref of hashes containing OptionName and other available
+                                      options.
 
- -options_to_remove
+                                      Available options are: DBSecurityGroupMemberships, OptionName,
+                                      OptionSettings, Port, VpcSecurityGroupMemberships
+
+                                      OptionName and Port must be provided as scalars.
+                                      DBSecurityGroupMemberships, VpcSecurityGroupMemberships must
+                                      be provided as arrayrefs.
+                                      OptionSettings must be a hashref of Name => Value pairs.
+
+                                      ie:
+                                         [ { OptionName => 'OEM',
+                                             DBSecurityGroupMemberships => [ 'mygroup' ],
+                                             Port => 1158 },
+                                           { OptionName => 'NATIVE_NETWORK_ENCRYPTION',
+                                             OptionSettings => {
+                                                 'SQLNET.ENCRYPTION_SERVER' => 'REQUIRED',
+                                                 'SQLNET.CRYPTO_CHECKSUM_SERVER' => 'REQUIRED' } } ]
+
+
+ -options_to_remove                   A string or arrayref containing the containing the option(s) to
+                                      remove.
+
+                                      ie:
+                                         [ 'OEM', 'NATIVE_NETWORK_ENCRYPTION' ]
+                                      or
+                                         'OEM'
+
+Returns a L<VM::EC2::DB::Option::Group> object on success.
 
 =cut
 
 sub modify_option_group {
+    my $self = shift;
+    my %args = @_;
+    my @params;
+    $args{-option_group_name} or
+        croak "modify_option_group(): -option_group_name required argument missing";
+    ($args{-options_to_include} || $args{-options_to_remove}) or
+        croak "modify_option_group(): -options_to_include or -options_to_remove argument required";
+
+    # -options_to_include is a convoluted combination of parameter types
+    # The DBSecurityGroupMemberships, VpcSecurityGroupMemberships options use
+    # parameters in the style:
+    #   OptionsToInclude.member.1.DBSecurityGroupMemberships.member.1=value1
+    #   OptionsToInclude.member.1.DBSecurityGroupMemberships.member.2=value2
+    #
+    # The OptionSettings option use parameters in the style:
+    #   OptionsToInclude.member.1.OptionSettings.member.1.Name=SQLNET.ENCRYPTION_SERVER
+    #   OptionsToInclude.member.1.OptionSettings.member.1.Value=REQUIRED
+    #
+    # The following code is to generate the parameters from perl objects
+    #
+    if (my $options = $args{-options_to_include}) {
+        croak "modify_option_group(): -options_to_include must be hashref or arrayref"
+            unless ref $options;
+        my @options = ref $options eq 'HASH' ? ($options) : @$options;
+        foreach my $option (@options) {
+            next unless ref $option eq 'HASH';
+            foreach my $option_cfg (keys %$option) {
+                if (ref $option->{$option_cfg}) {
+                    my %p;
+                    # this is for DBSecurityGroupMemberships, VpcSecurityGroupMemberships
+                    if (ref $option->{$option_cfg} eq 'ARRAY') {
+                        # create hashref compatible with member_list_parm()
+                        my $hash_ref = { "-$option_cfg" => $option->{$option_cfg} };
+                        %p = $self->member_list_parm($option_cfg,$hash_ref);
+                    }
+                    # this is for OptionSettings
+                    else {
+                        my $array_ref;
+                        foreach my $name (keys %{$option->{$option_cfg}}) {
+                            push @$array_ref, {
+                                Name => $name,
+                                Value => $option->{$option_cfg}->{$name}
+                            };
+                        }
+                        %p = $self->member_hash_parms($option_cfg,{ "-$option_cfg" => $array_ref });
+                    }
+                    $option->{$_} = $p{$_} foreach keys %p;
+                    delete $option->{$option_cfg};
+                }
+            }
+        }
+    }
+    push @params, $self->boolean_parm('ApplyImmediately',\%args);
+    push @params, $self->member_hash_parms('OptionsToInclude',\%args);
+    push @params, $self->member_list_parm('OptionsToRemove',\%args);
+    push @params, $self->single_parm('OptionGroupName',\%args);
+    return $self->rds_call('ModifyOptionGroup',@params);
 }
 
 =head2 $db_instance = $ec2->promote_read_replica(%args)
@@ -1943,7 +2072,8 @@ sub promote_read_replica {
     my $self = shift;
     my %args = @_;
     my @params;
-    $args{-db_instance_identifier} or croak "promote_read_replica(): -db_instance_identifier required argument missing";
+    $args{-db_instance_identifier} or
+        croak "promote_read_replica(): -db_instance_identifier required argument missing";
     $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
     push @params,$self->single_parm($_,\%args)
         foreach qw(BackupRetentionPeriod DBInstanceIdentifier PreferredBackupWindow);
@@ -2020,6 +2150,418 @@ sub reboot_db_instance {
     push @params,$self->single_parm('DBInstanceIdentifier',\%args);
     push @params,$self->boolean_parm('ForceFailover',\%args);
     return $self->rds_call('RebootDBInstance',@params);
+}
+
+=head2 $event_sub = $ec2->remove_source_identifier_from_subscription(-source_identifier => $id, -subscription_name => $name)
+
+Removes a source identifier from an existing RDS event notification subscription.
+
+Required arguments:
+
+ -source_identifier                   The source identifier to be removed from the subscription,
+                                      such as the DB instance identifier for a DB instance or the
+                                      name of a security group.
+
+ -subscription_name                   The name of the RDS event notification subscription to remove
+                                      a source identifier from.
+
+Returns a L<VM::EC2::DB::Event::Subscription> object on success.
+
+=cut
+
+sub remove_source_identifier_from_subscription {
+    my $self = shift;
+    my %args = @_;
+    my @params;
+    $args{-instance_identifier} or
+        croak "remove_source_identifier_from_subscription(): -instance_identifier required argument missing";
+    $args{-subscription_name} or
+        croak "remove_source_identifier_from_subscription(): -subscription_name required argument missing";
+    push @params,$self->single_parm('SourceIdentifier',\%args);
+    push @params,$self->single_parm('SubscriptionName',\%args);
+    return $self->rds_call('RemoveSourceIdentifierFromSubscription',@params);
+}
+
+=head2 $ec2->remove_tags_from_resource(-resource_name => $name, -tags => \@tags)
+
+Remove metadata tags from a resource.
+
+Required arguments:
+
+ -resource_name     The Amazon RDS resource the tags will be removed from.  This value is an Amazon
+                    Resource Name (ARN).  For information about creating an ARN, see Constructing
+                    an RDS Amazon Resource Name (ARN) at:
+                    http://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_Tagging.html#USER_Tagging.ARN
+
+ -tags              hashref or arrayref of hashrefs containing tag Key/Value pairs
+
+This method does not return a value but will raise an error if unsuccessful.
+
+=cut
+
+sub remove_tags_from_resource {
+    my $self = shift;
+    my %args = @_;
+    $args{-tags} && $args{-resource_name} or
+        croak "remove_tags_from_resource(): -tags and -resource_name arguments required";
+    my @params;
+    push @params,$self->single_parm('ResourceName',\%args);
+    push @params,$self->member_list_parm('Tags',\%args);
+    return $self->rds_call('RemoveTagsFromResource',@params);
+}
+
+=head2 $name = $ec2->reset_db_parameter_group(%args)
+
+Modifies the parameters of a DB parameter group to the engine/system default value.  To reset
+specific parameters, submit a hashref of the following: ParameterName and ApplyMethod.
+To reset the entire DB parameter group, set the -reset_all_parameters argument to true.
+When resetting the entire group, dynamic parameters are updated immediately and static 
+parameters are set to pending-reboot to take effect on the next DB instance restart or
+after issuing a reboot_db_instance().
+
+Required arguments:
+
+ -db_parameter_group_name             The name of the DB Parameter Group. 
+                                      Constraints:
+                                      * Must be the name of an existing DB Parameter Group
+                                      * Must be 1 to 255 alphanumeric characters
+                                      * First character must be a letter
+                                      * Cannot end with a hyphen or contain two consecutive hyphens
+
+Conditional arguments:
+
+ -parameters                          An arrayref of hashes containing parameter names and the apply 
+                                      method for the parameter update. 
+
+                                      The hash keys must be: ParameterName and ApplyMethod
+                                      ie:
+                                         [ { ParameterName => 'max_user_connections',
+                                             ApplyMethod => 'pending-reboot' },
+                                           { ParameterName => 'max_allowed_packet',
+                                             ApplyMethod => 'immediate' } ]
+
+ -reset_all_parameters                Reset all parameters in the DB parameter group to default
+                                      values.  Boolean, default is true.
+
+Returns the name of the DB parameter group.
+
+=cut
+
+sub reset_db_parameter_group {
+    my $self = shift;
+    my %args = @_;
+    $args{-db_parameter_group_name} or
+        croak "reset_db_parameter_group(): -db_parameter_group_name argument required";
+    $args{-DBParameterGroupName} = $args{-db_parameter_group_name};
+    my @params;
+    push @params,$self->single_parm('DBParameterGroupName',\%args);
+    push @params,$self->member_hash_parm('Parameters',\%args);
+    push @params,$self->boolean_parm('ResetAllParameters',\%args);
+    return $self->rds_call('ResetDBParameterGroup',@params);
+}
+
+=head2 $db_instance = $ec2->restore_db_instance_from_db_snapshot(%args)
+
+Creates a new DB instance from a DB snapshot.  The target database is created from the source
+database restore point with the same configuration as the original source database, except that
+the new RDS instance is created in the default security group.
+
+Required arguments:
+
+ -db_instance_identifier               The DB Instance identifier. 
+                                       Constraints:
+                                        * Must contain from 1 to 63 alphanumeric characters or
+                                          hyphens (1 to 15 for SQL Server).
+                                        * First character must be a letter.
+                                        * Cannot end with a hyphen or contain two consecutive
+                                          hyphens.
+
+ -db_snapshot_identifier               The identifier for the DB snapshot.
+
+                                       Constraints:
+                                       * Must contain 1 to 255 alphanumeric characters or hyphens
+                                       * First character must be a letter
+                                       * Cannot end with a hyphen or contain two consecutive hyphens
+
+Optional arguments:
+
+ -auto_minor_version_upgrade           Indicates that minor engine upgrades will be applied
+                                       automatically to the DB Instance during the maintenance
+                                       window.  (Boolean).  Default: true
+
+ -availability_zone                    The EC2 Availability Zone that the database instance will
+                                       be created in.
+                                       Default: A random, system-chosen Availability Zone in the
+                                                endpoint's region.
+                                       Constraint:  Cannot specify if -multi_az is true
+
+ -db_instance_class                    The compute and memory capacity of the DB Instance.
+                                       db.t1.micro | db.m1.small | db.m1.medium | db.m1.large |
+                                       db.m1.xlarge | db.m2.xlarge |db.m2.2xlarge | db.m2.4xlarge
+
+ -db_name                              The database name for the restored DB instance.
+                                       NOTE: Does not apply to MySQL engine.
+
+ -db_subnet_group_name                 A DB Subnet Group to associate with this DB Instance.
+                                       If not specified, then it is a non-VPC DB instance.
+
+ -engine                               The name of the database engine to be used for this
+                                       instance.
+                                       Default is that of source.
+                                       Valid values:  MySQL | oracle-se1 | oracle-se | oracle-ee |
+                                        sqlserver-ee | sqlserver-se | sqlserver-ex | sqlserver-web
+
+ -iops                                 The amount of Provisioned IOPS initially allocated.
+                                       Must be an integer greater than 1000
+
+ -license_model                        License model information for this DB Instance.
+                                       Valid values: license-included |
+                                                     bring-your-own-license |
+                                                     general-public-license
+
+ -multi_az                             Specifies if the DB Instance is a Multi-AZ deployment.
+                                       You cannot set the -availability_zone argument if the
+                                       -multi_az argument is set to true.
+
+ -option_group_name                    Indicates that the DB Instance should be associated
+                                       with the specified option group.
+
+ -port                                 The port number on which the database accepts
+                                       connections.
+
+                                       MySQL:
+                                        * Default: 3306, Valid values: 1150-65535
+                                       Oracle:
+                                        * Default: 1521, Valid values: 1150-65535
+                                       Oracle:
+                                        * Default: 1433, Valid values: 1150-65535 except
+                                          1434 and 3389.
+
+ -publicly_accessible                  Specifies the accessibility options for the DB instance. A
+                                       value of true specifies an Internet-facing instance with a
+                                       publicly resolvable DNS name, which resolves to a public IP
+                                       address. A value of false specifies an internal instance with
+                                       a DNS name that resolves to a private IP address.
+
+                                       Default: The default behavior varies depending on whether a
+                                       VPC has been requested or not. The following list shows the 
+                                       default behavior in each case.
+                                       * DefaultVPC:true
+                                       * VPC:false
+
+                                       If no DB subnet group has been specified as part of the
+                                       request and the -publicly_accessible value has not been set,
+                                       the DB instance will be publicly accessible. If a specific DB
+                                       subnet group has been specified as part of the request and
+                                       the PubliclyAccessible value has not been set, the DB
+                                       instance will be private.
+
+ -tags                                 hashref or arrayref of hashrefs containing Key/Value pairs
+
+=cut
+
+sub restore_db_instance_from_db_snapshot {
+    my $self = shift;
+    my %args = @_;
+    my @params;
+    $args{-db_instance_identifier} or 
+        croak "restore_db_instance_from_db_snapshot(): -db_instance_identifier required argument missing";
+    $args{-db_snapshot_identifier} or 
+        croak "restore_db_instance_from_db_snapshot(): -db_snapshot_identifier required argument missing";
+    $args{-MultiAZ} = $args{-multi_az};
+    $args{-DBInstanceClass} = $args{-db_instance_class};
+    $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
+    $args{-DBName} = $args{-db_name};
+    $args{-DBSnapshotIdentifier} = $args{-db_snapshot_identifier};
+    $args{-DBSubnetGroupName} = $args{-db_subnet_group_name};
+    push @params,$self->boolean_parm($_,\%args)
+        foreach qw(AutoMinorVersionUpgrade MultiAZ PubliclyAccessible);
+    push @params,$self->single_parm($_,\%args)
+        foreach qw(AvailabilityZone DBInstanceClass DBInstanceIdentifier
+                   DBName DBSnapshotIdentifier DBSubnetGroupName Engine
+                   Iops LicenseModel OptionGroupName Port);
+    push @params,$self->member_list_parm('Tags',\%args);
+    return $self->rds_call('RestoreDBInstanceFromDBSnapshot',@params);
+}
+
+=head2 $db_instance = $ec2->restore_db_instance_to_point_in_time(%args)
+
+Restores a DB instance to an arbitrary point-in-time. Users can restore to any point in time before
+the latestRestorableTime for up to backupRetentionPeriod days. The target database is created from
+the source database with the same configuration as the original database except that the DB instance
+is created with the default DB security group.
+
+Required arguments:
+
+ -source_db_instance_identifier      The identifier of the source DB instance from which to restore.
+                                     Constraints: Must be the identifier of an existing DB Instance 
+
+ -target_db_instance_identifier      The name of the new database instance to be created.
+                                     Constraints:
+                                     * Must contain from 1 to 63 alphanumeric characters or hyphens
+                                     * First character must be a letter
+                                     * Cannot end with a hyphen or contain two consecutive hyphens
+
+Optional arguments:
+
+ -auto_minor_version_upgrade           Indicates that minor engine upgrades will be applied
+                                       automatically to the DB Instance during the maintenance
+                                       window.  (Boolean).  Default: true
+
+ -availability_zone                    The EC2 Availability Zone that the database instance will
+                                       be created in.
+                                       Default: A random, system-chosen Availability Zone in the
+                                                endpoint's region.
+                                       Constraint:  Cannot specify if -multi_az is true
+
+ -db_instance_class                    The compute and memory capacity of the DB Instance.
+                                       db.t1.micro | db.m1.small | db.m1.medium | db.m1.large |
+                                       db.m1.xlarge | db.m2.xlarge |db.m2.2xlarge | db.m2.4xlarge
+
+ -db_name                              The database name for the restored DB instance.
+                                       NOTE: Does not apply to MySQL engine.
+
+ -db_subnet_group_name                 A DB Subnet Group to associate with this DB Instance.
+                                       If not specified, then it is a non-VPC DB instance.
+
+ -engine                               The name of the database engine to be used for this
+                                       instance.
+                                       Default is that of source.
+                                       Valid values:  MySQL | oracle-se1 | oracle-se | oracle-ee |
+                                        sqlserver-ee | sqlserver-se | sqlserver-ex | sqlserver-web
+
+ -iops                                 The amount of Provisioned IOPS initially allocated.
+                                       Must be an integer greater than 1000
+
+ -license_model                        License model information for this DB Instance.
+                                       Valid values: license-included |
+                                                     bring-your-own-license |
+                                                     general-public-license
+
+ -multi_az                             Specifies if the DB Instance is a Multi-AZ deployment.
+                                       You cannot set the -availability_zone argument if the
+                                       -multi_az argument is set to true.
+
+ -option_group_name                    Indicates that the DB Instance should be associated
+                                       with the specified option group.
+
+ -port                                 The port number on which the database accepts
+                                       connections.
+
+                                       MySQL:
+                                        * Default: 3306, Valid values: 1150-65535
+                                       Oracle:
+                                        * Default: 1521, Valid values: 1150-65535
+                                       Oracle:
+                                        * Default: 1433, Valid values: 1150-65535 except
+                                          1434 and 3389.
+
+ -publicly_accessible                  Specifies the accessibility options for the DB instance. A
+                                       value of true specifies an Internet-facing instance with a
+                                       publicly resolvable DNS name, which resolves to a public IP
+                                       address. A value of false specifies an internal instance with
+                                       a DNS name that resolves to a private IP address.
+
+                                       Default: The default behavior varies depending on whether a
+                                       VPC has been requested or not. The following list shows the 
+                                       default behavior in each case.
+                                       * DefaultVPC:true
+                                       * VPC:false
+
+                                       If no DB subnet group has been specified as part of the
+                                       request and the -publicly_accessible value has not been set,
+                                       the DB instance will be publicly accessible. If a specific DB
+                                       subnet group has been specified as part of the request and
+                                       the PubliclyAccessible value has not been set, the DB
+                                       instance will be private.
+
+ -restore_time                         The date and time to restore from.
+                                       Valid Values: Value must be a UTC time
+                                       Constraints:
+                                       * Must be prior the latest restorable time for the DB
+                                         instance
+                                       * Cannot be specified if -use_latest_restorable_time
+                                         parameter is true
+                                       Example: 2009-09-07T23:45:00Z
+
+ -tags                                 hashref or arrayref of hashrefs containing Key/Value pairs
+
+ -use_latest_restorable_time           Specifies if the DB instance is restored from the latest
+                                       backup time.
+                                       Boolean, default is false.
+                                       Constraints: Cannot be specified if -restore_time parameter
+                                       is provided.
+
+=cut
+
+sub restore_db_instance_to_point_in_time {
+    my $self = shift;
+    my %args = @_;
+    my @params;
+    $args{-source_db_instance_identifier} or 
+        croak "restore_db_instance_to_point_in_time(): -source_db_instance_identifier required argument missing";
+    $args{-target_db_instance_identifier} or 
+        croak "restore_db_instance_to_point_in_time(): -target_db_instance_identifier required argument missing";
+    $args{-MultiAZ} = $args{-multi_az};
+    $args{-DBInstanceClass} = $args{-db_instance_class};
+    $args{-DBName} = $args{-db_name};
+    $args{-DBSubnetGroupName} = $args{-db_subnet_group_name};
+    push @params,$self->boolean_parm($_,\%args)
+        foreach qw(AutoMinorVersionUpgrade MultiAZ PubliclyAccessible UseLatestRestorableTime);
+    push @params,$self->single_parm($_,\%args)
+        foreach qw(AvailabilityZone DBInstanceClass DBName DBSubnetGroupName
+                   Engine Iops OptionGroupName Port RestoreTime
+                   SourceDBInstanceIdentifier TargetDBInstanceIdentifier);
+    push @params,$self->member_list_parm('Tags',\%args);
+    return $self->rds_call('RestoreDBInstanceToPointInTime',@params);
+}
+
+=head2 $sg = $ec2->revoke_db_security_group_ingress(%args)
+
+Revokes ingress from a DBSecurityGroup for previously authorized IP ranges or EC2 or VPC Security
+Groups.
+
+Required arguments:
+
+ -db_security_group_name          The name of the DB Security Group to revoke authorization from.
+
+Optional arguments:
+
+ -cidrip                          The IP range to revoke.  Must be a valid CIDR range.
+                                  Security group parameters cannot be specified if -cidrip is
+                                  specified.
+
+ -ec2_security_group_id           ID of the EC2 Security Group to revoke access from.
+                                  For VPC DB security groups, this must be provided.
+
+ -ec2_security_group_name         Name of the EC2 Security Group to revoke access from.
+
+ -ec2_security_group_owner_id     AWS Account Number of the owner of the EC2 Security Group
+                                  specified in the -ec2_security_group_name parameter.
+
+Returns a L<VM::EC2::DB::SecurityGroup> object.
+
+=cut
+
+sub revoke_db_security_group_ingress {
+    my $self = shift;
+    my %args = @_;
+    $args{-db_security_group_name} &&
+        ($args{-cidrip} || $args{-ec2_security_group_id} || $args{-ec2_security_group_name}) or
+        croak "revoke_db_security_group_ingress(): -db_security_group_name and one of -cidrip, -ec2_security_group_id, -ec2_security_group_name arguments required";
+    ($args{-ec2_security_group_id} || $args{-ec2_security_group_name}) &&
+     $args{-ec2_security_group_owner_id} or
+        croak "revoke_db_security_group_ingress(): -ec2_security_group_owner_id required when -ec2_security_group_id or -ec2_security_group_name arguments specified";
+    $args{-DBSecurityGroupName} = $args{-db_security_group_name};
+    $args{-EC2SecurityGroupId} = $args{-ec2_security_group_id};
+    $args{-EC2SecurityGroupName} = $args{-ec2_security_group_name};
+    $args{-EC2SecurityGroupOwnerId} = $args{-ec2_security_group_owner_id};
+    $args{-CIDRIP} = $args{-cidrip};
+    my @params;
+    push @params,$self->single_parm($_,\%args)
+        foreach qw(CIDRIP DBSecurityGroupName EC2SecurityGroupId
+                   EC2SecurityGroupName EC2SecurityGroupOwnerId);
+    return $self->rds_call('RevokeDBSecurityGroupIngress',@params);
 }
 
 =head1 AUTHOR
