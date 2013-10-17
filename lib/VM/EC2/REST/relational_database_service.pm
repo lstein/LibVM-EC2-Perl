@@ -254,6 +254,10 @@ Required arguments:
                                        * Cannot end with a hyphen or contain two
                                          consecutive hyphens
 
+ -source                               Alias for -source_db_snapshot_identifier
+
+ -target                               Alias for -target_db_snapshot_identifier
+
 Returns a L<VM::EC2::DB::Snapshot> object.
 
 =cut
@@ -617,8 +621,8 @@ Creates a new DB Parameter Group.
 
 A DB Parameter Group is initially created with the default parameters for the database engine used
 by the DB Instance. To provide custom values for any of the parameters, you must modify the group
-after creating it using modify_parameter_group(). Once you've created a DB Parameter Group, you need
-to associate it with your DB Instance using modify_db_instance().  When you associate a new DB
+after creating it using modify_db_parameter_group(). Once you've created a DB Parameter Group, you
+need to associate it with your DB Instance using modify_db_instance().  When you associate a new DB
 Parameter Group with a running DB Instance, you need to reboot the DB Instance for the new DB
 Parameter Group and associated settings to take effect.
 
@@ -831,8 +835,7 @@ Optional arguments:
                        you want to subscribe to.  You can see a list of the
                        categories for a given -source_type in the Events topic
                        in the Amazon RDS User Guide or by using the
-                       describe_event_categories() call.
-
+                       describe_event_categories() call.  
  -source_ids           An arrayref of identifiers of the event sources for which
                        events will be returned.  If not specified, then all
                        sources are included in the response. An identifier must
@@ -1216,7 +1219,7 @@ Optional argument:
                       Valid values: db-instance | db-parameter-group |
                        db-security-group | db-snapshot
 
-Returns an array of VM::EC2::DB::Event::Category objects
+Returns an array of L<VM::EC2::DB::Event::Category> objects
 
 =cut
 
@@ -1474,7 +1477,7 @@ All arguments are optional:
 
  -reserved_db_instances_offering_id     The offering identifier filter value.
 
-Returns an array of VM::EC2::DB::Reserved::Instance objects.
+Returns an array of L<VM::EC2::DB::Reserved::Instance> objects.
 
 =cut
 
@@ -1815,6 +1818,13 @@ Required arguments:
 
                                       The hash keys must be: ParameterName, ParameterValue, ApplyMethod
 
+                                      ie:
+                                      [ { ParameterName => 'db_block_checking',
+                                          ParameterValue => 'FULL',
+                                          ApplyMethod => 'immediate' } ]
+
+ -name                                Alias for -db_parameter_group_name
+
 Returns the DB Parameter Group name on success.
 
 =cut
@@ -1823,6 +1833,7 @@ sub modify_db_parameter_group {
     my $self = shift;
     my %args = @_;
     my @params;
+    $args{-db_parameter_group_name} ||= $args{-name};
     $args{-db_parameter_group_name} or croak "modify_db_parameter_group(): -db_parameter_group_name required argument missing";
     $args{-parameters} or croak "modify_db_parameter_group(): -parameters required argument missing";
     $args{-DBParameterGroupName} = $args{-db_parameter_group_name};

@@ -6,9 +6,19 @@ VM::EC2::DB::Option::Group::Membership - An RDS Database Option Group Membership
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ ($db) = $ec2->describe_db_instances(-db_instance_identifier => 'mydb');
+ print $_,"\n" foreach $db->OptionGroupMemberships;
+
 =head1 DESCRIPTION
 
+This object represents and Option Group Membership.
+
 =head1 STRING OVERLOADING
+
+In string context, the object returns the Option Group Name.
 
 =head1 SEE ALSO
 
@@ -33,7 +43,9 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->OptionGroupName }
+
+use overload '""' => sub { shift->OptionGroupName },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;

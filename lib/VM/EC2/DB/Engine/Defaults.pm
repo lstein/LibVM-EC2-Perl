@@ -2,13 +2,24 @@ package VM::EC2::DB::Engine::Defaults;
 
 =head1 NAME
 
-VM::EC2::DB::IPRange - An RDS Database Engine Parameter Defaults
+VM::EC2::DB::Engine::Defaults - An RDS Database Engine Parameter Defaults
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+ $ec2 = VM::EC2->new(...);
+ my $defaults = $ec2->describe_engine_default_parameters(-db_parameter_group_family => 'MySQL5.1')
+ my @params = $defaults->Parameters;
+ print $_,"\n" foreach grep { $_->IsModifiable } @params;
+
 =head1 DESCRIPTION
 
+This object represents database engine parameter defaults.  It is returned
+by a VM::EC2->describe_engine_default_parameters() call.
+
 =head1 STRING OVERLOADING
+
+none
 
 =head1 SEE ALSO
 

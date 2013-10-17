@@ -6,9 +6,20 @@ VM::EC2::DB::Event - An RDS Database Event
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+ $ec2 = VM::EC2->new(...);
+ my @events = $ec2->describe_events;
+ print $_,"\n" foreach grep { $_->SourceIdentifier eq 'mydbinstance' } @events;
+
 =head1 DESCRIPTION
 
+This object represents an event related to DB instances, DB security groups, 
+DB snapshots, and DB parameter groups that have happened in the past 14 days.
+
 =head1 STRING OVERLOADING
+
+In string context, this object returns a string with the date,
+identifier of the source of the event, and the event message.
 
 =head1 SEE ALSO
 
@@ -33,7 +44,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->Message }
+use overload '""' => sub { shift->as_string },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;
@@ -46,6 +58,11 @@ sub EventCategories {
     return unless $cats;
     $cats = $cats->{EventCategory};
     return ref $cats eq 'ARRAY' ? @$cats : ($cats);
+}
+
+sub as_string {
+    my $self = shift;
+    return $self->Date . '[ ' . $self->SourceIdentifier . ' ] ' . $self->Message;
 }
 
 1;

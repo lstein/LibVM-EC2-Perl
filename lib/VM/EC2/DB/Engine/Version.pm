@@ -6,9 +6,19 @@ VM::EC2::DB::Engine::Version - An RDS Database Engine Version
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+ $ec2 = VM::EC2->new(...);
+ @versions = $ec2->describe_db_engine_versions;
+ print $_,"\n" foreach grep { $_->Engine eq 'mysql' } @versions;
+
 =head1 DESCRIPTION
 
+This object represents a DB Engine Version, returned from a call to
+VM::EC2->describe_db_engine_versions().
+
 =head1 STRING OVERLOADING
+
+In string context, this object return the DBEngineVersionDescription.
 
 =head1 SEE ALSO
 
@@ -34,11 +44,14 @@ use strict;
 use base 'VM::EC2::Generic';
 use VM::EC2::DB::CharacterSet;
 
-sub primary_id { shift->DBEngineVersionDescription }
+use overload '""' => sub { shift->DBEngineVersionDescription },
+    fallback => 1;
+
 
 sub valid_fields {
     my $self = shift;
-    return qw(DBEngineDescription DBEngineVersionDescription DBParameterGroupFamily DefaultCharacterSet Engine EngineVersion SupportedCharacterSets);
+    return qw(DBEngineDescription DBEngineVersionDescription DBParameterGroupFamily
+              DefaultCharacterSet Engine EngineVersion SupportedCharacterSets);
 }
 
 sub DefaultCharacterSet {

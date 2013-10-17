@@ -6,9 +6,23 @@ VM::EC2::DB::Event::Subscription - An RDS Database Event Subscription
 
 =head1 SYNOPSIS
 
+  use VM::EC2;
+
+  $ec2     = VM::EC2->new(...);
+  @subs = $ec2->describe_event_subscriptions;
+  @db_subs = grep { $_->SourceType eq 'db-instance' } @subs;
+  @enabled = grep { $_->Enabled } @subs;
+
 =head1 DESCRIPTION
 
+This object represents an RDS Event Subscription.  It is the resultant
+output of a VM::EC2->describe_event_subscriptions() and
+VM::EC2->create_event_subscription() call.
+
 =head1 STRING OVERLOADING
+
+When used in a string context, this object will output the
+CustSubscriptionId.
 
 =head1 SEE ALSO
 

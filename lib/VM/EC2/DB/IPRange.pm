@@ -6,9 +6,20 @@ VM::EC2::DB::IPRange - An RDS Database IP Range
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ $group = $ec2->revoke_db_security_group_ingress(-db_security_group_name => 'dbgroup',
+                                                    -cidrip => '10.10.10.10/32');
+ print $_,"\n" foreach grep { $_->Status eq 'authorized' } $group->IPRanges;
+
 =head1 DESCRIPTION
 
+This object represents an IP Range in a DB Security group.
+
 =head1 STRING OVERLOADING
+
+In string context, this object returns the CIDRIP.
 
 =head1 SEE ALSO
 
@@ -33,7 +44,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->CIDRIP }
+use overload '""' => sub { shift->CIDRIP },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;

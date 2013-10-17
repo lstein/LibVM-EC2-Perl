@@ -6,9 +6,20 @@ VM::EC2::DB::Reserved::RecurringCharge - An RDS Database Reserved Instance Recur
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+ $ec2 = VM::EC2->new(...);
+ @i = $ec2->describe_reserved_db_instances;
+ print $_->RecurringCharges,"\n" foreach grep { $_->State eq 'active' } @i;
+
 =head1 DESCRIPTION
 
+This object represents a recurring charge from an RDS Reserved DB Instance or an
+RDS Reserved DB Instance Offering.
+
 =head1 STRING OVERLOADING
+
+In string context, this object returns a string containing the recurring charge
+amount and frequency.
 
 =head1 SEE ALSO
 
@@ -33,7 +44,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->RecurringChargeAmount }
+use overload '""' => sub { shift->as_string },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;
@@ -43,5 +55,10 @@ sub valid_fields {
 sub amount { shift->RecurringChargeAmount }
 
 sub frequency { shift->RecurringChargeFrequency }
+
+sub as_string {
+    my $self = shift;
+    return $self->RecurringChargeAmount . '/' . $self->RecurringChargeFrequency;
+}
 
 1;

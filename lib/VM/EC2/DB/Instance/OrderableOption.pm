@@ -2,13 +2,29 @@ package VM::EC2::DB::Instance::OrderableOption;
 
 =head1 NAME
 
-VM::EC2::DB::Instance::OrderableOption - An RDS Database IP Range
+VM::EC2::DB::Instance::OrderableOption - An RDS Database Orderable Option
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ @options = $ec2->describe_orderable_db_instance_options(-engine => 'mysql');
+ foreach $option (grep { $_->MultiAZCapable } @options) {
+   print $option->EngineVersion,' ',
+         $option->DBInstanceClass,' ',
+         join(',',grep { $_->ProvisionedIopsCapable } $option->AvailabilityZones),
+         "\n";
+ }
+
 =head1 DESCRIPTION
 
+This object represents a DB Instance Orderable Option, as returned by the
+VM::EC2->describe_orderable_db_instance_options() call.
+
 =head1 STRING OVERLOADING
+
+none
 
 =head1 SEE ALSO
 

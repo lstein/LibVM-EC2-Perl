@@ -6,9 +6,24 @@ VM::EC2::DB::SecurityGroup - An RDS Database Security Group
 
 =head1 SYNOPSIS
 
+ $ec2     = VM::EC2->new(...);
+ @sg = $ec2->describe_db_security_groups;
+ foreach $group (@sg) {
+   print $_,"\n" foreach $group->IPRanges;
+   print $_->group_name,"\n" foreach $group->EC2SecurityGroups;
+ }
+
 =head1 DESCRIPTION
 
+This object represents a DB Security Group.  It is the resultant
+output of the VM::EC2->describe_db_security_groups(), 
+VM::EC2->authorize_db_security_group_ingress(),
+VM::EC2->create_db_security_group(),
+and VM::EC2->revoke_db_security_group_ingress() calls. 
+
 =head1 STRING OVERLOADING
+
+When used in a string context, this object outputs the DB Security Group Name.
 
 =head1 SEE ALSO
 

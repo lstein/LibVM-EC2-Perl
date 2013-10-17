@@ -6,9 +6,21 @@ VM::EC2::DB::EC2SecurityGroup - An RDS Database EC2 Security Group
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ $group = $ec2->authorize_db_security_group_ingress(-db_security_group_name => 'dbgroup',
+                                                    -ec2_security_group_name => 'ec2group',
+                                                    -ec2_security_group_owner_id => '123456789123');
+ print $_,"\n" foreach $group->EC2SecurityGroups;
+
 =head1 DESCRIPTION
 
+This object represents an EC2 Security Group that is authorized in a DB Security Group.
+
 =head1 STRING OVERLOADING
+
+In string context, this object returns the EC2 Security Group ID.
 
 =head1 SEE ALSO
 

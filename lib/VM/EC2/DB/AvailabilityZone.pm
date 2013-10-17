@@ -6,9 +6,25 @@ VM::EC2::DB::AvailabilityZone - An RDS Database Availability Zone
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ @options = $ec2->describe_orderable_db_instance_options(-engine => 'mysql');
+ foreach $option (grep { $_->DBInstanceClass eq 'db.m2.4xlarge' } @options) {
+   foreach $zone (grep { $_->ProvisionedIopsCapable } $option->AvailabilityZones) {
+     print $option->Engine,' ',$option->EngineVersion,' ',$zone,"\n";
+   }
+ }
+
 =head1 DESCRIPTION
 
+This object represents an Availability Zone as part of an Orderable DB Instance
+Option.  Return as an element of a VM::EC2->describe_orderable_db_instance_options()
+call.
+
 =head1 STRING OVERLOADING
+
+In string context, the object returns the Availability Zone name.
 
 =head1 SEE ALSO
 
@@ -33,7 +49,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->Name }
+use overload '""' => sub { shift->Name },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;

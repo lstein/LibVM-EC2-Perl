@@ -8,7 +8,11 @@ VM::EC2::DB::Parameter - An RDS Database Parameter
 
 =head1 DESCRIPTION
 
+This object represents a DB Parameter.
+
 =head1 STRING OVERLOADING
+
+In string context, this object returns a string of Name=Value
 
 =head1 SEE ALSO
 
@@ -33,10 +37,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id {
-    my $self = shift;
-    return $self->ParameterName . ': ' . $self->ParameterValue
-}
+use overload '""' => sub { shift->as_string },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;
@@ -57,5 +59,10 @@ sub valid_fields {
 sub name { shift->ParameterName }
 
 sub value { shift->ParameterValue }
+
+sub as_string {
+    my $self = shift;
+    return $self->ParameterName . '=' . $self->ParameterValue
+}
 
 1;
