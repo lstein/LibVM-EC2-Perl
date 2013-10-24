@@ -6,9 +6,21 @@ VM::EC2::DB::Option::Group - An RDS Database Option Group
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ @grps = $ec2->describe_option_groups();
+ print $_->OptionGroupName,': ',$_->EngineName,"\n" foreach @grps;
+
 =head1 DESCRIPTION
 
+This object represents a DB Option Group.  It is the result of a
+VM::EC2->create_option_group(), VM::EC2->describe_option_groups(), or
+VM::EC2->modify_option_group() call.
+
 =head1 STRING OVERLOADING
+
+In string context, the object returns the Option Group Name.
 
 =head1 SEE ALSO
 
@@ -34,7 +46,8 @@ use strict;
 use base 'VM::EC2::Generic';
 use VM::EC2::DB::Option;
 
-sub primary_id { shift->OptionGroupName }
+use overload '""' => sub { shift->OptionGroupName },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;

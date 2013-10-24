@@ -6,9 +6,21 @@ VM::EC2::DB::Parameter::Group - An RDS Database Parameter Group
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ my @grps = $ec2->describe_db_parameter_groups();
+ print $_,"\n" foreach @grps;
+
 =head1 DESCRIPTION
 
+This object represents a DB Parameter Group.  It is the result of a
+VM::EC2->create_db_parameter_group and VM::EC2->describe_db_parameter_groups
+call and is an element returned by other calls.
+
 =head1 STRING OVERLOADING
+
+In string context, the object returns the Parameter Group Name.
 
 =head1 SEE ALSO
 
@@ -33,7 +45,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->DBParameterGroupName }
+use overload '""' => sub { shift->DBParameterGroupName },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;

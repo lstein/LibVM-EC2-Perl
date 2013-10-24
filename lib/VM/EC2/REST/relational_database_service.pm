@@ -981,7 +981,7 @@ All arguments are optional.
 
  -db_instance_id            alias for -db_instance_identifier
 
-Returns an array of VM::EC2::DB::Instance objects if any exist.
+Returns an array of L<VM::EC2::DB::Instance> objects if any exist.
 
 =cut
 

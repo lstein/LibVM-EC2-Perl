@@ -13,6 +13,24 @@ VM::EC2::DB::SecurityGroup - An RDS Database Security Group
    print $_->group_name,"\n" foreach $group->EC2SecurityGroups;
  }
 
+=head1 METHODS
+
+ DBSecurityGroupDescription    -- The description of the DB security group
+
+ DBSecurityGroupName           -- The name of the DB security group
+
+ EC2SecurityGroups             -- EC2 security groups enabled in the DB group
+
+ IPRanges                      -- IP Ranges enabled in the DB group
+
+ OwnerId                       -- The Owner ID of the DB security group
+
+ VpcId                         -- The VPC ID of the DB security group
+
+ ec2_security_groups           -- Alias for EC2SecurityGroups
+
+ ip_ranges                     -- Alias for IPRanges
+
 =head1 DESCRIPTION
 
 This object represents a DB Security Group.  It is the resultant

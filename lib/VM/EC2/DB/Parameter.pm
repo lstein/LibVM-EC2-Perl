@@ -6,9 +6,17 @@ VM::EC2::DB::Parameter - An RDS Database Parameter
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ @params = $ec2->describe_db_parameters(-db_parameter_group_name => 'mygroup');
+ print $_,"\n" foreach @params;
+
 =head1 DESCRIPTION
 
-This object represents a DB Parameter.
+This object represents a DB Parameter, used as a response element in the
+VM::EC2->describe_engine_default_parameters() and 
+VM::EC2->describe_db_parameters() calls.
 
 =head1 STRING OVERLOADING
 

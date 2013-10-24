@@ -6,9 +6,22 @@ VM::EC2::DB::PendingModifiedValues - An RDS Database Pending Modifed Values obje
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ $db = $ec2->modify_db_instance(...);
+ $pending = $db->PendingModifiedValues;
+ foreach $p ($pending->valid_fields) {
+    print $p,' ',$pending->$p,"\n" if $pending->$p;
+ }
+
 =head1 DESCRIPTION
 
+This object represents the changes to a DB instance that are currently pending.
+
 =head1 STRING OVERLOADING
+
+none
 
 =head1 SEE ALSO
 
@@ -32,8 +45,6 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
-
-sub primary_id { shift->DBInstanceIdentifier }
 
 sub valid_fields {
     my $self = shift;

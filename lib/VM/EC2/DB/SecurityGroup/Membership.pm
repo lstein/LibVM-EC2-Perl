@@ -6,9 +6,31 @@ VM::EC2::DB::SecurityGroup::Membership - An RDS Database Security Group Membersh
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+ $ec2 = VM::EC2->new(...);
+ my $db = $ec2->describe_db_instance(...);
+ my @grps = $db->DBSecurityGroups;
+
+=head1 METHODS
+
+ DBSecurityGroupName        -- The security group name
+
+ Status                     -- The security group status
+
+ name                       -- Alias for DBSecurityGroupName
+
+ status                     -- Alias for Status
+
+ db_security_group          -- returns an VM::EC2::DB::SecurityGroup object
+
 =head1 DESCRIPTION
 
+This object describes a DB Security Group Membership.  It is a response element
+in calls that return a DB instance object.
+
 =head1 STRING OVERLOADING
+
+In string context, the object returns the Security Group Name.
 
 =head1 SEE ALSO
 
@@ -33,7 +55,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->DBSecurityGroupName }
+use overload '""' => sub { shift->DBSecurityGroupName },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;
@@ -41,5 +64,13 @@ sub valid_fields {
 }
 
 sub name { shift->DBSecurityGroupName }
+
+sub status { shift->Status }
+
+sub db_security_group {
+    my $self = shift;
+    my $name = $self->DBSecurityGroupName or return;
+    return $self->aws->describe_db_security_groups(-db_security_group_name => $name);
+}
 
 1;
