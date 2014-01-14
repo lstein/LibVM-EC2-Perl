@@ -1,5 +1,5 @@
 This is an interface to Amazon EC2 REST tools that follows the
-2013-06-15 API. I created it because I needed access to the Tag and
+2013-07-15 API. I created it because I needed access to the Tag and
 TagSet interfaces, and neither euca2ools nor Net::Amazon::EC2 provided
 this functionality. Almost all of the Amazon API is supported, but API
 calls for VM/volume import, bundle task management, and reserved instance

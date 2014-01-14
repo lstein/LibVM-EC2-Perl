@@ -112,8 +112,9 @@ Optional Arguments:
                           standard
 
  -iops                 -- The number of I/O operations per second (IOPS) that
-                          the volume supports.  Range is 100 to 2000.  Required
-                          when volume type is io1.
+                          the volume supports.  Range is 100 to 4000.  Required
+                          when volume type is io1.  IOPS must be 30-to-1 ratio
+                          to size.  ie: 3000 IOPS volume must be at least 100GB.
 
 The returned object is a VM::EC2::Volume object.
 

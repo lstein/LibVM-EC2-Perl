@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2013-06-15 version of the Amazon AWS API
+This is an interface to the 2013-07-15 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -1522,8 +1522,8 @@ sub block_device_parm {
 
 # ['eth0=eni-123456','eth1=192.168.2.1,192.168.3.1,192.168.4.1:subnet-12345:sg-12345:true:My Weird Network']
 # form 1: ethX=network device id
-# form 2: ethX=primary_address,secondary_address1,secondary_address2...:subnetId:securityGroupId:deleteOnTermination:description
-# form 3: ethX=primary_address,secondary_address_count:subnetId:securityGroupId:deleteOnTermination:description
+# form 2: ethX=primary_address,secondary_address1,secondary_address2...:subnetId:securityGroupId:deleteOnTermination:description:AssociatePublicIpAddress
+# form 3: ethX=primary_address,secondary_address_count:subnetId:securityGroupId:deleteOnTermination:description:AssociatePublicIpAddress
 sub network_interface_parm {
     my $self = shift;
     my $args    = shift;
@@ -1542,7 +1542,17 @@ sub network_interface_parm {
 	    push @p,("NetworkInterface.$c.NetworkInterfaceId" => $options[0]);
 	} 
 	else {
-	    my ($ip_addresses,$subnet_id,$security_group_id,$delete_on_termination,$description) = @options;
+	    my ($ip_addresses,$subnet_id,$security_group_id,$delete_on_termination,$description,$assoc_public_ip_addr) = @options;
+            # if assoc_public_ip_addr is true, the following conditions must be met:
+            #  * can only associate a public address with a single network interface with a device index of 0
+            #  * cannot associate a public ip with a second network interface
+            #  * cannot assoicate a public ip when launching more than one network interface
+            # NOTE: This option defaults to true in a default VPC
+            if ($assoc_public_ip_addr) {
+                $assoc_public_ip_addr = (($assoc_public_ip_addr eq 'true') && 
+                                         ($device_index == 0) && 
+                                         (@dev == 1)) ? 'true' : 'false';
+            }
 	    my @addresses = split /\s*,\s*/,$ip_addresses;
 	    for (my $a = 0; $a < @addresses; $a++) {
 		if ($addresses[$a] =~ /^\d+\.\d+\.\d+\.\d+$/ ) {
@@ -1561,6 +1571,7 @@ sub network_interface_parm {
 	    push @p,("NetworkInterface.$c.SubnetId"              => $subnet_id)             if length $subnet_id;
 	    push @p,("NetworkInterface.$c.DeleteOnTermination"   => $delete_on_termination) if length $delete_on_termination;
 	    push @p,("NetworkInterface.$c.Description"           => $description)           if length $description;
+	    push @p,("NetworkInterface.$c.AssociatePublicIpAddress" => $assoc_public_ip_addr) if $assoc_public_ip_addr;
 	}
 	$c++;
     }
@@ -1602,7 +1613,7 @@ sub guess_version_from_endpoint {
     my $self = shift;
     my $endpoint = $self->endpoint;
     return '2009-04-04' if $endpoint =~ /Eucalyptus/;  # eucalyptus version according to http://www.eucalyptus.com/participate/code
-    return '2013-06-15';                               # most recent AWS version that we support
+    return '2013-07-15';                               # most recent AWS version that we support
 }
 
 =head2 $ts = $ec2->timestamp
@@ -1700,7 +1711,7 @@ sub async_post {
     RetryTimer->new(on_retry       => $callback,
 		    interval       => 1,
 		    max_retries    => 12,
-		    on_max_retries => $cv->error(VM::EC2::Error->new({Code=>500,Message=>'RequestLimitExceeded'},$self)));
+		    on_max_retries => sub { $cv->error(VM::EC2::Error->new({Code=>500,Message=>'RequestLimitExceeded'},$self)) });
 
     return $cv;
 }
@@ -1716,7 +1727,7 @@ sub async_send_error {
         $error = VM::EC2::Dispatch->create_alt_error_object($body,$self,$action);
     } else {
 	my $code = $hdr->{Status};
-	my $msg  = $body;
+        my $msg  = $code =~ /^59[0-9]/ ? $hdr->{Reason} : $body;
 	$error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$action')"},$self);
     }
 
