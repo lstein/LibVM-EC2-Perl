@@ -732,9 +732,9 @@ sub new {
                       or croak "Please provide -secret_key or define environment variable EC2_SECRET_KEY";
     $token        ||= $args{-security_token};
 
-    my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL} || 'http://ec2.amazonaws.com/';
-    $endpoint_url   .= '/'                     unless $endpoint_url =~ m!/$!;
-    $endpoint_url    = "http://".$endpoint_url unless $endpoint_url =~ m!https?://!;
+    my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL} || 'https://ec2.amazonaws.com/';
+    $endpoint_url   .= '/'                      unless $endpoint_url =~ m!/$!;
+    $endpoint_url    = "https://".$endpoint_url unless $endpoint_url =~ m!https?://!;
 
     my $raise_error  = $args{-raise_error};
     my $print_error  = $args{-print_error};
@@ -820,7 +820,7 @@ sub endpoint {
     my $d    = $self->{endpoint};
     if (@_) {
 	my $new_endpoint = shift;
-	$new_endpoint    = 'http://'.$new_endpoint
+	$new_endpoint    = 'https://'.$new_endpoint
 	    unless $new_endpoint =~ /^https?:/;
 	$self->{endpoint} = $new_endpoint;
     }

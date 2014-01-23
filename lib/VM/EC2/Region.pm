@@ -34,7 +34,7 @@ These object methods are supported:
 
 Note that you should prefix the endpoint with http:// or https://
 before using it to change the VM::EC2 endpoint with the endpoint()
-call. If you do not do so, then http:// will be assumed.
+call. If you do not do so, then https:// will be assumed.
 
 =head1 STRING OVERLOADING
 
@@ -74,7 +74,7 @@ sub zones {
     my $self = shift;
     my $aws  = $self->aws;
     # break encapsulation, but it is elegant this way
-    local $aws->{endpoint} = 'http://'.$self->regionEndpoint;
+    local $aws->{endpoint} = 'https://'.$self->regionEndpoint;
     return $aws->describe_availability_zones(-filter=>{'region-name'=>$self});
 }
 
