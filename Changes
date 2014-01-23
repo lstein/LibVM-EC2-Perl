@@ -1,3 +1,9 @@
+1.25
+    - Change behavior of create_network_acl_entry() so that -egress option defaults to false as originally
+      documented.
+    - Change way that async_post() works to (hopefully) handle RequestLimitExceeded errors in a way
+      that works.
+
 1.24
     - Big code reorganization -- moved all REST calls into their own dynamically-loaded
        modules.

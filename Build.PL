@@ -19,6 +19,8 @@ my $build = Module::Build->new(
       'File::Path'   => '2.08',
       'String::Approx' => '3.26',
       'JSON'         => 0,
+      'AnyEvent'     => '7.04',
+      'AnyEvent::HTTP' => '2.15',
     },
     build_class        => 'Module::Build',
     );

@@ -7,7 +7,7 @@ package VM::EC2;  # add methods to VM::EC2
 VM::EC2::Dispatch->register(
     ApplySecurityGroupsToLoadBalancer => 'elb_member_list,SecurityGroups',
     AttachLoadBalancerToSubnets       => 'elb_member_list,Subnets',
-    ConfigureHealthCheck              => 'elb_fetch_one,HealthCheck,VM::EC2::ELB::HealthCheck',
+    ConfigureHealthCheck              => 'fetch_one_result,HealthCheck,VM::EC2::ELB::HealthCheck',
     CreateAppCookieStickinessPolicy   => sub { exists shift->{CreateAppCookieStickinessPolicyResult} },
     CreateLBCookieStickinessPolicy    => sub { exists shift->{CreateLBCookieStickinessPolicyResult} },
     CreateLoadBalancer                => sub { shift->{CreateLoadBalancerResult}{DNSName} },
@@ -29,6 +29,14 @@ VM::EC2::Dispatch->register(
     SetLoadBalancerPoliciesForBackendServer => sub { exists shift->{SetLoadBalancerPoliciesForBackendServerResult} },
     SetLoadBalancerPoliciesOfListener => sub { exists shift->{SetLoadBalancerPoliciesOfListenerResult} },
     );
+
+sub elb_call {
+    my $self = shift;
+    (my $endpoint = $self->{endpoint}) =~ s/ec2/elasticloadbalancing/;
+    local $self->{endpoint} = $endpoint;
+    local $self->{version}  = '2012-06-01';
+    $self->call(@_);
+}
 
 =head1 NAME VM::EC2::REST::elastic_load_balancer
 

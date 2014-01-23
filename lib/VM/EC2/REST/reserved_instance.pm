@@ -31,6 +31,8 @@ Unimplemented:
  CancelReservedInstancesListing
  CreateReservedInstancesListing
  DescribeReservedInstancesListings
+ DescribeReservedInstancesModifications
+ ModifyReservedInstances
 
 =head2 @offerings = $ec2->describe_reserved_instances_offerings(@offering_ids)
 

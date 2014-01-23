@@ -37,6 +37,9 @@ These object methods are supported:
  cidrBlock  -- The CIDR block assigned to the subnet.
  availableIpAddressCount -- The number of unused IP addresses in the subnet.
  availableZone -- This subnet's availability zone.
+ defaultForAz  -- Indicates if this is the default subnet for the Availability Zone
+ mapPublicIpOnLaunch -- Indicates if instances launched in this subnet automatically receive a
+                        public IP address
 
 This class supports the VM::EC2 tagging interface. See
 L<VM::EC2::Generic> for information.
@@ -96,7 +99,7 @@ use base 'VM::EC2::Generic';
 sub valid_fields {
     my $self  = shift;
     return qw(subnetId state vpcId cidrBlock availableIpAddressCount
-              availabilityZone);
+              availabilityZone defaultForAz mapPublicIpOnLaunch);
 }
 
 sub primary_id { shift->subnetId }
@@ -170,6 +173,18 @@ sub associate_network_acl {
     my ($association) = grep { $_->subnetId eq $self->subnetId } $acl->associations;
     my $association_id = $association->networkAclAssociationId;
     return $self->aws->replace_network_acl_association(-association_id=>$association_id,-network_acl_id=>$network_acl_id);
+}
+
+sub defaultForAz {
+    my $self = shift;
+    my $default = $self->SUPER::defaultForAz;
+    return $default eq 'true';
+}
+
+sub mapPublicIpOnLaunch {
+    my $self = shift;
+    my $map_ip = $self->SUPER::mapPublicIpOnLaunch;
+    return $map_ip eq 'true';
 }
 
 1;

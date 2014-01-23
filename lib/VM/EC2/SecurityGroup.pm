@@ -227,7 +227,10 @@ sub valid_fields {
     return qw(ownerId groupId groupName groupDescription vpcId ipPermissions ipPermissionsEgress tagSet);
 }
 
-sub primary_id { shift->groupId }
+sub primary_id { 
+    my $self = shift;
+    return $self->groupId || $self->groupName;
+}
 
 sub name { shift->groupName }
 
@@ -284,7 +287,7 @@ sub authorize_outgoing {
 
 sub revoke_incoming {
     my $self = shift;
-    my $permission = $_[0] =~ /^-/ ? $self->_new_permission(@_) : shift;
+    my $permission = $_[0] =~ /^-[A-Za-z]/ ? $self->_new_permission(@_) : shift;
     if ($self->{uncommitted}{Authorize}{Ingress}{$permission}) {
 	delete $self->{uncommitted}{Authorize}{Ingress}{$permission};
     }
@@ -293,7 +296,7 @@ sub revoke_incoming {
 
 sub revoke_outgoing {
     my $self = shift;
-    my $permission = $_[0] =~ /^-/ ? $self->_new_permission(@_) : shift;
+    my $permission = $_[0] =~ /^-[A-Za-z]/ ? $self->_new_permission(@_) : shift;
     if ($self->{uncommitted}{Authorize}{Egress}{$permission}) {
 	delete $self->{uncommitted}{Authorize}{Egress}{$permission};
     }

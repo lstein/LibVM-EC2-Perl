@@ -161,7 +161,7 @@ defaults. Otherwise, the arguments will be taken as a
                      instance into. Applicable to cluster instances
                      only.
 
-  -placement_tenancy Specify 'dedicated' to launch the instance on a
+  -tenancy           Specify 'dedicated' to launch the instance on a
                      dedicated server. Only applicable for VPC
                      instances.
 
@@ -272,7 +272,7 @@ following:
          - '<volume-type>': The volume type. One of "standard" or "io1".
 
          - '<iops>': The number of I/O operations per second (IOPS) that
-           the volume suports. A number between 100 to 2000. Only valid
+           the volume suports. A number between 100 to 4000. Only valid
            for volumes of type "io1".
           
          Examples: -block_devices => '/dev/sdb=snap-7eb96d16'
@@ -305,7 +305,11 @@ The network configuration can be specified using the
 -network_interface parameter:
 
  -network_interfaces => ['eth0=10.10.0.12:subnet-1234567:sg-1234567:true:My Custom Eth0',
-                         'eth1=10.10.1.12,10.10.1.13:subnet-999999:sg-1234567:true:My Custom Eth1',
+                         'eth1=10.10.1.12,10.10.1.13:subnet-999999:sg-1234567:true:My Custom Eth1']
+
+ or
+
+ -network_interfaces => ['eth0=10.10.0.12:subnet-1234567:sg-1234567:true:My Custom Eth0:true']
 
 The format is '<device>=<specification>'. The device is an ethernet
 interface name such as eth0, eth1, eth2, etc. The specification has up
@@ -339,6 +343,11 @@ B<4. DeleteOnTerminate>: True if this ENI should be automatically
 deleted when the instance terminates.
 
 B<5. Description>: A human-readable description of the ENI.
+
+B<6. Associate Public Address>: Indicates whether to assign a public 
+IP address to the ENI on an instance in a VPC.  Can only be specified
+as true when a single network interface of device index 0 is created.
+Defaults to true when launching in a Default VPC.
 
 As an alternative syntax, you may specify the ID of an existing ENI in
 lieu of the primary IP address and other fields. The ENI will be
@@ -404,6 +413,7 @@ sub run_instances {
     $args{-max_count} ||= $args{-min_count};
     $args{-availability_zone}  ||= $args{-zone};
     $args{-availability_zone}  ||= $args{-placement_zone};
+    $args{-group_name} = $args{-placement_group};
     $args{-monitoring_enabled} ||= $args{-monitoring};
     $args{-instance_initiated_shutdown_behavior} ||= $args{-shutdown_behavior};
     $args{-block_device_mapping} ||= $args{-block_devices};
@@ -417,7 +427,7 @@ sub run_instances {
                            IamInstanceProfile.Arn IamInstanceProfile.Name
                            )],
 	list_parm   => [qw(SecurityGroup SecurityGroupId)],
-        'Placement.single_parm'   => [qw(AvailabilityZone GroupName Tenancy PlacementGroup)],
+        'Placement.single_parm'   => [qw(AvailabilityZone GroupName Tenancy)],
 	base64_parm => 'UserData',
 	boolean_parm=> [qw(DisableApiTermination EbsOptimized Monitoring.Enabled)],
 	block_device_parm         => 'BlockDeviceMapping',

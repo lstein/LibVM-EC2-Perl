@@ -10,6 +10,14 @@ VM::EC2::Dispatch->register(
     DescribePolicies                  => 'fetch_members,ScalingPolicies,VM::EC2::ScalingPolicy',
     );
 
+sub asg_call {
+    my $self = shift;
+    (my $endpoint = $self->{endpoint}) =~ s/ec2/autoscaling/;
+    local $self->{endpoint} = $endpoint;
+    local $self->{version}  = '2011-01-01';
+    $self->call(@_);
+}
+
 =head1 NAME VM::EC2::REST::autoscaling
 
 =head1 SYNOPSIS
@@ -260,6 +268,7 @@ Optional arguments:
   -desired_capacity
   -health_check_type
   -health_check_grace_period
+  -launch_configuration_name
   -placement_group
   -vpc_zone_identifier
   -max_size
@@ -281,7 +290,8 @@ sub update_autoscaling_group {
 
     my @p = map {$self->single_parm($_,\%args) }
        qw( DefaultCooldown DesiredCapacity HealthCheckGracePeriod
-           HealthCheckType PlacementGroup VPCZoneIdentifier MaxSize MinSize );
+           HealthCheckType LaunchConfigurationName PlacementGroup
+           VPCZoneIdentifier MaxSize MinSize );
     push @params, @p;
 
     return $self->asg_call('UpdateAutoScalingGroup',@params);

@@ -9,6 +9,13 @@ VM::EC2::Dispatch->register(
     GetSessionToken                   => 'fetch_one,GetSessionTokenResult,VM::EC2::Security::Token',
     );
 
+sub sts_call {
+    my $self = shift;
+    local $self->{endpoint} = 'https://sts.amazonaws.com';
+    local $self->{version}  = '2011-06-15';
+    $self->call(@_);
+}
+
 =head1 NAME VM::EC2::REST::security_token
 
 =head1 SYNOPSIS

@@ -8,6 +8,8 @@ VM::EC2::Dispatch->register(
     CreateVpc                         => 'fetch_one,vpc,VM::EC2::VPC',
     DeleteVpc                         => 'boolean',
     DescribeVpcs                      => 'fetch_items,vpcSet,VM::EC2::VPC',
+    ModifyVpcAttribute                => 'boolean',
+    DescribeVpcAttribute              => 'boolean',
     );
 
 =head1 NAME VM::EC2::REST::vpc
@@ -26,10 +28,11 @@ Implemented:
  CreateVpc
  DeleteVpc
  DescribeVpcs
-
-Unimplemented:
  DescribeVpcAttribute
  ModifyVpcAttribute
+
+Unimplemented:
+ (none)
 
 =cut
 
@@ -122,6 +125,70 @@ sub delete_vpc {
     my @param = $self->single_parm(VpcId=>\%args);
     return $self->call('DeleteVpc',@param);
 }
+
+=head2 $attr = $ec2->describe_vpc_attribute(-vpc_id => $id, -attribute => $attr)
+
+Describes an attribute of the specified VPC.
+
+Required arguments:
+
+ -vpc_id                  The ID of the VPC.
+
+ -attribute               The VPC attribute.
+                          Valid values:
+                          enableDnsSupport | enableDnsHostnames
+
+Returns true if attribute is set.
+
+=cut
+
+sub describe_vpc_attribute {
+    my $self = shift;
+    my %args  = @_;
+    $args{-vpc_id} or croak "modify_vpc_attribute(): -vpc_id argument missing";
+    $args{-attribute} or croak "modify_vpc_attribute(): -attribute argument missing";
+    my @param = $self->single_parm(VpcId=>\%args);
+    push @param, $self->single_parm('Attribute',\%args);
+    my $result = $self->call('DescribeVpcAttribute',@param);
+    return $result && $result->attribute($args{-attribute}) eq 'true';
+}
+
+=head2 $success = $ec2->modify_vpc_attribute(-vpc_id               => $id,
+                                             -enable_dns_support   => $boolen,
+                                             -enable_dns_hostnames => $boolean)
+
+Modify attributes of a VPC.
+
+Required Arguments:
+
+ -vpc_id                  The ID of the VPC.
+
+ -enable_dns_support      Specifies whether the DNS server provided
+                          by Amazon is enabled for the VPC.
+
+Optional arguments:
+
+ -enable_dns_hostnames    Specifies whether DNS hostnames are provided
+                          for the instances launched in this VPC. You
+                          can only set this attribute to true if
+                          -enable_dns_support is also true.
+
+Returns true on success.
+
+=cut
+
+sub modify_vpc_attribute {
+    my $self = shift;
+    my %args  = @_;
+    $args{-vpc_id} or croak "modify_vpc_attribute(): -vpc_id argument missing";
+    $args{-enable_dns_support} or
+        croak "modify_vpc_attribute(): -enable_dns_support argument missing";
+    my @param = $self->single_parm(VpcId=>\%args);
+    push @param, $self->boolean_parm($_,\%args)
+        foreach qw(enableDnsSupport enableDnsHostnames);
+    return $self->call('ModifyVpcAttribute',@param);
+}
+
 
 =head1 SEE ALSO
 

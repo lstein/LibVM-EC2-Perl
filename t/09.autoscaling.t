@@ -74,7 +74,6 @@ ok($s, 'update_autoscaling_group');
 
 @a = $ec2->describe_autoscaling_groups();
 is($a[0]->max_size, 1, 'correctly updated max size');
-}
 
 my $p = $ec2->put_scaling_policy(
     -name => POLICY_NAME,
@@ -101,6 +100,9 @@ $p = $ec2->delete_policy(
 ok($p, 'Policy deleted');
 
 is($ec2->describe_policies, undef, 'No policies left');
+
+# END SKIP
+}
 
 exit 0;
 
