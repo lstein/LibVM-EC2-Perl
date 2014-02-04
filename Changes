@@ -3,6 +3,11 @@
       documented.
     - Change way that async_post() works to (hopefully) handle RequestLimitExceeded errors in a way
       that works.
+    - Fix incompatibility with Amazon Gov cloud.
+    - Fix incompatibilities with Open Stack.
+    - Compliant to 2013-07-15 API.
+    - Implement exponential backoff for RequestLimitExceeded. Will throttle back requests and keep 
+      retrying when Amazon reports too many requests.
 
 1.24
     - Big code reorganization -- moved all REST calls into their own dynamically-loaded
