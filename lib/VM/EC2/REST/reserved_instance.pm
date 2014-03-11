@@ -6,10 +6,14 @@ package VM::EC2;  # add methods to VM::EC2
 
 VM::EC2::Dispatch->register(
     DescribeReservedInstances          => 'fetch_items,reservedInstancesSet,VM::EC2::ReservedInstance',
-    DescribeReservedInstancesOfferings  => 'fetch_items,reservedInstancesOfferingsSet,VM::EC2::ReservedInstance::Offering',
+    DescribeReservedInstancesOfferings => 'fetch_items,reservedInstancesOfferingsSet,VM::EC2::ReservedInstance::Offering',
     PurchaseReservedInstancesOffering  => sub { my ($data,$ec2) = @_;
 						my $ri_id = $data->{reservedInstancesId} or return;
 						return $ec2->describe_reserved_instances($ri_id); },
+    ModifyReservedInstances            => sub { my ($data,$ec2) = @_;
+						return $data->{reservedInstancesModificationId}; },
+    DescribeReservedInstancesModifications =>
+                                           'fetch_items,reservedInstancesModificationsSet,VM::EC2::ReservedInstance::Modification',
     );
 
 =head1 NAME VM::EC2::REST::reserved_instance
@@ -26,13 +30,13 @@ Implemented:
  DescribeReservedInstances
  DescribeReservedInstancesOfferings
  PurchaseReservedInstancesOffering
+ ModifyReservedInstances
+ DescribeReservedInstancesModifications
 
 Unimplemented:
  CancelReservedInstancesListing
  CreateReservedInstancesListing
  DescribeReservedInstancesListings
- DescribeReservedInstancesModifications
- ModifyReservedInstances
 
 =head2 @offerings = $ec2->describe_reserved_instances_offerings(@offering_ids)
 
@@ -144,10 +148,10 @@ instances that the reservation allows you to launch, the availability
 zone, and the cost per hour to run those reserved instances.
 
 All arguments are optional. If no named arguments are used, then the
-arguments are treated as Reserved Instance  IDs.
+arguments are treated as Reserved Instance IDs.
  
  -reserved_instances_id -- A scalar or arrayref of reserved
-                            instance IDs
+                           instance IDs
 
  -filter                -- A set of filters to apply.
 
@@ -163,6 +167,92 @@ sub describe_reserved_instances {
     my @param = $self->list_parm('ReservedInstancesId',\%args);
     push @param,$self->filter_parm(\%args);
     return $self->call('DescribeReservedInstances',@param);
+}
+
+=head2 $id = $ec2->modify_reserved_instances(%args)
+
+Modifies the Availability Zone, instance count, instance type, or network
+platform (EC2-Classic or EC2-VPC) of your Reserved Instances. The Reserved
+Instances to be modified must be identical, except for Availability Zone,
+network platform, and instance type.
+
+Required arguments:
+
+ -reserved_instances_id         -- The IDs of the Reserved Instances to modify
+                                   Can be scalar or arrayref.
+
+ -target_configuration          -- The configuration settings for the Reserved
+                                   Instances to modify
+
+                                   Must be a hashref or arrayref of hashes with
+                                   one or more of the following values:
+                                     AvailabilityZone, Platform, InstanceType
+                                   The following is also REQUIRED:
+                                     InstanceCount
+
+ -id                            -- Alias for -reserved_instances_id
+
+=cut
+
+sub modify_reserved_instances {
+    my $self = shift;
+    my %args = @_;
+    $args{-reserved_instances_id} ||= $args{-id};
+    $args{-reserved_instances_id} or 
+	croak "modify_reserved_instances(): -reserved_instances_id argument required";
+    $args{-target_configuration} or 
+	croak "modify_reserved_instances(): -target_configuration argument required";
+    my @param = $self->list_parm('ReservedInstancesId',\%args);
+    push @param,$self->_target_config_parm($args{-target_configuration});
+    return $self->call('ModifyReservedInstances',@param);
+}
+
+sub _target_config_parm {
+    my $self = shift;
+    my $target_config = shift;
+    my @param;
+
+    my @config = ref $target_config eq 'ARRAY' ? @$target_config : ( $target_config );
+    for (my $i=0; $i<@config; $i++) {
+        my $config = $config[$i];
+        my $n = $i+1;
+        foreach my $p (qw/AvailabilityZone Platform InstanceCount InstanceType/) {
+            push @param, ("ReservedInstancesConfigurationSetItemType.$n.$p" => $config->{$p}) if $config->{$p}
+        }
+    }
+    return @param;
+}
+
+=head2 @mods = $ec2->describe_reserved_instances_modifications(@ids)
+
+=head2 @mods = $ec2->describe_reserved_instances_modifications(%args)
+
+Describes the modifications made to your Reserved Instances.
+
+All arguments are optional. If no named arguments are used, then the
+arguments are treated as Reserved Instance Modification IDs.
+ 
+ -reserved_instances_modification_id -- A scalar or arrayref of reserved
+                                        instance modification IDs
+
+ -filter                             -- A set of filters to apply.
+
+ -id                                 -- Alias for -reserved_instances_modification_id
+
+For available filters, see:
+http://docs.aws.amazon.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeReservedInstancesModifications.html
+
+The returned objects are of type L<VM::EC2::ReservedInstance::Modification>
+
+=cut
+
+sub describe_reserved_instances_modifications {
+    my $self = shift;
+    my %args = $self->args('-reserved_instances_modification_id',@_);
+    $args{-reserved_instances_modification_id} ||= $args{-id};
+    my @param = $self->list_parm('ReservedInstancesModificationId',\%args);
+    push @param,$self->filter_parm(\%args);
+    return $self->call('DescribeReservedInstancesModifications',@param);
 }
 
 =head1 SEE ALSO
