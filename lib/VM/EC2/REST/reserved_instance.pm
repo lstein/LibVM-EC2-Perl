@@ -5,15 +5,18 @@ use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
 VM::EC2::Dispatch->register(
+    CancelReservedInstancesListing     => 'fetch_items,reservedInstancesListingsSet,VM::EC2::ReservedInstance::Listing',
+    CreateReservedInstancesListing     => 'fetch_items,reservedInstancesListingsSet,VM::EC2::ReservedInstance::Listing',
     DescribeReservedInstances          => 'fetch_items,reservedInstancesSet,VM::EC2::ReservedInstance',
+    DescribeReservedInstancesListings  => 'fetch_items,reservedInstancesListingsSet,VM::EC2::ReservedInstance::Listing',
+    DescribeReservedInstancesModifications =>
+                                           'fetch_items,reservedInstancesModificationsSet,VM::EC2::ReservedInstance::Modification',
     DescribeReservedInstancesOfferings => 'fetch_items,reservedInstancesOfferingsSet,VM::EC2::ReservedInstance::Offering',
+    ModifyReservedInstances            => sub { my ($data,$ec2) = @_;
+						return $data->{reservedInstancesModificationId}; },
     PurchaseReservedInstancesOffering  => sub { my ($data,$ec2) = @_;
 						my $ri_id = $data->{reservedInstancesId} or return;
 						return $ec2->describe_reserved_instances($ri_id); },
-    ModifyReservedInstances            => sub { my ($data,$ec2) = @_;
-						return $data->{reservedInstancesModificationId}; },
-    DescribeReservedInstancesModifications =>
-                                           'fetch_items,reservedInstancesModificationsSet,VM::EC2::ReservedInstance::Modification',
     );
 
 =head1 NAME VM::EC2::REST::reserved_instance
@@ -27,16 +30,17 @@ VM::EC2::Dispatch->register(
 These methods apply to describing, purchasing and using Reserved Instances.
 
 Implemented:
+ CancelReservedInstancesListing
  DescribeReservedInstances
- DescribeReservedInstancesOfferings
- PurchaseReservedInstancesOffering
- ModifyReservedInstances
+ DescribeReservedInstancesListings
  DescribeReservedInstancesModifications
+ DescribeReservedInstancesOfferings
+ ModifyReservedInstances
+ PurchaseReservedInstancesOffering
+ CreateReservedInstancesListing
 
 Unimplemented:
- CancelReservedInstancesListing
- CreateReservedInstancesListing
- DescribeReservedInstancesListings
+ (none)
 
 =head2 @offerings = $ec2->describe_reserved_instances_offerings(@offering_ids)
 
@@ -253,6 +257,135 @@ sub describe_reserved_instances_modifications {
     my @param = $self->list_parm('ReservedInstancesModificationId',\%args);
     push @param,$self->filter_parm(\%args);
     return $self->call('DescribeReservedInstancesModifications',@param);
+}
+
+=head2 @list = $ec2->describe_reserved_instances_listings(%args)
+
+Describes the account's Reserved Instance listings in the Reserved Instance
+Marketplace.
+
+All arguments are optional. If no named arguments are used, then the
+arguments are treated as Reserved Instance Listing IDs.
+
+ -reserved_instances_listing_id      -- A scalar or arrayref of reserved
+                                        instance listing IDs
+
+ -reserved_instances_id              -- A scalar or arrayref of reserved
+                                        instance IDs 
+
+ -filter                             -- A set of filters to apply.
+ 
+For available filters, see:
+http://docs.aws.amazon.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeReservedInstancesListings.html
+
+The returned objects are of type L<VM::EC2::ReservedInstance::Listing>
+
+=cut
+
+sub describe_reserved_instances_listings {
+    my $self = shift;
+    my %args = $self->args('-reserved_instances_listing_id',@_);
+    my @param = $self->list_parm('ReservedInstancesListingId',\%args);
+    push @param, $self->list_parm('ReservedInstancesId',\%args);
+    push @param,$self->filter_parm(\%args);
+    return $self->call('DescribeReservedInstancesListings',@param);
+}
+
+=head2 $listing = $ec2->cancel_reserved_instances_listing(%args)
+
+Cancels the specified Reserved Instance listing in the Reserved Instance
+Marketplace.
+
+Required arguments:
+
+ -reserved_instances_listing_id    -- The ID of the Reserved Instance listing
+                                      to be canceled
+
+Returns an object of type L<VM::EC2::ReservedInstance::Listing>
+
+=cut
+
+sub cancel_reserved_instances_listing {
+    my $self = shift;
+    my %args = $self->args('-reserved_instances_listing_id',@_);
+    my @param = $self->single_parm('ReservedInstancesListingId',\%args);
+    return $self->call('CancelReservedInstancesListing',@param);
+}
+
+=head2 $listing = $ec2->create_reserved_instances_listing(%args)
+
+Creates a listing for Amazon EC2 Reserved Instances to be sold in the Reserved
+Instance Marketplace. Only one Reserved Instance listing may be created at a
+time.
+
+Required arguments:
+
+ -reserved_instances_id   -- The ID of the active Reserved Instance
+
+ -instance_count          -- The number of instances to be listed in the
+                             Reserved Instance Marketplace. This number
+                             should be less than or equal to the instance count
+                             associated with the Reserved Instance ID specified
+
+ -price_schedules         -- hashref containing term/price pairs for months
+                             the Reserved Instance has remaining in its term
+
+                             For example, with a RI with 11 months to go:
+
+                             { 11 => 2.5,
+                                8 => 2.0,
+                                5 => 1.5,
+                                3 => 0.7,
+                                1 => 0.1 }
+
+                             For months 11,10,9 the price is $2.50, 8,7,6 is
+                             $2.00, 5,4 is $1.50, 3,2 is $0.70 and the last
+                             month is $0.10.
+
+                             For more details, see the API docs at:
+http://docs.aws.amazon.com/AWSEC2/latest/APIReference/ApiReference-query-CreateReservedInstancesListing.html
+                             
+
+ -client_token            -- Unique, case-sensitive identifier to ensure
+                             idempotency of listings
+
+Returns an object of type L<VM::EC2::ReservedInstance::Listing>
+
+=cut
+
+sub create_reserved_instances_listing {
+    my $self = shift;
+    my %args = $self->args('-reserved_instances_listing_id',@_);
+    $args{-reserved_instances_id} or
+	croak "create_reserved_instances_listing(): -reserved_instances_id argument required";
+    $args{-instance_count} or
+	croak "create_reserved_instances_listing(): -instance_count argument required";
+    $args{-price_schedules} or
+	croak "create_reserved_instances_listing(): -price_schedules argument required";
+    $args{-client_token} or
+	croak "create_reserved_instances_listing(): -client_token argument required";
+    ref $args{-price_schedules} eq 'HASH' or
+	croak "create_reserved_instances_listing(): -price_schedules argument must be hashref";
+
+    my @param = $self->single_parm('ReservedInstancesId',\%args);
+    push @param, $self->single_parm('InstanceCount',\%args);
+    push @param, $self->_price_sched_parm($args{-price_schedules});
+    push @param, $self->single_parm('ClientToken',\%args);
+    return $self->call('CreateReservedInstancesListing',@param);
+}
+
+sub _price_sched_parm {
+    my $self = shift;
+    my $sched = shift;
+    my @param;
+
+    my $i = 0;
+    foreach my $month (keys %$sched) {
+        push @param, "PriceSchedules.$i.Price" => $sched->{$month};
+        push @param, "PriceSchedules.$i.Term" => $month;
+        $i++;
+    }
+    return @param;
 }
 
 =head1 SEE ALSO
