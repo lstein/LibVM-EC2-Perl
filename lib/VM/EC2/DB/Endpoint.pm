@@ -52,7 +52,7 @@ sub valid_fields {
 
 sub as_string {
     my $self = shift;
-    return $self->Address . ':' $self->Port;
+    return $self->Address . ':' . $self->Port;
 }
 
 1;

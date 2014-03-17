@@ -83,7 +83,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 use Carp 'croak';
-use VM::EC2::DB::ParameterGroup::Status;
+use VM::EC2::DB::Parameter::Group::Status;
 use VM::EC2::DB::SecurityGroup::Membership;
 use VM::EC2::DB::Endpoint;
 use VM::EC2::DB::PendingModifiedValues;
