@@ -63,7 +63,7 @@ sub rds_call {
     my $self = shift;
     (my $endpoint = $self->{endpoint}) =~ s/ec2/rds/;
     local $self->{endpoint} = $endpoint;
-    local $self->{version}  = '2013-05-15';
+    local $self->{version}  = '2013-09-09';
     $self->call(@_);
 }
 
@@ -244,6 +244,17 @@ Copies the specified DBSnapshot. The source DBSnapshot must be in the "available
 Required arguments:
 
  -source_db_snapshot_identifier        The identifier for the source DB snapshot.
+                                       Constraints:
+                                       * Must specify a valid system snapshot in
+                                         the "available" state
+                                       * If the source snapshot is in the same
+                                         region as the copy, specify a valid DB
+                                         snapshot identifier
+                                       * If the source snapshot is in a different
+                                         region than the copy, specify a valid DB
+                                         snapshot ARN
+                                         For more information, see:
+                                         http://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_CopySnapshot.html
 
  -target_db_snapshot_identifier        The identifier for the copied snapshot.
                                        Constraints:
@@ -257,6 +268,10 @@ Required arguments:
  -source                               Alias for -source_db_snapshot_identifier
 
  -target                               Alias for -target_db_snapshot_identifier
+
+Optional arguments:
+
+ -tags                                 hashref or arrayref of hashrefs containing Key/Value pairs
 
 Returns a L<VM::EC2::DB::Snapshot> object.
 
@@ -272,6 +287,7 @@ sub copy_db_snapshot {
     my @params;
     push @params,$self->single_parm($_,\%args)
         foreach qw(SourceDBSnapshotIdentifier TargetDBSnapshotIdentifier);
+    push @params,$self->member_list_parm('Tags',\%args);
     return $self->rds_call('CopyDBSnapshot',@params);
 }
 

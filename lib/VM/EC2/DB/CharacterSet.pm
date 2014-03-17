@@ -33,7 +33,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->CharacterSetName}
+use overload '""' => sub { shift->CharacterSetName },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;

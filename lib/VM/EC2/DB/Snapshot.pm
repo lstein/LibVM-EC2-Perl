@@ -20,7 +20,7 @@ L<VM::EC2::DB::Instance>
 
 Lance Kinley E<lt>lkinley@loyaltymethods.comE<gt>.
 
-Copyright (c) 2013 Loyalty Methods, Inc.
+Copyright (c) 2013-2014 Loyalty Methods, Inc.
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
@@ -33,7 +33,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->DBSnapshotIdentifier }
+use overload '""' => sub { shift->DBSnapshotIdentifier },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;
@@ -49,9 +50,11 @@ sub valid_fields {
         LicenseModel
         MasterUsername
         OptionGroupName
+        PercentProgress
         Port
         SnapshotCreateTime
         SnapshotType
+        SourceRegion
         Status
         VpcId
     );

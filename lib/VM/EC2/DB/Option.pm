@@ -35,7 +35,8 @@ use base 'VM::EC2::Generic';
 use VM::EC2::DB::SecurityGroup::Membership;
 use VM::EC2::DB::VpcSecurityGroup::Membership;
 
-sub primary_id { shift->OptionName }
+use overload '""' => sub { shift->OptionName },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;

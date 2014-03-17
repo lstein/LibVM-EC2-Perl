@@ -68,7 +68,8 @@ use base 'VM::EC2::Generic';
 use VM::EC2::DB::EC2SecurityGroup;
 use VM::EC2::DB::IPRange;
 
-sub primary_id { shift->DBSecurityGroupName }
+use overload '""' => sub { shift->DBSecurityGroupName },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;

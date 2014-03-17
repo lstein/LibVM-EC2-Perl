@@ -33,7 +33,8 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-sub primary_id { shift->VpcSecurityGroupId }
+use overload '""' => sub { shift->VpcSecurityGroupId },
+    fallback => 1;
 
 sub valid_fields {
     my $self = shift;

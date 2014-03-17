@@ -88,7 +88,8 @@ use VM::EC2::DB::SecurityGroup::Membership;
 use VM::EC2::DB::Endpoint;
 use VM::EC2::DB::PendingModifiedValues;
 
-sub primary_id { shift->DBInstanceIdentifier }
+use overload '""' => sub { shift->DBInstanceIdentifier },
+    fallback => 1;
 
 sub valid_fields {
     my $self  = shift;
