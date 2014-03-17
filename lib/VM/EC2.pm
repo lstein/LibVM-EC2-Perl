@@ -620,6 +620,7 @@ use constant import_tags => {
     ':hpc'      => ['placement_group'],
     ':scaling'  => ['elastic_load_balancer','autoscaling'],
     ':elb'      => ['elastic_load_balancer'],
+    ':rds'      => ['relational_database_service'],
     ':misc'     => ['devpay','reserved_instance', 'spot_instance','vm_export','vm_import','windows'],
     ':all'      => [qw(:standard :vpc :hpc :scaling :misc)],
     ':DEFAULT'  => [':all'],
@@ -1351,6 +1352,62 @@ sub member_list_parm {
         my $c = 1;
         for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
             push @params,("$argname.member.".$c++ => $_);
+        }
+    }
+    return @params;
+}
+
+=head2 @arguments = $ec2->member_hash_parms(ParameterName => \%args)
+
+Create a parameter list from a hashref or arrayref of hashes
+
+Created specifically for the RDS ModifyDBParameterGroup parameter
+'Parameters', but may be useful for other calls in the future.
+
+ie:
+
+The argument would be in the form:
+
+   [
+           {
+                   ParameterName=>'max_user_connections',
+                   ParameterValue=>24,
+                   ApplyMethod=>'pending-reboot'
+           },
+           {
+                   ParameterName=>'max_allowed_packet',
+                   ParameterValue=>1024,
+                   ApplyMethod=>'immediate'
+           },
+   ];
+
+The resulting output would be if the argname is '-parameters':
+
+Parameters.member.1.ParameterName => max_user_connections
+Parameters.member.1.ParameterValue => 24
+Parameters.member.1.ApplyMethod => pending-reboot
+Parameters.member.2.ParameterName => max_allowed_packet
+Parameters.member.2.ParameterValue => 1024
+Parameters.member.2.ApplyMethod => immediate
+
+=cut
+
+sub member_hash_parms {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    my $name = $self->canonicalize($argname);
+
+    my @params;
+    if (my $arg = $args->{$name}||$args->{"-$argname"}) {
+        $arg = [ $arg ] if ref $arg eq 'HASH';
+        return unless ref $arg eq 'ARRAY';
+        my $c = 1;
+        foreach my $a (@$arg) {
+            next unless ref $a eq 'HASH';
+            foreach my $key (keys %$a) {
+                push @params, ("$argname.member.$c.$key" => $a->{$key});
+            }
+            $c++;
         }
     }
     return @params;
