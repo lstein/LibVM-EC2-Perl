@@ -1,5 +1,5 @@
 This is an interface to Amazon EC2 REST tools that follows the
-2013-07-15 API. I created it because I needed access to the Tag and
+2013-10-15 API. I created it because I needed access to the Tag and
 TagSet interfaces, and neither euca2ools nor Net::Amazon::EC2 provided
 this functionality. Almost all of the Amazon API is supported, but API
 calls for VM/volume import, bundle task management, and reserved instance
@@ -92,7 +92,7 @@ Credits
 -------
 
 Many thanks to Lance Kinley, who contributed support for Network ACLs,
-VPC VPNs, Elastic Load Balancing, and many smaller feature
+VPC VPNs, Elastic Load Balancing, RDS, and many smaller feature
 enhancements as well as bug and documentation fixes.
 
 Author
