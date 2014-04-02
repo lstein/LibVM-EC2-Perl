@@ -5,11 +5,16 @@ use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
 VM::EC2::Dispatch->register(
+    AcceptVpcPeeringConnection        => 'fetch_one,vpcPeeringConnection,VM::EC2::VPC::PeeringConnection',
     CreateVpc                         => 'fetch_one,vpc,VM::EC2::VPC',
+    CreateVpcPeeringConnection        => 'fetch_one,vpcPeeringConnection,VM::EC2::VPC::PeeringConnection',
     DeleteVpc                         => 'boolean',
+    DeleteVpcPeeringConnection        => 'boolean',
     DescribeVpcs                      => 'fetch_items,vpcSet,VM::EC2::VPC',
-    ModifyVpcAttribute                => 'boolean',
     DescribeVpcAttribute              => 'boolean',
+    DescribeVpcPeeringConnections     => 'fetch_items,vpcPeeringConnectionSet,VM::EC2::VPC::PeeringConnection',
+    ModifyVpcAttribute                => 'boolean',
+    RejectVpcPeeringConnection        => 'boolean',
     );
 
 =head1 NAME VM::EC2::REST::vpc
@@ -25,16 +30,48 @@ tiered applications combining public and private subnetworks, and for
 extending your home/corporate network into the cloud.
 
 Implemented:
+ AcceptVpcPeeringConnection
  CreateVpc
+ CreateVpcPeeringConnection
  DeleteVpc
+ DeleteVpcPeeringConnection
+ DescribeVpcPeeringConnections
  DescribeVpcs
  DescribeVpcAttribute
  ModifyVpcAttribute
+ RejectVpcPeeringConnection
 
 Unimplemented:
  (none)
 
 =cut
+
+=head2 $vpx = $ec2->accept_vpc_peering_connection(-vpc_peering_connection_id => $id)
+
+=head2 $vpx = $ec2->accept_vpc_peering_connection($id)
+
+Accepts a VPC peering connection request. To accept a request, the VPC peering
+connection must be in the pending-acceptance state, and the request must come from
+the owner of the peer VPC. 
+Use describe_vpc_peering_connections(-filter => { 'status-code' => 'pending-acceptance' })
+to view outstanding VPC peering connection requests.
+
+Required arguments:
+
+ -vpc_peering_connection_id    -- The ID of the VPC peering connection
+
+Returns a L<VM::EC2::VPC::PeeringConnection> object.
+
+=cut
+
+sub accept_vpc_peering_connection {
+    my $self = shift;
+    my %args   = $self->args('-vpc_peering_connection_id',@_);
+    $args{-vpc_peering_connection_id} or
+        croak "accept_vpc_peering_connection(): -vpc_peering_connection_id argument required";
+    my @parm = $self->single_parm('VpcPeeringConnectionId',\%args);
+    return $self->call('AcceptVpcPeeringConnection',@parm);
+}
 
 =head2 $vpc = $ec2->create_vpc(-cidr_block=>$cidr,-instance_tenancy=>$tenancy)
 
@@ -80,6 +117,48 @@ sub create_vpc {
     return $self->call('CreateVpc',@parm);
 }
 
+=head2 $pcx = $ec2->create_vpc_peering_connection(-vpc_id        => $vpc_id,
+                                                  -peer_vpc_id   => $peer_id,
+                                                  -peer_owner_id => $owner_id)
+
+Requests a VPC peering connection between two VPCs: a requester VPC and a peer
+VPC with which to create the connection. The peer VPC can belong to another AWS
+account. The requester VPC and peer VPC must not have overlapping CIDR blocks.
+
+The owner of the peer VPC must accept the peering request to activate the
+peering connection. The VPC peering connection request expires after seven days,
+after which it cannot be accepted or rejected.
+
+Required arguments:
+
+ -vpc_id           The ID of the requester VPC
+
+ -peer_vpc_id      The ID of the VPC with which the peering connection is to be
+                   made
+
+Conditional arguments:
+
+ -peer_owner_id    The AWS account ID of the owner of the peer VPC
+                   Required if the peer VPC is not in the same account as the
+                   requester VPC
+
+Returns a L<VM::EC2::VPC::PeeringConnection> object.
+
+=cut
+
+sub create_vpc_peering_connection {
+    my $self = shift;
+    my %args = @_;
+    $args{-vpc_id} or
+        croak "create_vpc_peering_connection(): -vpc_id argument required";
+    $args{-peer_vpc_id} or
+        croak "create_vpc_peering_connection(): -peer_vpc_id argument required";
+    my @param;
+    push @param, $self->single_parm($_,\%args)
+        foreach qw(VpcId PeerVpcId PeerOwnerId);
+    return $self->call('CreateVpcPeeringConnection',@param);
+}
+
 =head2 @vpc = $ec2->describe_vpcs(@vpc_ids)
 
 =head2 @vpc = $ec2->describe_vpcs(\%filter)
@@ -111,6 +190,36 @@ sub describe_vpcs {
     return $self->call('DescribeVpcs',@parm);
 }
 
+=head2 @vpx = $ec2->describe_vpc_peering_connections(@vpx_ids)
+
+=head2 @vpx = $ec2->describe_vpc_peering_connections(\%filter)
+
+=head2 @vpx = $ec2->describe_vpc_peering_connections(vpc_peering_connection_id=>\@list,-filter=>\%filter)
+
+Describes one or more of your VPC peering connections.
+
+Optional arguments:
+
+ -vpc_peering_connection_id    A scalar or array ref containing the VPC IDs you want
+                               information on.
+
+ -filter                       A hashref of filters to apply to the query.
+
+The filters you can use are described at
+http://docs.aws.amazon.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVpcPeeringConnections.html
+
+Returns a scalar or array of L<VM::EC2::VPC::PeeringConnection> objects.
+
+=cut
+
+sub describe_vpc_peering_connections {
+    my $self = shift;
+    my %args   = $self->args('-vpc_peering_connection_id',@_);
+    my @parm   = $self->list_parm('VpcPeeringConnectionId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeVpcPeeringConnections',@parm);
+}
+
 =head2 $success = $ec2->delete_vpc($vpc_id)
 
 =head2 $success = $ec2->delete_vpc(-vpc_id=>$vpc_id)
@@ -124,6 +233,32 @@ sub delete_vpc {
     my %args  = $self->args(-vpc_id => @_);
     my @param = $self->single_parm(VpcId=>\%args);
     return $self->call('DeleteVpc',@param);
+}
+
+=head2 $success = $ec2->delete_vpc_peering_connection(-vpc_peering_connection_id => $id)
+
+=head2 $success = $ec2->delete_vpc_peering_connection($id)
+
+Deletes a VPC peering connection. Either the owner of the requester VPC or the
+owner of the peer VPC can delete the VPC peering connection if it's in the
+'active' state. The owner of the requester VPC can delete a VPC peering
+connection in the 'pending-acceptance' state.
+
+Required arguments:
+
+ -vpc_peering_connection_id    The ID of the VPC peering connection to delete
+
+Returns true if the deletion was successful.
+
+=cut
+
+sub delete_vpc_peering_connection {
+    my $self = shift;
+    my %args  = $self->args(-vpc_peering_connection_id => @_);
+    $args{-vpc_peering_connection_id} or
+        croak "delete_vpc_peering_connection(): -vpc_peering_connection_id argument required";
+    my @param = $self->single_parm(VpcPeeringConnectionId=>\%args);
+    return $self->call('DeleteVpcPeeringConnection',@param);
 }
 
 =head2 $attr = $ec2->describe_vpc_attribute(-vpc_id => $id, -attribute => $attr)
@@ -189,6 +324,29 @@ sub modify_vpc_attribute {
     return $self->call('ModifyVpcAttribute',@param);
 }
 
+=head2 $success = $ec2->reject_vpc_peering_connection(-vpc_peering_connection_id => $id)
+
+Rejects a VPC peering connection request. The VPC peering connection must be in
+the 'pending-acceptance' state.
+Use describe_vpc_peering_connections(-filter => { 'status-code' => 'pending-acceptance' })
+to view outstanding VPC peering connection requests.
+
+Required arguments:
+
+ -vpc_peering_connection_id    The ID of the VPC peering connection to delete
+
+Returns true if the deletion was successful.
+
+=cut
+
+sub reject_vpc_peering_connection {
+    my $self = shift;
+    my %args  = $self->args(-vpc_peering_connection_id => @_);
+    $args{-vpc_peering_connection_id} or
+        croak "reject_vpc_peering_connection(): -vpc_peering_connection_id argument required";
+    my @param = $self->single_parm(VpcPeeringConnectionId=>\%args);
+    return $self->call('RejectVpcPeeringConnection',@param);
+}
 
 =head1 SEE ALSO
 
@@ -199,6 +357,10 @@ L<VM::EC2>
 Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
 
 Copyright (c) 2011 Ontario Institute for Cancer Research
+
+Lance Kinley E<lt>lkinley@loyaltymethods.comE<gt>
+
+Copyright (c) 2014 Loyalty Methods, Inc.
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
