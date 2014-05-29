@@ -1,3 +1,7 @@
+1.26
+    - Use AnyEvent::CacheDNS to reduce latency of asynchronous calls. This introduces a new module
+      dependency.
+
 1.25
     - Change behavior of create_network_acl_entry() so that -egress option defaults to false as originally
       documented.

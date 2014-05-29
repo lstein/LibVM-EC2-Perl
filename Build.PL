@@ -21,6 +21,7 @@ my $build = Module::Build->new(
       'JSON'         => 0,
       'AnyEvent'     => '7.04',
       'AnyEvent::HTTP' => '2.15',
+      'AnyEvent::CacheDNS' => '0.08',
     },
     build_class        => 'Module::Build',
     );

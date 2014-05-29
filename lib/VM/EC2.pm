@@ -574,12 +574,13 @@ use URI;
 use URI::Escape;
 use AnyEvent;
 use AnyEvent::HTTP;
+use AnyEvent::CacheDNS ':register';
 use HTTP::Request::Common;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 use JSON;
 
-our $VERSION = '1.25';
+our $VERSION = '1.26';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
