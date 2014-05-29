@@ -47,6 +47,7 @@ The following object methods are supported:
  iops             -- The number of I/O operations per second that the volume
                      supports, an integer between 100 and 4000. Only valid for
                      volumes of type "io1".
+ encrypted        -- True if volume is encrypted.
  tags             -- Hashref containing tags associated with this group.
                      See L<VM::EC2::Generic>.
 
@@ -192,7 +193,7 @@ use Carp 'croak';
 sub valid_fields {
     my $self = shift;
     return qw(volumeId size snapshotId availabilityZone status 
-              createTime attachmentSet volumeType iops tagSet);
+              createTime attachmentSet volumeType iops tagSet encrypted);
 }
 
 sub primary_id {shift->volumeId}

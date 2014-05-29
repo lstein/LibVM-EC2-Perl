@@ -88,7 +88,7 @@ sub describe_volumes {
     return $self->call('DescribeVolumes',@params);
 }
 
-=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size,-volume_type=>$type,-iops=>$iops)
+=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size,-volume_type=>$type,-iops=>$iops,-encrypted=>$boolean)
 
 Create a volume in the specified availability zone and return
 information about it.
@@ -116,6 +116,8 @@ Optional Arguments:
                           when volume type is io1.  IOPS must be 30-to-1 ratio
                           to size.  ie: 3000 IOPS volume must be at least 100GB.
 
+ -encrypted            -- If true, then volume and its snapshots will be encrypted.
+
 The returned object is a VM::EC2::Volume object.
 
 =cut
@@ -138,6 +140,7 @@ sub create_volume {
     push @params,(Size => $size)         if $size;
     push @params,$self->single_parm('VolumeType',\%args);
     push @params,$self->single_parm('Iops',\%args);
+    push @params,$self->boolean_parm('Encrypted',\%args);
     return $self->call('CreateVolume',@params);
 }
 
