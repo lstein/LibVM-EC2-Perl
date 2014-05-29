@@ -1,3 +1,7 @@
+1.26
+    - Compliant to 2014-05-01 API.
+    - Volume and snapshot encryption supported.
+
 1.25
     - Change behavior of create_network_acl_entry() so that -egress option defaults to false as originally
       documented.

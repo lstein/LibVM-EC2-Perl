@@ -46,6 +46,7 @@ The following object methods are supported:
  volumeSize       -- Size of the volume, in gigabytes.
  description      -- Description of the snapshot
  ownerAlias       -- AWS account alias, such as "self".
+ encrypted        -- True if snapshot is encrypted
  tags             -- Hashref containing tags associated with this group.
                      See L<VM::EC2::Generic>.
 
@@ -255,6 +256,7 @@ sub valid_fields {
               ownerId
               volumeSize
               description
+              encrypted
               ownerAlias);
 }
 
