@@ -568,7 +568,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
 
 use MIME::Base64 qw(encode_base64 decode_base64);
-use Digest::SHA qw(hmac_sha256 sha1_hex);
+use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
 use POSIX 'strftime';
 use URI;
 use URI::Escape;
@@ -1855,6 +1855,53 @@ sub _signature {
     my $signature = encode_base64(hmac_sha256($to_sign,$self->secret),'');
     $sign_hash{Signature} = $signature;
     return [%sign_hash];
+}
+
+# attempt to implement the version 4 signature
+sub _signature4 {
+}
+
+sub _canonical_request_4 {
+    my $self = shift;
+    my ($method,$uri,$params,$headers,$hashed_payload) = @_;
+    $method         ||= 'POST';
+    $uri            ||= '/';
+    $params         ||= [];
+    $headers        ||= [];
+    $hashed_payload ||= sha256_hex('');
+
+    # canonicalize query string
+    my %canonical;
+    while (my ($key,$value) = splice(@$params,0,2)) {
+	$key   = uri_escape($key);
+	$value = uri_escape($value);
+	push @{$canonical{$key}},$value;
+    }
+    my $canonical_query_string = join '&',map {my $key = $_; map {"$key=$_"} sort @{$canonical{$key}}} sort keys %canonical;
+
+    # canonicalize the request headers
+    %canonical = ();
+    while (my ($key,$value) = splice(@$neaders,0,2)) {
+	$key   = lc($key);
+	$value = lc($value);
+	# remove redundant whitespace
+	unless ($value =~ /^".+"$/) {
+	    $value =~ s/^\s+//;
+	    $value =~ s/\s+$//;
+	    $value =~ s/(\s)\s+/$1/g;
+	}
+	push @{$canonical{$key}},$value;
+    }
+    my $canonical_headers = join "\n",map {"$_:".join(',',@{$canonical{$_}})} sort keys %canonical;
+    $canonical_headers   .= "\n";
+    my $signed_headers    = join ';',sort keys %canonical;
+
+    my $canonical_request = join("\n",$method,$uri,$canonical_query_string,
+				 $canonical_headers,$signed_headers,$hashed_payload);
+
+    my $request_digest    = sha256_hex($canonical_request);
+    
+    return $request_digest;
 }
 
 =head2 @param = $ec2->args(ParamName=>@_)
