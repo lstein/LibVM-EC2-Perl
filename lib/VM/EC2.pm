@@ -2,7 +2,7 @@ package VM::EC2;
 
 =head1 NAME
 
-VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
+VM::EC2 - Control the Amazon EC2 and Open Stack Clouds
 
 =head1 SYNOPSIS
 
@@ -139,8 +139,8 @@ This is an interface to the 2014-05-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
-mechanism for the API. This library will also support the Eucalyptus
-open source cloud (http://open.eucalyptus.com).
+mechanism for the API. This library will also support the Open Stack
+open source cloud (http://www.openstack.org/).
 
 The main interface is the VM::EC2 object, which provides methods for
 interrogating the Amazon EC2, launching instances, and managing
@@ -696,7 +696,7 @@ created. See
 http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html
 and L</AWS SECURITY TOKENS>.
 
-To use a Eucalyptus cloud, please provide the appropriate endpoint
+To use an Open Stack cloud, please provide the appropriate endpoint
 URL.
 
 By default, when the Amazon API reports an error, such as attempting
@@ -1855,53 +1855,6 @@ sub _signature {
     my $signature = encode_base64(hmac_sha256($to_sign,$self->secret),'');
     $sign_hash{Signature} = $signature;
     return [%sign_hash];
-}
-
-# attempt to implement the version 4 signature
-sub _signature4 {
-}
-
-sub _canonical_request_4 {
-    my $self = shift;
-    my ($method,$uri,$params,$headers,$hashed_payload) = @_;
-    $method         ||= 'POST';
-    $uri            ||= '/';
-    $params         ||= [];
-    $headers        ||= [];
-    $hashed_payload ||= sha256_hex('');
-
-    # canonicalize query string
-    my %canonical;
-    while (my ($key,$value) = splice(@$params,0,2)) {
-	$key   = uri_escape($key);
-	$value = uri_escape($value);
-	push @{$canonical{$key}},$value;
-    }
-    my $canonical_query_string = join '&',map {my $key = $_; map {"$key=$_"} sort @{$canonical{$key}}} sort keys %canonical;
-
-    # canonicalize the request headers
-    %canonical = ();
-    while (my ($key,$value) = splice(@$neaders,0,2)) {
-	$key   = lc($key);
-	$value = lc($value);
-	# remove redundant whitespace
-	unless ($value =~ /^".+"$/) {
-	    $value =~ s/^\s+//;
-	    $value =~ s/\s+$//;
-	    $value =~ s/(\s)\s+/$1/g;
-	}
-	push @{$canonical{$key}},$value;
-    }
-    my $canonical_headers = join "\n",map {"$_:".join(',',@{$canonical{$_}})} sort keys %canonical;
-    $canonical_headers   .= "\n";
-    my $signed_headers    = join ';',sort keys %canonical;
-
-    my $canonical_request = join("\n",$method,$uri,$canonical_query_string,
-				 $canonical_headers,$signed_headers,$hashed_payload);
-
-    my $request_digest    = sha256_hex($canonical_request);
-    
-    return $request_digest;
 }
 
 =head2 @param = $ec2->args(ParamName=>@_)
