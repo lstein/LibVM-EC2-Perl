@@ -25,16 +25,17 @@ sub sign {
 
 sub _canonical_request {
     my $self = shift;
-    my ($method,$uri,$params,$headers,$hashed_payload) = @_;
-    $method         ||= 'POST';
-    $uri            ||= '/';
-    $params         ||= [];
-    $headers        ||= [];
+    my $request = shift; # http::request
+    $method         = $request->method;
+    $uri            = $request->uri;
+    @params         =  $method eq 'POST' ? URI->new('?',$method->content)->query_form
+	                                 :$uri->query_form;
+    $headers        = $request->headers;
     $hashed_payload ||= sha256_hex('');
 
     # canonicalize query string
     my %canonical;
-    while (my ($key,$value) = splice(@$params,0,2)) {
+    while (my ($key,$value) = splice(@params,0,2)) {
 	$key   = uri_escape($key);
 	$value = uri_escape($value);
 	push @{$canonical{$key}},$value;
@@ -42,21 +43,21 @@ sub _canonical_request {
     my $canonical_query_string = join '&',map {my $key = $_; map {"$key=$_"} sort @{$canonical{$key}}} sort keys %canonical;
 
     # canonicalize the request headers
-    %canonical = ();
-    while (my ($key,$value) = splice(@$neaders,0,2)) {
-	$key   = lc($key);
-	$value = lc($value);
+    my @canonical;
+    for my $header (sort keys %$headers) {
+	my @values = ref($headers->{$header}) ? @{$headers->{$header}} : $headers->{$header};
 	# remove redundant whitespace
-	unless ($value =~ /^".+"$/) {
+	foreach (@values ) {
+	    next if /^".+"$/;
 	    $value =~ s/^\s+//;
 	    $value =~ s/\s+$//;
 	    $value =~ s/(\s)\s+/$1/g;
 	}
-	push @{$canonical{$key}},$value;
+	push @canonical,"$header:".join(',',@values);
     }
-    my $canonical_headers = join "\n",map {"$_:".join(',',@{$canonical{$_}})} sort keys %canonical;
+    my $canonical_headers = join "\n",@canonical;
     $canonical_headers   .= "\n";
-    my $signed_headers    = join ';',sort keys %canonical;
+    my $signed_headers    = join ';',sort keys %$headers;
 
     my $canonical_request = join("\n",$method,$uri,$canonical_query_string,
 				 $canonical_headers,$signed_headers,$hashed_payload);
@@ -66,3 +67,7 @@ sub _canonical_request {
     return ($request_digest,$signed_headers);
 }
 
+sub _string_to_sign {
+    my $self = shift;
+    my ($credential_scope,$request,$hashed_request) = @_;
+}
