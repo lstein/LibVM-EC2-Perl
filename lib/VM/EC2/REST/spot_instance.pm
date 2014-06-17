@@ -340,7 +340,9 @@ sub cancel_spot_instance_requests {
     my $self = shift;
     my %args = $self->args('-spot_instance_request_id',@_);
     my @parm = $self->list_parm('SpotInstanceRequestId',\%args);
-    return $self->call('CancelSpotInstanceRequests',@parm);
+    # possible bug in AWS: some cancelled instances repeated in list 
+    my %c =  map {$_=>$_} $self->call('CancelSpotInstanceRequests',@parm);
+    return values %c;
 }
 
 

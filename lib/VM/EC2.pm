@@ -566,6 +566,7 @@ use strict;
 
 use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
+use AWS::Signature4;
 
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
@@ -757,6 +758,13 @@ sub new {
     }
 
     return $obj;
+}
+
+sub _region {
+    my $self = shift;
+    my $endpoint = $self->endpoint || return 'us-east-1';
+    my ($region) = $endpoint =~ /([^.]+)\.amazonaws\.com/;
+    return $region || 'us-east-1';
 }
 
 =head2 $access_key = $ec2->access_key([$new_access_key])
@@ -1670,24 +1678,44 @@ sub _call_sync {
 sub _call_async {
     my $self  = shift;
     my ($action,@param) = @_;
-    my $post  = $self->_signature(Action=>$action,@param);
-    my $u     = URI->new($self->endpoint);
-    $u->query_form(@$post);
-    $self->async_post($action,$self->endpoint,$u->query);
+    my $request = POST($self->endpoint,
+		       'content-type'=>'application/x-www-form-urlencoded',
+		       Content => [
+			   Action  => $action,
+			   Version => $self->version,
+			   @param
+		       ]);
+#    my $post  = $self->_signature(Action=>$action,@param);
+#    my $u     = URI->new($self->endpoint);
+#    $u->query_form(@$post);
+    my $access_key = $self->access_key;
+    my $secret_key = $self->secret;
+    my $host       = URI->new($self->endpoint)->host;
+    $request->header('x-amz-security-token'=>$self->security_token) if $self->security_token;
+    $request->header('user-agent' => 'VM::EC2-perl');
+    $request->header('action'     => $action);  # maybe not necessary, but docs say it is!
+    $request->header('host'       => $host);
+
+    AWS::Signature4->sign($access_key,$secret_key,$self->endpoint,$request);
+    $self->async_post($action,$request);
 }
 
 sub async_post {
     my $self = shift;
-    my ($action,$endpoint,$query) = @_;
+    my ($action,$request) = @_;
+
+    my @headers;
+    $request->headers->scan(sub {push @headers,@_});
 
     my $cv    = $self->condvar;
     my $callback = sub {
 	my $timer = shift;
-	http_post($endpoint,
-		  $query,
+	http_post($request->uri,
+		  $request->content,
 		  headers => {
-		      'Content-Type' => 'application/x-www-form-urlencoded',
-		      'User-Agent'   => 'VM::EC2-perl',
+		      TE      => undef,
+		      Referer => undef,
+		      @headers,
 		  },
 		  sub {
 		      my ($body,$hdr) = @_;
