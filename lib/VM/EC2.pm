@@ -1685,9 +1685,6 @@ sub _call_async {
 			   Version => $self->version,
 			   @param
 		       ]);
-#    my $post  = $self->_signature(Action=>$action,@param);
-#    my $u     = URI->new($self->endpoint);
-#    $u->query_form(@$post);
     my $access_key = $self->access_key;
     my $secret_key = $self->secret;
     my $host       = URI->new($self->endpoint)->host;
@@ -1702,7 +1699,27 @@ sub _call_async {
 
 sub async_post {
     my $self = shift;
-    my ($action,$request) = @_;
+    $self->async_request('POST',@_);
+}
+
+sub async_get {
+    my $self = shift;
+    $self->async_request('GET',@_);
+}
+
+sub async_put {
+    my $self = shift;
+    $self->async_request('PUT',@_);
+}
+
+sub async_delete {
+    my $self = shift;
+    $self->async_request('DELETE',@_);
+}
+
+sub async_request {
+    my $self = shift;
+    my ($method,$action,$request) = @_;
 
     my @headers;
     $request->headers->scan(sub {push @headers,@_});
@@ -1710,32 +1727,33 @@ sub async_post {
     my $cv    = $self->condvar;
     my $callback = sub {
 	my $timer = shift;
-	http_post($request->uri,
-		  $request->content,
-		  headers => {
-		      TE      => undef,
-		      Referer => undef,
-		      @headers,
-		  },
-		  sub {
-		      my ($body,$hdr) = @_;
-		      if ($hdr->{Status} !~ /^2/) { # an error
-			  if ($body =~ /RequestLimitExceeded/) {
-			      warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
-			      $timer->retry();
-			      return;
-			  } else {
-			      $self->async_send_error($action,$hdr,$body,$cv);
-			      $timer->success();
-			      return;
-			  }
-		      } else { # success
-			  $self->error(undef);
-			  my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
-			  $cv->send(@obj);
-			  $timer->success();
-		      }
-		  })
+	http_request(
+	    $method => $request->uri,
+	    body    => $request->content,
+	    headers => {
+		TE      => undef,
+		Referer => undef,
+		@headers,
+	    },
+	    sub {
+		my ($body,$hdr) = @_;
+		if ($hdr->{Status} !~ /^2/) { # an error
+		    if ($body =~ /RequestLimitExceeded/) {
+			warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
+			$timer->retry();
+			return;
+		    } else {
+			$self->async_send_error($action,$hdr,$body,$cv);
+			$timer->success();
+			return;
+		    }
+		} else { # success
+		    $self->error(undef);
+		    my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
+		    $cv->send(@obj);
+		    $timer->success();
+		}
+	    })
     };
     RetryTimer->new(on_retry       => $callback,
 		    interval       => 1,
