@@ -566,7 +566,7 @@ use strict;
 
 use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
-use AWS::Signature4;
+eval {use AWS::Signature4}; # optional
 
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
@@ -1678,6 +1678,18 @@ sub _call_sync {
 sub _call_async {
     my $self  = shift;
     my ($action,@param) = @_;
+
+    # called if AWS::Signature4 NOT present; use built-in method
+    unless (AWS::Signature4->can('new')) {
+	my ($action,@param) = @_;
+	my $post  = $self->_signature(Action=>$action,@param);
+	my $u     = URI->new($self->endpoint);
+	$u->query_form(@$post);
+	return $self->async_post($action,POST($self->endpoint,Content=>$u->query));
+    }
+
+
+    # called if AWS::Signature4 IS present; use external module
     my $request = POST($self->endpoint,
 		       'content-type'=>'application/x-www-form-urlencoded',
 		       Content => [
