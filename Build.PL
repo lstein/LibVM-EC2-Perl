@@ -11,6 +11,7 @@ my $build = Module::Build->new(
     dist_author       => 'Lincoln Stein <lincoln.stein@oicr.on.ca>',
     configure_requires => { 'Module::Build' => 0 },
     requires          => {
+      'AWS::Signature4' => '1.00',
       'LWP' => 5.835,
       'MIME::Base64' => '3.08',
       'Digest::SHA'  => '5.47',
