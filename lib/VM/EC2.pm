@@ -1692,8 +1692,9 @@ sub _call_async {
     $request->header('user-agent' => 'VM::EC2-perl');
     $request->header('action'     => $action);  # maybe not necessary, but docs say it is!
     $request->header('host'       => $host);
-
-    AWS::Signature4->sign($access_key,$secret_key,$self->endpoint,$request);
+    
+    AWS::Signature4->new(-access_key=>$access_key,
+			 -secret_key=>$secret_key)->sign($request);
     $self->async_post($action,$request);
 }
 
