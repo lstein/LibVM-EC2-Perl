@@ -1685,9 +1685,8 @@ sub _call_async {
 	my $post  = $self->_signature(Action=>$action,@param);
 	my $u     = URI->new($self->endpoint);
 	$u->query_form(@$post);
-	return $self->async_post($action,POST($self->endpoint,Content=>$u->query));
+	return $self->async_request($action,POST($self->endpoint,Content=>$u->query));
     }
-
 
     # called if AWS::Signature4 IS present; use external module
     my $request = POST($self->endpoint,
@@ -1707,32 +1706,12 @@ sub _call_async {
     
     AWS::Signature4->new(-access_key=>$access_key,
 			 -secret_key=>$secret_key)->sign($request);
-    $self->async_post($action,$request);
-}
-
-sub async_post {
-    my $self = shift;
-    $self->async_request('POST',@_);
-}
-
-sub async_get {
-    my $self = shift;
-    $self->async_request('GET',@_);
-}
-
-sub async_put {
-    my $self = shift;
-    $self->async_request('PUT',@_);
-}
-
-sub async_delete {
-    my $self = shift;
-    $self->async_request('DELETE',@_);
+    $self->async_request($action,$request);
 }
 
 sub async_request {
     my $self = shift;
-    my ($method,$action,$request) = @_;
+    my ($action,$request) = @_;
 
     my @headers;
     $request->headers->scan(sub {push @headers,@_});
@@ -1741,7 +1720,7 @@ sub async_request {
     my $callback = sub {
 	my $timer = shift;
 	http_request(
-	    $method => $request->uri,
+	    $request->method => $request->uri,
 	    body    => $request->content,
 	    headers => {
 		TE      => undef,
