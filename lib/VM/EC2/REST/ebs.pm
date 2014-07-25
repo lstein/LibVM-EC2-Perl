@@ -108,13 +108,20 @@ you may abbreviate -availability_zone as -zone, and -snapshot_id as
 
 Optional Arguments:
 
- -volume_type          -- The volume type.  standard or io1, default is
-                          standard
+ -volume_type          -- The volume type.  "standard", "io1", or "gp2"
+                          Default is "standard"
 
  -iops                 -- The number of I/O operations per second (IOPS) that
                           the volume supports.  Range is 100 to 4000.  Required
                           when volume type is io1.  IOPS must be 30-to-1 ratio
                           to size.  ie: 3000 IOPS volume must be at least 100GB.
+
+ -encrypted            -- Specifies whether the volume should be encrypted.
+                          Encrypted Amazon EBS volumes may only be attached to
+                          instances that support them. Volumes created from
+                          encrypted snapshots are also encrypted using the same
+                          key as the original volume.
+                          See: http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSEncryption.html
 
 The returned object is a VM::EC2::Volume object.
 
@@ -138,6 +145,7 @@ sub create_volume {
     push @params,(Size => $size)         if $size;
     push @params,$self->single_parm('VolumeType',\%args);
     push @params,$self->single_parm('Iops',\%args);
+    push @params,$self->boolean_parm('Encrypted',\%args);
     return $self->call('CreateVolume',@params);
 }
 
@@ -549,6 +557,7 @@ initiating this operation.
 Arguments:
 
  -volume_id    -- ID of the volume to snapshot (required)
+
  -description  -- A description to add to the snapshot (optional)
 
 The return value is a VM::EC2::Snapshot object that can be queried
@@ -591,14 +600,25 @@ sub delete_snapshot {
 
 =head2 $snapshot = $ec2->copy_snapshot(-source_region=>$region,-source_snapshot_id=>$id,-description=>$desc)
 
+=head2 $snapshot = $ec2->copy_snapshot(-region=>$region,-snapshot_id=>$id,-description=>$desc)
+
 Copies an existing snapshot within the same region or from one region to another.
 
 Required arguments:
- -region       -- The region the existing snapshot to copy resides in
- -snapshot_id  -- The snapshot ID of the snapshot to copy
+
+ -source_region       -- The region the existing snapshot to copy resides in
+ -source_snapshot_id  -- The snapshot ID of the snapshot to copy
+
+ -region              -- Alias for -source_region
+ -snapshot_id         -- Alias for -source_snapshot_id
+
+Currently, the DestinationRegion and PresignedUrl API arguments are not
+supported.  Therefore, copying encrypted snapshots between regions is
+not yet possible.
 
 Optional arguments:
- -description  -- A description of the new snapshot
+
+ -description         -- A description of the new snapshot
 
 The return value is a VM::EC2::Snapshot object that can be queried
 through its current_status() interface to follow the progress of the
@@ -617,6 +637,7 @@ sub copy_snapshot {
     my @params  = $self->single_parm('SourceRegion',\%args);
     push @params, $self->single_parm('SourceSnapshotId',\%args);
     push @params, $self->single_parm('Description',\%args);
+    #push @params, $self->single_parm('DestinationRegion',\%args);
     my $snap_id = $self->call('CopySnapshot',@params) or return;
     return eval {
             my $snapshot;

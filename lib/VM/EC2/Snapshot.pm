@@ -46,6 +46,7 @@ The following object methods are supported:
  volumeSize       -- Size of the volume, in gigabytes.
  description      -- Description of the snapshot
  ownerAlias       -- AWS account alias, such as "self".
+ encrypted        -- Snapshot is encrypted (boolean).
  tags             -- Hashref containing tags associated with this group.
                      See L<VM::EC2::Generic>.
 
@@ -255,7 +256,8 @@ sub valid_fields {
               ownerId
               volumeSize
               description
-              ownerAlias);
+              ownerAlias
+              encrypted);
 }
 
 sub primary_id { shift->snapshotId }
@@ -399,6 +401,12 @@ sub copy {
     $dest_aws->region($region);
     my $snapshot = $dest_aws->copy_snapshot(-source_region=>$orig_region, -source_snapshot_id=>$snap_id, -description=>$desc);
     return $snapshot;
+}
+
+sub encrypted {
+    my $self = shift;
+    my $enc = $self->SUPER::encrypted;
+    return $enc eq 'true';
 }
 
 1;

@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2014-02-01 version of the Amazon AWS API
+This is an interface to the 2014-05-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -574,6 +574,7 @@ use URI;
 use URI::Escape;
 use AnyEvent;
 use AnyEvent::HTTP;
+use AnyEvent::CacheDNS ':register';
 use HTTP::Request::Common;
 use VM::EC2::Error;
 use Carp 'croak','carp';
@@ -1644,6 +1645,15 @@ sub boolean_parm {
     return ($argname => $val ? 'true' : 'false');
 }
 
+sub boolean_value_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    my $name = $self->canonicalize($argname);
+    return unless exists $args->{$name} || exists $args->{$argname};
+    my $val = $args->{$name} || $args->{$argname};
+    return ("$argname.Value" => $val ? 'true' : 'false');
+}
+
 =head2 $version = $ec2->version()
 
 Returns the API version to be sent to the endpoint. Calls
@@ -1670,7 +1680,7 @@ sub guess_version_from_endpoint {
     my $self = shift;
     my $endpoint = $self->endpoint;
     return '2009-04-04' if $endpoint =~ /Eucalyptus/;  # eucalyptus version according to http://www.eucalyptus.com/participate/code
-    return '2014-02-01';                               # most recent AWS version that we support
+    return '2014-05-01';                               # most recent AWS version that we support
 }
 
 =head2 $ts = $ec2->timestamp
