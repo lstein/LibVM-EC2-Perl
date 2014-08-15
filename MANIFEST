@@ -45,6 +45,11 @@ lib/VM/EC2/DB/VpcSecurityGroup/Membership.pm
 lib/VM/EC2/Dispatch.pm
 lib/VM/EC2/ElasticAddress.pm
 lib/VM/EC2/ELB.pm
+lib/VM/EC2/ELB/Attributes.pm
+lib/VM/EC2/ELB/Attributes/AccessLog.pm
+lib/VM/EC2/ELB/Attributes/ConnectionDraining.pm
+lib/VM/EC2/ELB/Attributes/ConnectionSettings.pm
+lib/VM/EC2/ELB/Attributes/CrossZoneLoadBalancing.pm
 lib/VM/EC2/ELB/BackendServerDescription.pm
 lib/VM/EC2/ELB/HealthCheck.pm
 lib/VM/EC2/ELB/InstanceState.pm
@@ -57,6 +62,7 @@ lib/VM/EC2/ELB/PolicyAttribute.pm
 lib/VM/EC2/ELB/PolicyAttributeType.pm
 lib/VM/EC2/ELB/PolicyDescription.pm
 lib/VM/EC2/ELB/PolicyTypeDescription.pm
+lib/VM/EC2/ELB/TagDescription.pm
 lib/VM/EC2/Error.pm
 lib/VM/EC2/Generic.pm
 lib/VM/EC2/Group.pm

@@ -1339,25 +1339,6 @@ sub prefix_parm {
     return ("$prefix.$argname"=>$v);
 }
 
-=head2 @parameters = $ec2->member_list_parm(ParameterName => \%args)
-
-=cut
-
-sub member_list_parm {
-    my $self = shift;
-    my ($argname,$args) = @_;
-    my $name = $self->canonicalize($argname);
-
-    my @params;
-    if (my $a = $args->{$name}||$args->{"-$argname"}) {
-        my $c = 1;
-        for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
-            push @params,("$argname.member.".$c++ => $_);
-        }
-    }
-    return @params;
-}
-
 =head2 @arguments = $ec2->member_hash_parms(ParameterName => \%args)
 
 Create a parameter list from a hashref or arrayref of hashes
@@ -1421,10 +1402,27 @@ sub member_hash_parms {
 sub list_parm {
     my $self = shift;
     my ($argname,$args) = @_;
+    return $self->_list_parm($argname,$args);
+}
+
+=head2 @parameters = $ec2->member_list_parm(ParameterName => \%args)
+
+=cut
+
+sub member_list_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    return $self->_list_parm($argname,$args,'member');
+}
+
+sub _list_parm {
+    my $self = shift;
+    my ($argname,$args,$append) = @_;
     my $name = $self->canonicalize($argname);
 
     my @params;
     if (my $a = $args->{$name}||$args->{"-$argname"}) {
+        $argname .= ".$append" if $append;
 	my $c = 1;
 	for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
 	    push @params,("$argname.".$c++ => $_);
@@ -1451,11 +1449,28 @@ sub filter_parm {
 sub key_value_parameters {
     my $self = shift;
     # e.g. 'Filter', 'Name','Value',{-filter=>{a=>b}}
+    return $self->_key_value_parameters(@_);
+}
+
+=head2 @arguments = $ec2->member_key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
+
+=cut
+
+sub member_key_value_parameters {
+    my $self = shift;
     my ($parameter_name,$keyname,$valuename,$args,$skip_undef_values) = @_;  
+    return $self->_key_value_parameters($parameter_name,$keyname,$valuename,$args,$skip_undef_values,'member');
+}
+
+sub _key_value_parameters {
+    my $self = shift;
+    # e.g. 'Filter', 'Name','Value',{-filter=>{a=>b}}
+    my ($parameter_name,$keyname,$valuename,$args,$skip_undef_values,$append) = @_;  
     my $arg_name     = $self->canonicalize($parameter_name);
     
     my @params;
     if (my $a = $args->{$arg_name}||$args->{"-$parameter_name"}) {
+        $parameter_name .= ".$append" if $append;
 	my $c = 1;
 	if (ref $a && ref $a eq 'HASH') {
 	    while (my ($name,$value) = each %$a) {

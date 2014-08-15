@@ -54,11 +54,13 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
+use overload
+    '""'     => sub { shift->PolicyName },
+    fallback => 1;
+
 sub valid_fields {
     my $self = shift;
     return qw(CookieName PolicyName);
 }
-
-sub primary_id { shift->PolicyName }
 
 1;

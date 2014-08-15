@@ -342,7 +342,7 @@ sub fetch_items {
 
 Used for XML responses from ELB API calls which contain a key that is the name
 of the API call with 'Result' appended.  All these XML responses contain
-'member' as the item delimter instead of 'item'
+'member' as the item delimiter instead of 'item'
 
 =cut
 

@@ -64,18 +64,19 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
+# allow pretty print of parameters when printing the object
+use overload
+    '""'     => sub {
+        my $self = shift;
+        return "Target: " . $self->Target . "\nInterval: " . $self->Interval .
+           "\nHealthyThreshold: " . $self->HealthyThreshold .
+           "\nUnhealthyThreshold: " . $self->UnhealthyThreshold .
+           "\nTimeout: " . $self->Timeout . "\n"},
+    fallback => 1;
+
 sub valid_fields {
     my $self = shift;
     return qw(HealthyThreshold Interval Target Timeout UnhealthyThreshold);
-}
-
-# allow pretty print of parameters when printing the object
-sub primary_id {
-    my $self = shift;
-    return "Target: " . $self->Target . "\nInterval: " . $self->Interval .
-           "\nHealthyThreshold: " . $self->HealthyThreshold .
-           "\nUnhealthyThreshold: " . $self->UnhealthyThreshold .
-           "\nTimeout: " . $self->Timeout . "\n";
 }
 
 1;

@@ -5,6 +5,7 @@ use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
 
 VM::EC2::Dispatch->register(
+    AddTags                           => sub { exists shift->{AddTagsResult} },
     ApplySecurityGroupsToLoadBalancer => 'elb_member_list,SecurityGroups',
     AttachLoadBalancerToSubnets       => 'elb_member_list,Subnets',
     ConfigureHealthCheck              => 'fetch_one_result,HealthCheck,VM::EC2::ELB::HealthCheck',
@@ -18,15 +19,22 @@ VM::EC2::Dispatch->register(
     DeleteLoadBalancerPolicy          => sub { exists shift->{DeleteLoadBalancerPolicyResult} },
     DeregisterInstancesFromLoadBalancer => 'elb_member_list,Instances,InstanceId',
     DescribeInstanceHealth            => 'fetch_members,InstanceStates,VM::EC2::ELB::InstanceState', 
+    DescribeLoadBalancerAttributes    => 'fetch_one_result,LoadBalancerAttributes,VM::EC2::ELB::Attributes',
     DescribeLoadBalancerPolicies      => 'fetch_members,PolicyDescriptions,VM::EC2::ELB::PolicyDescription',
     DescribeLoadBalancerPolicyTypes   => 'fetch_members,PolicyTypeDescriptions,VM::EC2::ELB::PolicyTypeDescription',
     DescribeLoadBalancers             => 'fetch_members,LoadBalancerDescriptions,VM::EC2::ELB',
+    DescribeTags                      => 'fetch_members,TagDescriptions,VM::EC2::ELB::TagDescription',
     DetachLoadBalancerFromSubnets     => 'elb_member_list,Subnets',
-    DisableAvailabilityZonesForLoadBalancer => 'elb_member_list,AvailabilityZones',
-    EnableAvailabilityZonesForLoadBalancer => 'elb_member_list,AvailabilityZones',
+    DisableAvailabilityZonesForLoadBalancer =>
+                                         'elb_member_list,AvailabilityZones',
+    EnableAvailabilityZonesForLoadBalancer =>
+                                         'elb_member_list,AvailabilityZones',
+    ModifyLoadBalancerAttributes      => 'fetch_one_result,LoadBalancerAttributes,VM::EC2::ELB::Attributes',
     RegisterInstancesWithLoadBalancer => 'elb_member_list,Instances,InstanceId',
-    SetLoadBalancerListenerSSLCertificate => sub { exists shift->{SetLoadBalancerListenerSSLCertificateResult} },
-    SetLoadBalancerPoliciesForBackendServer => sub { exists shift->{SetLoadBalancerPoliciesForBackendServerResult} },
+    SetLoadBalancerListenerSSLCertificate =>
+                                         sub { exists shift->{SetLoadBalancerListenerSSLCertificateResult} },
+    SetLoadBalancerPoliciesForBackendServer =>
+                                         sub { exists shift->{SetLoadBalancerPoliciesForBackendServerResult} },
     SetLoadBalancerPoliciesOfListener => sub { exists shift->{SetLoadBalancerPoliciesOfListenerResult} },
     );
 
@@ -51,6 +59,7 @@ Elastic Load Balancers, create new ELBs, and change the properties of
 the ELBs.
 
 Implemented:
+ AddTags
  ApplySecurityGroupsToLoadBalancer
  AttachLoadBalancerToSubnets
  ConfigureHealthCheck
@@ -64,13 +73,17 @@ Implemented:
  DeleteLoadBalancerPolicy
  DeregisterInstancesFromLoadBalancer
  DescribeInstanceHealth
+ DescribeLoadBalancerAttributes
  DescribeLoadBalancerPolicies
  DescribeLoadBalancerPolicyTypes
  DescribeLoadBalancers
+ DescribeTags
  DetachLoadBalancerFromSubnets
  DisableAvailabilityZonesForLoadBalancer
  EnableAvailabilityZonesForLoadBalancer
+ ModifyLoadBalancerAttributes
  RegisterInstancesWithLoadBalancer
+ RemoveTags
  SetLoadBalancerListenerSSLCertificate
  SetLoadBalancerPoliciesForBackendServer
  SetLoadBalancerPoliciesOfListener
@@ -80,6 +93,192 @@ Unimplemented:
 
 The primary object manipulated by these methods is
 L<VM::EC2::ELB>. Please see the L<VM::EC2::ELB> manual page
+
+=head2 $success = $ec2->tag_load_balancer(-load_balancer_names => $name, -tags => { key => value, [key2 => value2], ... })
+
+Adds one or more tags for the specified load balancer.  Each load balancer can
+have a maximum of 10 tags.  Each tag consists of a key and an optional value.
+
+Tag keys must be unique for each load balancer.
+If a tag with the same key is already associated with the load balancer, this
+action will update the value of the key.
+
+Arguments:
+
+ -load_balancer_names    The name of the load balancer to tag. You can specify a
+                         maximum of one load balancer name.
+
+ -tags                   Hashref of tag key/value pairs.
+
+Returns true on success.
+
+=cut
+
+sub add_load_balancer_tags {
+    my $self = shift;
+    my %args = $self->args('-tags',@_);
+    $args{'-load_balancer_names'} ||= $args{-lb_name};
+    $args{'-load_balancer_names'} ||= $args{-lb_names};
+    $args{'-load_balancer_names'} ||= $args{-load_balancer_name};
+    $args{'-load_balancer_names'} ||
+        croak "describe_load_balancer_tags(): -load_balancer_names argument missing";
+    my @params = $self->member_list_parm('LoadBalancerNames',\%args);
+    push @params, $self->member_key_value_parameters('Tags','Key','Value',\%args);
+    return $self->elb_call('AddTags',@params);
+}
+
+=head2 %tags = $ec2->describe_load_balancer_tags(-load_balancer_name=>\@names)
+
+=head2 %tags = $ec2->describe_load_balancer_tags(@names)
+
+Describes the tags associated with one or more load balancers.
+
+Arguments:
+
+ -load_balancer_names    The name of the load balancers to retrieve tags for.
+
+Returns a hash of hashes in this format:
+
+{
+   'LBName' =>
+   {
+       TagName => TagValue,
+       TagName => TagValue,
+   }
+}
+
+=cut
+
+sub describe_load_balancer_tags {
+    my $self = shift;
+    my %args = $self->args('-load_balancer_names',@_);
+    $args{'-load_balancer_names'} ||= $args{-lb_name};
+    $args{'-load_balancer_names'} ||= $args{-lb_names};
+    $args{'-load_balancer_names'} ||= $args{-load_balancer_name};
+    $args{'-load_balancer_names'} ||
+        croak "describe_load_balancer_tags(): -load_balancer_names argument missing";
+    my @params = $self->member_list_parm('LoadBalancerNames',\%args);
+    my @tag_descs = $self->elb_call('DescribeTags',@params);
+    my %tags;
+    foreach my $desc (@tag_descs) {
+        $tags{$desc->LoadBalancerName} = $desc->Tags;
+    }
+    return wantarray ? %tags : \%tags;
+}
+
+=head2 $success = $ec2->remove_load_balancer_tags(-load_balancer_names => $name, -tags => [ name1,[name2,name3,...] ])
+
+=head2 $success = $ec2->remove_load_balancer_tags(-load_balancer_names => $name, -tags => $tag)
+
+=cut
+
+sub remove_load_balancer_tags {
+    my $self = shift;
+    my %args = $self->args('-load_balancer_names',@_);
+    $args{'-load_balancer_names'} ||= $args{-lb_name};
+    $args{'-load_balancer_names'} ||= $args{-lb_names};
+    $args{'-load_balancer_names'} ||= $args{-load_balancer_name};
+    $args{'-load_balancer_names'} ||
+        croak "remove_load_balancer_tags(): -load_balancer_names argument missing";
+    $args{-tags} ||
+        croak "remove_load_balancer_tags(): -tags argument missing";
+    my @params = $self->member_list_parm('LoadBalancerNames',\%args);
+    my $tags = $args{-tags};
+    my @tags = ref $tags eq 'ARRAY' ? @$tags : ($tags);
+    my @taglist;
+    push @taglist, { Key => $_ } foreach @tags;
+    $args{-tags} = \@taglist;
+    push @params, $self->member_hash_parms('Tags',\%args);
+    return $self->elb_call('RemoveTags',@params);
+}
+
+=head2 $attrs = $ec2->describe_load_balancer_attributes(-load_balancer_name => $name)
+
+Returns detailed information about all of the attributes associated with the
+specified load balancer.
+
+Arguments:
+
+    -load_balancer_name     Name of the ELB to return information on. 
+
+Returns a L<VM::EC2::ELB::Attributes> object.
+
+=cut
+
+sub describe_load_balancer_attributes {
+    my $self = shift;
+    my %args = $self->args('-load_balancer_name',@_);
+    $args{'-load_balancer_name'} ||= $args{-lb_name};
+    $args{'-load_balancer_name'} ||= $args{-lb_names};
+    $args{'-load_balancer_name'} ||= $args{-load_balancer_names};
+    $args{'-load_balancer_name'} ||
+        croak "describe_load_balancer_attributes(): -load_balancer_name argument missing";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    return $self->elb_call('DescribeLoadBalancerAttributes',@params);
+}
+
+=head2 $attr = $ec2->modify_load_balancer_attributes(%args)
+
+Modifies the attributes of a specified load balancer.
+
+Arguments:
+
+ -load_balancer_name        Name of the ELB to change attributes on. (Required)
+
+One or more of the following arguments are required:
+
+ -access_log                A hashref of attribute values for AccessLog
+                            ex: -access_log => { Enabled => 'false' }
+
+ -connection_draining       A hashref of attribute values for ConnectionDraining
+                            ex: -connection_draining => { Enabled => 'false' }
+
+ -connection_settings       A hashref of attribute values for ConnectionSettings
+                            ex: -connection_settings => { IdleTimeout => 30 }
+
+ -cross_zone_load_balancing A hashref of attribute values for
+                            CrossZoneLoadBalancing.  ex:
+                            -cross_zone_load_balancing => { Enabled => 'true' }
+
+Returns a L<VM::EC2::ELB::Attributes> object.
+
+=cut
+
+sub modify_load_balancer_attributes {
+    my $self = shift;
+    my %args = $self->args('-load_balancer_name',@_);
+    $args{'-load_balancer_name'} ||= $args{-lb_name};
+    $args{'-load_balancer_name'} ||= $args{-lb_names};
+    $args{'-load_balancer_name'} ||= $args{-load_balancer_names};
+    $args{'-load_balancer_name'} or
+        croak "modify_load_balancer_attributes(): -load_balancer_name argument missing";
+    ($args{-access_log} || $args{-connection_draining} ||
+     $args{-connection_settings} || $args{-cross_zone_load_balancing}) or
+        croak "modify_load_balancer_attributes(): missing attribute parameter";
+    my @params = $self->single_parm('LoadBalancerName',\%args);
+    push @params, $self->_elb_attr_parms(\%args);
+    return $self->elb_call('ModifyLoadBalancerAttributes',@params);
+}
+
+# internal method for building ELB attribute parameters
+sub _elb_attr_parms {
+    my $self = shift;
+    my $args = shift or return;
+    my @params;
+
+    foreach my $attr (qw/AccessLog ConnectionDraining ConnectionSettings CrossZoneLoadBalancing/) {
+        my ($parm,$pair) = $self->single_parm($attr,$args);
+        if ($parm) {
+            unless (ref $pair eq 'HASH') {
+                croak "Value for " . $self->canonicalize($attr) . " must be hashref";
+            }
+            foreach my $setting (keys %$pair) {
+		    push @params, ("LoadBalancerAttributes.$parm.$setting" => $pair->{$setting});
+            }
+        }
+    }
+    return @params;
+}
 
 =head2 @lbs = $ec2->describe_load_balancers(-load_balancer_name=>\@names)
 
@@ -144,7 +343,7 @@ sub delete_load_balancer {
                                                    -timeout             => $secs,
                                                    -unhealthy_threshold => $cnt)
 
-Define an application healthcheck for the instances.
+Defines an application healthcheck for the instances.
 
 All Parameters are required.
 
@@ -311,6 +510,10 @@ Optional arguments:
                            ELB.  String or arrayref.  REQUIRED if availability
                            zones are not specified above.
 
+    -tags                  A list of tags to assign to the load balancer.
+                           Hashref of tag key/value pairs.
+                           ex: { Name => Value, Name => Value, ... }
+
 Argument aliases:
 
     -zones                 Alias for -availability_zones
@@ -337,6 +540,7 @@ sub create_load_balancer {
     push @params, $self->single_parm('Scheme',\%args);
     push @params, $self->member_list_parm('SecurityGroups',\%args);
     push @params, $self->member_list_parm('Subnets',\%args);
+    push @params, $self->member_key_value_parameters('Tags','Key','Value',\%args);
     return unless $self->elb_call('CreateLoadBalancer',@params);
     return eval {
             my $elb;
