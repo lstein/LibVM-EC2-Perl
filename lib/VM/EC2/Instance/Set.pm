@@ -69,7 +69,7 @@ sub instances {
     my $owner_id       = $p->{ownerId};
     my $requester_id   = $p->{requesterId};
     my @groups         = map {VM::EC2::Group->new($_,$self->aws,
-							$self->xmlns,$self->requestId)} @{$p->{groupSet}{item}};
+						     $self->xmlns,$self->requestId)} @{$p->{groupSet}{item}};
 
     my $instances = $p->{instancesSet}{item};
     return map {VM::EC2::Instance->new(

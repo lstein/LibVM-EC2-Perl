@@ -2,7 +2,7 @@ package VM::EC2;
 
 =head1 NAME
 
-VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
+VM::EC2 - Control the Amazon EC2 and Open Stack Clouds
 
 =head1 SYNOPSIS
 
@@ -139,8 +139,8 @@ This is an interface to the 2014-05-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
-mechanism for the API. This library will also support the Eucalyptus
-open source cloud (http://open.eucalyptus.com).
+mechanism for the API. This library will also support the Open Stack
+open source cloud (http://www.openstack.org/).
 
 The main interface is the VM::EC2 object, which provides methods for
 interrogating the Amazon EC2, launching instances, and managing
@@ -566,9 +566,10 @@ use strict;
 
 use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
+eval {use AWS::Signature4}; # optional
 
 use MIME::Base64 qw(encode_base64 decode_base64);
-use Digest::SHA qw(hmac_sha256 sha1_hex);
+use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
 use POSIX 'strftime';
 use URI;
 use URI::Escape;
@@ -580,7 +581,7 @@ use VM::EC2::Error;
 use Carp 'croak','carp';
 use JSON;
 
-our $VERSION = '1.25';
+our $VERSION = '1.26';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -697,7 +698,7 @@ created. See
 http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html
 and L</AWS SECURITY TOKENS>.
 
-To use a Eucalyptus cloud, please provide the appropriate endpoint
+To use an Open Stack cloud, please provide the appropriate endpoint
 URL.
 
 By default, when the Amazon API reports an error, such as attempting
@@ -758,6 +759,13 @@ sub new {
     }
 
     return $obj;
+}
+
+sub _region {
+    my $self = shift;
+    my $endpoint = $self->endpoint || return 'us-east-1';
+    my ($region) = $endpoint =~ /([^.]+)\.amazonaws\.com/;
+    return $region || 'us-east-1';
 }
 
 =head2 $access_key = $ec2->access_key([$new_access_key])
@@ -1751,44 +1759,95 @@ sub _call_sync {
 sub _call_async {
     my $self  = shift;
     my ($action,@param) = @_;
-    my $post  = $self->_signature(Action=>$action,@param);
-    my $u     = URI->new($self->endpoint);
-    $u->query_form(@$post);
-    $self->async_post($action,$self->endpoint,$u->query);
+
+    # called if AWS::Signature4 NOT present; use built-in method
+    unless (AWS::Signature4->can('new')) {
+	my ($action,@param) = @_;
+	my $post  = $self->_signature(Action=>$action,@param);
+	my $u     = URI->new($self->endpoint);
+	$u->query_form(@$post);
+	return $self->async_post($action,POST($self->endpoint,Content=>$u->query));
+    }
+
+
+    # called if AWS::Signature4 IS present; use external module
+    my $request = POST($self->endpoint,
+		       'content-type'=>'application/x-www-form-urlencoded',
+		       Content => [
+			   Action  => $action,
+			   Version => $self->version,
+			   @param
+		       ]);
+    my $access_key = $self->access_key;
+    my $secret_key = $self->secret;
+    my $host       = URI->new($self->endpoint)->host;
+    $request->header('x-amz-security-token'=>$self->security_token) if $self->security_token;
+    $request->header('user-agent' => 'VM::EC2-perl');
+    $request->header('action'     => $action);  # maybe not necessary, but docs say it is!
+    $request->header('host'       => $host);
+    
+    AWS::Signature4->new(-access_key=>$access_key,
+			 -secret_key=>$secret_key)->sign($request);
+    $self->async_post($action,$request);
 }
 
 sub async_post {
     my $self = shift;
-    my ($action,$endpoint,$query) = @_;
+    $self->async_request('POST',@_);
+}
+
+sub async_get {
+    my $self = shift;
+    $self->async_request('GET',@_);
+}
+
+sub async_put {
+    my $self = shift;
+    $self->async_request('PUT',@_);
+}
+
+sub async_delete {
+    my $self = shift;
+    $self->async_request('DELETE',@_);
+}
+
+sub async_request {
+    my $self = shift;
+    my ($method,$action,$request) = @_;
+
+    my @headers;
+    $request->headers->scan(sub {push @headers,@_});
 
     my $cv    = $self->condvar;
     my $callback = sub {
 	my $timer = shift;
-	http_post($endpoint,
-		  $query,
-		  headers => {
-		      'Content-Type' => 'application/x-www-form-urlencoded',
-		      'User-Agent'   => 'VM::EC2-perl',
-		  },
-		  sub {
-		      my ($body,$hdr) = @_;
-		      if ($hdr->{Status} !~ /^2/) { # an error
-			  if ($body =~ /RequestLimitExceeded/) {
-			      warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
-			      $timer->retry();
-			      return;
-			  } else {
-			      $self->async_send_error($action,$hdr,$body,$cv);
-			      $timer->success();
-			      return;
-			  }
-		      } else { # success
-			  $self->error(undef);
-			  my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
-			  $cv->send(@obj);
-			  $timer->success();
-		      }
-		  })
+	http_request(
+	    $method => $request->uri,
+	    body    => $request->content,
+	    headers => {
+		TE      => undef,
+		Referer => undef,
+		@headers,
+	    },
+	    sub {
+		my ($body,$hdr) = @_;
+		if ($hdr->{Status} !~ /^2/) { # an error
+		    if ($body =~ /RequestLimitExceeded/) {
+			warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
+			$timer->retry();
+			return;
+		    } else {
+			$self->async_send_error($action,$hdr,$body,$cv);
+			$timer->success();
+			return;
+		    }
+		} else { # success
+		    $self->error(undef);
+		    my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
+		    $cv->send(@obj);
+		    $timer->success();
+		}
+	    })
     };
     RetryTimer->new(on_retry       => $callback,
 		    interval       => 1,

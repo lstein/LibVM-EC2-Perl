@@ -25,6 +25,8 @@ VM::EC2::Dispatch->register(
     ResetSnapshotAttribute  => 'boolean',
     );
 
+my $VEP = 'VM::EC2::ParmParser';
+
 =head1 NAME
 
 VM::EC2::REST::ebs - Modules for EC2 EBS volumes
@@ -81,14 +83,16 @@ http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-
 
 sub describe_volumes {
     my $self = shift;
-    my %args = $self->args(-volume_id=>@_);
-    my @params;
-    push @params,$self->list_parm('VolumeId',\%args);
-    push @params,$self->filter_parm(\%args);
+    my %args = $VEP->args(-volume_id,@_);
+    my @params = $VEP->format_parms(\%args,
+				    {
+					list_parm   => 'VolumeId',
+					filter_parm => 'Filter'
+				    });
     return $self->call('DescribeVolumes',@params);
 }
 
-=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size,-volume_type=>$type,-iops=>$iops)
+=head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size,-volume_type=>$type,-iops=>$iops,-encrypted=>$boolean)
 
 Create a volume in the specified availability zone and return
 information about it.
@@ -130,22 +134,21 @@ The returned object is a VM::EC2::Volume object.
 sub create_volume {
     my $self = shift;
     my %args = @_;
-    my $zone = $args{-availability_zone} || $args{-zone} or croak "-availability_zone argument is required";
-    my $snap = $args{-snapshot_id}       || $args{-snapshot};
-    my $size = $args{-size};
-    $snap || $size or croak "One or both of -snapshot_id or -size are required";
+
+    $args{-availability_zone} ||= $args{-zone} or croak "-availability_zone argument is required";
+    $args{-snapshot_id}       ||= $args{-snapshot};
+    $args{-snapshot_id} || $args{-size} or croak "One or both of -snapshot_id or -size are required";
     if (exists $args{-volume_type} && $args{-volume_type} eq 'io1') {
         $args{-iops} or croak "Argument -iops required when -volume_type is 'io1'";
     }
     elsif ($args{-iops}) {
         croak "Argument -iops cannot be used when volume type is 'standard'";
     }
-    my @params = (AvailabilityZone => $zone);
-    push @params,(SnapshotId   => $snap) if $snap;
-    push @params,(Size => $size)         if $size;
-    push @params,$self->single_parm('VolumeType',\%args);
-    push @params,$self->single_parm('Iops',\%args);
-    push @params,$self->boolean_parm('Encrypted',\%args);
+    my @params = $VEP->format_parms(\%args,
+				    {
+					single_parm  => [qw(AvailabilityZone SnapshotId Size VolumeType Iops)],
+					boolean_parm => 'Encrypted'
+				    });
     return $self->call('CreateVolume',@params);
 }
 
@@ -159,8 +162,12 @@ state for some time after this call completes.
 
 sub delete_volume {
     my $self = shift;
-    my %args  = $self->args(-volume_id => @_);
-    my @param = $self->single_parm(VolumeId=>\%args);
+    my %args  = $VEP->args(-volume_id => @_);
+    my @param = $VEP->format_parms(\%args,
+				   {
+				       single_parm => 'VolumeId'
+				   });
+	
     return $self->call('DeleteVolume',@param);
 }
 
@@ -204,9 +211,10 @@ sub attach_volume {
     }
     $args{-volume_id} && $args{-instance_id} && $args{-device} or
 	croak "-volume_id, -instance_id and -device arguments must all be specified";
-    my @param = $self->single_parm(VolumeId=>\%args);
-    push @param,$self->single_parm(InstanceId=>\%args);
-    push @param,$self->single_parm(Device=>\%args);
+    my @param = $VEP->format_parms(\%args,
+				   {
+				       single_parm => [qw(VolumeId InstanceId Device)]
+				   });
     return $self->call('AttachVolume',@param);
 }
 
@@ -244,11 +252,12 @@ Or more simply:
 
 sub detach_volume {
     my $self = shift;
-    my %args = $self->args(-volume_id => @_);
-    my @param = $self->single_parm(VolumeId=>\%args);
-    push @param,$self->single_parm(InstanceId=>\%args);
-    push @param,$self->single_parm(Device=>\%args);
-    push @param,$self->single_parm(Force=>\%args);
+    my %args = $VEP->args(-volume_id => @_);
+    my @param = $VEP->format_parms(\%args,
+				   {
+				       single_parm  => [qw(VolumeId InstanceId Device)],
+				       boolean_parm => 'Force'
+				   });
     return $self->call('DetachVolume',@param);
 }
 
@@ -337,11 +346,13 @@ sub describe_volume_status {
     }
     
     else {
-	my %args = $self->args('-volume_id',@_);
-	push @parms,$self->list_parm('VolumeId',\%args);
-	push @parms,$self->filter_parm(\%args);
-	push @parms,$self->single_parm('MaxResults',\%args);
-	
+	my %args = $VEP->args('-volume_id',@_);
+	my @parms = $VEP->format_parms(\%args,
+				       {
+					   list_parm   => 'VolumeId',
+					   filter_parm => 'Filter',
+					   single_parm => 'MaxResults'
+				       });
 	if ($args{-max_results}) {
 	    $self->{volume_status_token} = 'xyzzy'; # dummy value
 	    $self->{volume_status_args} = \@parms;
@@ -450,13 +461,13 @@ http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-
 
 sub describe_snapshots {
     my $self = shift;
-    my %args = $self->args('-snapshot_id',@_);
+    my %args = $VEP->args('-snapshot_id',@_);
 
-    my @params;
-    push @params,$self->list_parm('SnapshotId',\%args);
-    push @params,$self->list_parm('Owner',\%args);
-    push @params,$self->list_parm('RestorableBy',\%args);
-    push @params,$self->filter_parm(\%args);
+    my @params = $VEP->format_parms(\%args,
+				    {
+					list_parm   => [qw(SnapshotId Owner RestorableBy)],
+					filter_parm => 'Filter'
+				    });
     return $self->call('DescribeSnapshots',@params);
 }
 
@@ -578,9 +589,11 @@ VM::EC2::Volume interface:
 
 sub create_snapshot {
     my $self = shift;
-    my %args = $self->args('-volume_id',@_);
-    my @params   = $self->single_parm('VolumeId',\%args);
-    push @params,$self->single_parm('Description',\%args);
+    my %args = $VEP->args('-volume_id',@_);
+    my @params  = $VEP->format_parms(\%args,
+				    {
+					single_parm => ['VolumeId','Description']
+				    });
     return $self->call('CreateSnapshot',@params);
 }
 
@@ -593,8 +606,11 @@ successful.
 
 sub delete_snapshot {
     my $self = shift;
-    my %args = $self->args('-snapshot_id',@_);
-    my @params   = $self->single_parm('SnapshotId',\%args);
+    my %args = $VEP->args('-snapshot_id',@_);
+    my @params   = $VEP->format_parms(\%args,
+				     {
+					 single_parm => 'SnapshotId'
+				     });
     return $self->call('DeleteSnapshot',@params);
 }
 
@@ -634,10 +650,10 @@ sub copy_snapshot {
     $args{-source_snapshot_id} ||= $args{-snapshot_id};
     $args{-source_region} or croak "copy_snapshot(): -source_region argument required";
     $args{-source_snapshot_id} or croak "copy_snapshot(): -source_snapshot_id argument required";
-    my @params  = $self->single_parm('SourceRegion',\%args);
-    push @params, $self->single_parm('SourceSnapshotId',\%args);
-    push @params, $self->single_parm('Description',\%args);
-    #push @params, $self->single_parm('DestinationRegion',\%args);
+    my @params  = $VEP->format_parms(\%args,
+				     {
+					 single_parm => [qw(SourceRegion SourceSnapshotId Description)]
+				     });
     my $snap_id = $self->call('CopySnapshot',@params) or return;
     return eval {
             my $snapshot;

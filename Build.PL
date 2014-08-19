@@ -21,6 +21,10 @@ my $build = Module::Build->new(
       'JSON'         => 0,
       'AnyEvent'     => '7.04',
       'AnyEvent::HTTP' => '2.15',
+      'AnyEvent::CacheDNS' => '0.08',
+    },
+    recommends => {
+	'AWS::Signature4' => '1.00',
     },
     build_class        => 'Module::Build',
     );
