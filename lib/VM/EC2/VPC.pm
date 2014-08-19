@@ -47,7 +47,7 @@ In addition, this object supports the following convenience methods:
     internet_gateways() -- Return the list of internet gateways attached to
                            this VPC as a list of VM::EC2::VPC::InternetGateway.
 
-    create_subnet($cidr_block)
+    create_subnet($cidr_block, $options)
                         -- Create a subnet with the indicated CIDR block and
                            return the VM::EC2::VPC::Subnet object.
 
@@ -155,8 +155,12 @@ sub detach_internet_gateway {
 sub create_subnet {
     my $self = shift;
     my $cidr_block = shift or croak "usage: create_subnet(\$cidr_block)";
-    my $result = $self->aws->create_subnet(-vpc_id=>$self->vpcId,
-					   -cidr_block=>$cidr_block);
+    my $options = shift || {};
+    my %params = (
+	(-vpc_id=>$self->vpcId, -cidr_block=>$cidr_block),
+	map { $_=>$options->{$_} } keys %{$options},
+    );
+    my $result = $self->aws->create_subnet(%params);
     $self->refresh if $result;
     return $result;
 }
