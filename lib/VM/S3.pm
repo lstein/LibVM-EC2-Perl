@@ -11,14 +11,15 @@ VM::EC2::Dispatch->register(
     ''   => sub {VM::EC2::Dispatch::load_module('VM::S3::BucketList');
 		 my $bl =  VM::S3::BucketList->new(@_);
 		 return $bl ? $bl->buckets : undef
-    }
+    },
+    'get bucket' => 'VM::S3::Generic',
     );
 
 sub get_service {
-    my $self   = shift;
-    my $action = shift || '';
-
-    local $self->{endpoint} = 'https://s3.amazonaws.com';
+    my $self     = shift;
+    my $action   = shift || '';
+    my $endpoint = shift || 'https://s3.amazonaws.com';
+    local $self->{endpoint} = $endpoint;
     local $self->{version}  = '2006-03-01';
     my $request = GET($self->endpoint.'/',
 		      Host=>URI->new($self->endpoint)->host,
@@ -36,17 +37,13 @@ sub get_service {
 
 sub list_buckets {
     my $self = shift;
-    return $self->get_service('');
+    return $self->get_service();
 }
 
 sub get_bucket {
     my $self   = shift;
     my $bucket = shift;
-    my $action = shift;
-    local $self->{endpoint} = "https://$bucket.s3.amazonaws.com";
-    local $self->{version}  = '2006-03-01';
-    my $request = GET($self->endpoint);
-    $self->async_get($action,$request);
+    $self->get_service('get bucket',"https://$bucket.s3.amazonaws.com");
 }
 
 1;
