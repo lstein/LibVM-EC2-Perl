@@ -75,9 +75,12 @@ tag:key, vpc-id
 
 sub describe_network_acls {
     my $self = shift;
-    my %args = $self->args('-network_acl_id',@_);
-    my @params = $self->list_parm('NetworkAclId',\%args);
-    push @params,$self->filter_parm(\%args);
+    my %args = $VEP->args(-network_acl_id,@_);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        list_parm   => 'NetworkAclId',
+                                        filter_parm => 'Filter',
+                                    });
     return $self->call('DescribeNetworkAcls',@params);
 }
 
