@@ -55,6 +55,7 @@ lib/VM/EC2/ELB/HealthCheck.pm
 lib/VM/EC2/ELB/InstanceState.pm
 lib/VM/EC2/ELB/Listener.pm
 lib/VM/EC2/ELB/ListenerDescription.pm
+lib/VM/EC2/ELB/ParmParser.pm
 lib/VM/EC2/ELB/Policies.pm
 lib/VM/EC2/ELB/Policies/AppCookieStickinessPolicy.pm
 lib/VM/EC2/ELB/Policies/LBCookieStickinessPolicy.pm

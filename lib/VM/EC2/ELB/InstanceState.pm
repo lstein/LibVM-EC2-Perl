@@ -70,7 +70,12 @@ sub valid_fields {
 }
 
 use overload
-    '""'     => sub { shift->State },
+    '""'     => sub {
+                        my $self = shift;
+                        return $self->InstanceId . ': ' .
+                               $self->State . ' (Reason: ' .
+                               $self->ReasonCode . ')';
+                    },
     fallback => 1;
 
 sub instance {

@@ -71,7 +71,7 @@ use overload
         return "Target: " . $self->Target . "\nInterval: " . $self->Interval .
            "\nHealthyThreshold: " . $self->HealthyThreshold .
            "\nUnhealthyThreshold: " . $self->UnhealthyThreshold .
-           "\nTimeout: " . $self->Timeout . "\n"},
+           "\nTimeout: " . $self->Timeout},
     fallback => 1;
 
 sub valid_fields {

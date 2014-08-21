@@ -3,6 +3,7 @@ package VM::EC2::REST::elastic_load_balancer;
 use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
+require VM::EC2::ELB::ParmParser;
 
 VM::EC2::Dispatch->register(
     AddTags                           => sub { exists shift->{AddTagsResult} },
@@ -45,6 +46,8 @@ sub elb_call {
     local $self->{version}  = '2012-06-01';
     $self->call(@_);
 }
+
+my $VEP = 'VM::EC2::ELB::ParmParser';
 
 =head1 NAME VM::EC2::REST::elastic_load_balancer
 
@@ -122,8 +125,11 @@ sub add_load_balancer_tags {
     $args{'-load_balancer_names'} ||= $args{-load_balancer_name};
     $args{'-load_balancer_names'} ||
         croak "describe_load_balancer_tags(): -load_balancer_names argument missing";
-    my @params = $self->member_list_parm('LoadBalancerNames',\%args);
-    push @params, $self->member_key_value_parameters('Tags','Key','Value',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        member_list_parm      => 'LoadBalancerNames',
+                                        member_key_value_parm => 'Tags',
+                                    });
     return $self->elb_call('AddTags',@params);
 }
 
@@ -157,7 +163,10 @@ sub describe_load_balancer_tags {
     $args{'-load_balancer_names'} ||= $args{-load_balancer_name};
     $args{'-load_balancer_names'} ||
         croak "describe_load_balancer_tags(): -load_balancer_names argument missing";
-    my @params = $self->member_list_parm('LoadBalancerNames',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        member_list_parm => 'LoadBalancerNames',
+                                    });
     my @tag_descs = $self->elb_call('DescribeTags',@params);
     my %tags;
     foreach my $desc (@tag_descs) {
@@ -182,13 +191,16 @@ sub remove_load_balancer_tags {
         croak "remove_load_balancer_tags(): -load_balancer_names argument missing";
     $args{-tags} ||
         croak "remove_load_balancer_tags(): -tags argument missing";
-    my @params = $self->member_list_parm('LoadBalancerNames',\%args);
     my $tags = $args{-tags};
     my @tags = ref $tags eq 'ARRAY' ? @$tags : ($tags);
     my @taglist;
     push @taglist, { Key => $_ } foreach @tags;
     $args{-tags} = \@taglist;
-    push @params, $self->member_hash_parms('Tags',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        member_list_parm => 'LoadBalancerNames',
+                                        member_hash_parm => 'Tags',
+                                    });
     return $self->elb_call('RemoveTags',@params);
 }
 
@@ -213,7 +225,10 @@ sub describe_load_balancer_attributes {
     $args{'-load_balancer_name'} ||= $args{-load_balancer_names};
     $args{'-load_balancer_name'} ||
         croak "describe_load_balancer_attributes(): -load_balancer_name argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => 'LoadBalancerName',
+                                    });
     return $self->elb_call('DescribeLoadBalancerAttributes',@params);
 }
 
@@ -255,29 +270,14 @@ sub modify_load_balancer_attributes {
     ($args{-access_log} || $args{-connection_draining} ||
      $args{-connection_settings} || $args{-cross_zone_load_balancing}) or
         croak "modify_load_balancer_attributes(): missing attribute parameter";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->_elb_attr_parms(\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm   => 'LoadBalancerName',
+                                        elb_attr_parm => [qw(AccessLog ConnectionDraining
+                                                             ConnectionSettings
+                                                             CrossZoneLoadBalancing)],
+                                    });
     return $self->elb_call('ModifyLoadBalancerAttributes',@params);
-}
-
-# internal method for building ELB attribute parameters
-sub _elb_attr_parms {
-    my $self = shift;
-    my $args = shift or return;
-    my @params;
-
-    foreach my $attr (qw/AccessLog ConnectionDraining ConnectionSettings CrossZoneLoadBalancing/) {
-        my ($parm,$pair) = $self->single_parm($attr,$args);
-        if ($parm) {
-            unless (ref $pair eq 'HASH') {
-                croak "Value for " . $self->canonicalize($attr) . " must be hashref";
-            }
-            foreach my $setting (keys %$pair) {
-		    push @params, ("LoadBalancerAttributes.$parm.$setting" => $pair->{$setting});
-            }
-        }
-    }
-    return @params;
 }
 
 =head2 @lbs = $ec2->describe_load_balancers(-load_balancer_name=>\@names)
@@ -304,8 +304,10 @@ sub describe_load_balancers {
     $args{'-load_balancer_names'} ||= $args{-lb_name};
     $args{'-load_balancer_names'} ||= $args{-lb_names};
     $args{'-load_balancer_names'} ||= $args{-load_balancer_name};
-    my @params = $self->member_list_parm('LoadBalancerNames',\%args);
-    push @params,$self->filter_parm(\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        member_list_parm => 'LoadBalancerNames',
+                                    });
     return $self->elb_call('DescribeLoadBalancers',@params);
 }
 
@@ -332,7 +334,10 @@ sub delete_load_balancer {
     $args{-load_balancer_name} ||= $args{-lb_name};
     $args{-load_balancer_name} or
         croak "delete_load_balancer(): -load_balancer_name argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => 'LoadBalancerName',
+                                    });
     return $self->elb_call('DeleteLoadBalancer',@params);
 }
 
@@ -382,9 +387,14 @@ sub configure_health_check {
     $args{-healthy_threshold} && $args{-interval} &&
         $args{-target} && $args{-timeout} && $args{-unhealthy_threshold} or
         croak "configure_health_check(): healthcheck argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, map {$self->prefix_parm('HealthCheck',$_,\%args)}
-        qw(HealthyThreshold Interval Target Timeout UnhealthyThreshold);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm               => 'LoadBalancerName',
+                                        'HealthCheck.single_parm' =>
+                                            [ qw(HealthyThreshold Interval Target
+                                                 Timeout UnhealthyThreshold)
+                                            ],
+                                    });
     return $self->elb_call('ConfigureHealthCheck',@params);
 }
 
@@ -419,8 +429,10 @@ sub create_app_cookie_stickiness_policy {
         croak "create_app_cookie_stickiness_policy(): -load_balancer_name argument missing";
     $args{-cookie_name} && $args{-policy_name} or
         croak "create_app_cookie_stickiness_policy(): -cookie_name or -policy_name option missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, map {$self->single_parm($_,\%args)} qw(CookieName PolicyName);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(LoadBalancerName CookieName PolicyName)],
+                                    });
     return $self->elb_call('CreateAppCookieStickinessPolicy',@params);
 }
 
@@ -460,8 +472,10 @@ sub create_lb_cookie_stickiness_policy {
         croak "create_lb_cookie_stickiness_policy(): -load_balancer_name argument missing";
     $args{-cookie_expiration_period} && $args{-policy_name} or
         croak "create_lb_cookie_stickiness_policy(): -cookie_expiration_period or -policy_name option missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, map {$self->single_parm($_,\%args)} qw(CookieExpirationPeriod PolicyName);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(LoadBalancerName CookieExpirationPeriod PolicyName)],
+                                    });
     return $self->elb_call('CreateLBCookieStickinessPolicy',@params);
 }
 
@@ -534,13 +548,13 @@ sub create_load_balancer {
         croak "create_load_balancer(): -listeners option missing";
     $args{-availability_zones} || $args{-subnets} or
         croak "create_load_balancer(): -availability_zones option is required if subnets are not specified";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->_listener_parm($args{-listeners});
-    push @params, $self->member_list_parm('AvailabilityZones',\%args);
-    push @params, $self->single_parm('Scheme',\%args);
-    push @params, $self->member_list_parm('SecurityGroups',\%args);
-    push @params, $self->member_list_parm('Subnets',\%args);
-    push @params, $self->member_key_value_parameters('Tags','Key','Value',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm           => [qw(LoadBalancerName Scheme)],
+                                        member_list_parm      => [qw(AvailabilityZones SecurityGroups Subnets)],
+                                        elb_listeners_parm    => 'Listeners',
+                                        member_key_value_parm => 'Tags',
+                                    });
     return unless $self->elb_call('CreateLoadBalancer',@params);
     return eval {
             my $elb;
@@ -552,39 +566,6 @@ sub create_load_balancer {
     };
 }
 
-
-# Internal method for building ELB listener parameters
-sub _listener_parm {
-    my $self = shift;
-    my $l = shift;
-    my @param;
-
-    my $i = 1;
-    for my $lsnr (ref $l && ref $l eq 'ARRAY' ? @$l : $l) {
-        if (ref $lsnr && ref $lsnr eq 'HASH') {
-            push @param,("Listeners.member.$i.Protocol"=> $lsnr->{Protocol});
-            push @param,("Listeners.member.$i.LoadBalancerPort"=> $lsnr->{LoadBalancerPort});
-            push @param,("Listeners.member.$i.InstancePort"=> $lsnr->{InstancePort});
-            push @param,("Listeners.member.$i.InstanceProtocol"=> $lsnr->{InstanceProtocol})
-                if $lsnr->{InstanceProtocol};
-            push @param,("Listeners.member.$i.SSLCertificateId"=> $lsnr->{SSLCertificateId})
-                if $lsnr->{SSLCertificateId};
-            $i++;
-        } elsif (ref $lsnr && ref $lsnr eq 'VM::EC2::ELB::Listener') {
-            push @param,("Listeners.member.$i.Protocol"=> $lsnr->Protocol);
-            push @param,("Listeners.member.$i.LoadBalancerPort"=> $lsnr->LoadBalancerPort);
-            push @param,("Listeners.member.$i.InstancePort"=> $lsnr->InstancePort);
-            if (my $InstanceProtocol = $lsnr->InstanceProtocol) {
-                push @param,("Listeners.member.$i.InstanceProtocol"=> $InstanceProtocol)
-            }
-            if (my $SSLCertificateId = $lsnr->SSLCertificateId) {
-                push @param,("Listeners.member.$i.SSLCertificateId"=> $SSLCertificateId)
-            }
-            $i++;
-        }
-    }
-    return @param;
-}
 
 =head2 $success = $ec2->create_load_balancer_listeners(-load_balancer_name => $name,
                                                        -listeners          => \@listeners)
@@ -620,7 +601,10 @@ sub create_load_balancer_listeners {
     $args{-listeners} or
         croak "create_load_balancer_listeners(): -listeners option missing";
 
-    my @params = $self->single_parm('LoadBalancerName',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => 'LoadBalancerName',
+                                    });
     push @params, $self->_listener_parm($args{-listeners});
     return $self->elb_call('CreateLoadBalancerListeners',@params);
 }
@@ -654,8 +638,11 @@ sub delete_load_balancer_listeners {
         croak "delete_load_balancer_listeners(): -load_balancer_name argument missing";
     $args{-load_balancer_ports} or
         croak "delete_load_balancer_listeners(): -load_balancer_ports argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->member_list_parm('LoadBalancerPorts',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'LoadBalancerName',
+                                        member_list_parm => 'LoadBalancerPorts',
+                                    });
     return $self->elb_call('DeleteLoadBalancerListeners',@params);
 }
 
@@ -692,8 +679,11 @@ sub disable_availability_zones_for_load_balancer {
         croak "disable_availability_zones_for_load_balancer(): -load_balancer_name argument missing";
     $args{-availability_zones} or
         croak "disable_availability_zones_for_load_balancer(): -availability_zones argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->member_list_parm('AvailabilityZones',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'LoadBalancerName',
+                                        member_list_parm => 'AvailabilityZones',
+                                    });
     my @zones = $self->elb_call('DisableAvailabilityZonesForLoadBalancer',@params) or return;
     return $self->describe_availability_zones(@zones);
 }
@@ -728,8 +718,11 @@ sub enable_availability_zones_for_load_balancer {
         croak "enable_availability_zones_for_load_balancer(): -load_balancer_name argument missing";
     $args{-availability_zones} or
         croak "enable_availability_zones_for_load_balancer(): -availability_zones argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->member_list_parm('AvailabilityZones',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'LoadBalancerName',
+                                        member_list_parm => 'AvailabilityZones',
+                                    });
     my @zones = $self->elb_call('EnableAvailabilityZonesForLoadBalancer',@params) or return;
     return $self->describe_availability_zones(@zones);
 }
@@ -763,8 +756,11 @@ sub register_instances_with_load_balancer {
         croak "register_instances_with_load_balancer(): -load_balancer_name argument missing";
     $args{-instances} or
         croak "register_instances_with_load_balancer(): -instances argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->_perm_parm('Instances','member','InstanceId',$args{-instances});
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm          => 'LoadBalancerName',
+                                        elb_instance_id_list => 'Instances',
+                                    });
     my @i = $self->elb_call('RegisterInstancesWithLoadBalancer',@params) or return;
     return $self->describe_instances(@i);
 }
@@ -797,8 +793,11 @@ sub deregister_instances_from_load_balancer {
         croak "deregister_instances_from_load_balancer(): -load_balancer_name argument missing";
     $args{-instances} or
         croak "deregister_instances_from_load_balancer(): -instances argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->_perm_parm('Instances','member','InstanceId',$args{-instances});
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm          => 'LoadBalancerName',
+                                        elb_instance_id_list => 'Instances',
+                                    });
     my @i = $self->elb_call('DeregisterInstancesFromLoadBalancer',@params) or return;
     return $self->describe_instances(@i);
 }
@@ -845,8 +844,10 @@ sub set_load_balancer_listener_ssl_certificate {
         croak "set_load_balancer_listener_ssl_certificate(): -load_balancer_port argument missing";
     $args{-ssl_certificate_id} or
         croak "set_load_balancer_listener_ssl_certificate(): -ssl_certificate_id argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->single_parm('LoadBalancerPort',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(LoadBalancerName LoadBalancerPort)],
+                                    });
     push @params,('SSLCertificateId'=>$args{-ssl_certificate_id}) if $args{-ssl_certificate_id};
     return $self->elb_call('SetLoadBalancerListenerSSLCertificate',@params);
 }
@@ -880,8 +881,11 @@ sub describe_instance_health {
     $args{-instances} ||= $args{-instance_id};
     $args{-load_balancer_name} or
         croak "describe_instance_health(): -load_balancer_name argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->_perm_parm('Instances','member','InstanceId',$args{-instances});
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm          => 'LoadBalancerName',
+                                        elb_instance_id_list => 'Instances',
+                                    });
     return $self->elb_call('DescribeInstanceHealth',@params);
 }
 
@@ -910,7 +914,9 @@ Required Arguments:
 
 Optional Arguments:
 
- -policy_attributes    Arrayref of hashes containing AttributeName and AttributeValue
+ -policy_attributes    or hashref containing AttributeName and AttributeValue
+                         or
+                       Arrayref of VM::EC2::ELB::PolicyAttribute object or single object
 
  -lb_name              Alias for -load_balancer_name
 
@@ -928,32 +934,14 @@ sub create_load_balancer_policy {
         croak "create_load_balancer_policy(): -policy_name argument missing";
     $args{-policy_type_name} or
         croak "create_load_balancer_policy(): -policy_type_name argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->single_parm('PolicyName',\%args);
-    push @params, $self->single_parm('PolicyTypeName',\%args);
-    push @params, $self->_policy_attr_parm($args{-policy_attributes});
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm              => [qw(LoadBalancerName
+                                                                        PolicyName
+                                                                        PolicyTypeName)],
+                                        elb_attr_name_value_parm => 'PolicyAttributes',
+                                    });
     return $self->elb_call('CreateLoadBalancerPolicy',@params);
-}
-
-# internal method for building policy attribute parameters
-sub _policy_attr_parm {
-    my $self = shift;
-    my $p = shift;
-    my @param;
-
-    my $i = 1;
-    for my $policy (ref $p && ref $p eq 'ARRAY' ? @$p : $p) {
-        if (ref $policy && ref $policy eq 'HASH') {
-            push @param,("PolicyAttributes.member.$i.AttributeName"=> $policy->{AttributeName});
-            push @param,("PolicyAttributes.member.$i.AttributeValue"=> $policy->{AttributeValue});
-            $i++;
-        } elsif (ref $policy && ref $policy eq 'VM::EC2::ELB::PolicyAttribute') {
-            push @param,("PolicyAttributes.member.$i.AttributeName"=> $policy->AttributeName);
-            push @param,("PolicyAttributes.member.$i.AttributeValue"=> $policy->AttributeValue);
-            $i++;
-        }
-    }
-    return @param;
 }
 
 =head2 $success = $ec2->delete_load_balancer_policy(-load_balancer_name => $name,
@@ -982,8 +970,10 @@ sub delete_load_balancer_policy {
         croak "delete_load_balancer_policy(): -load_balancer_name argument missing";
     $args{-policy_name} or
         croak "delete_load_balancer_policy(): -policy_name argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->single_parm('PolicyName',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(LoadBalancerName PolicyName)],
+                                    });
     return $self->elb_call('DeleteLoadBalancerPolicy',@params);
 }
 
@@ -1016,8 +1006,11 @@ sub describe_load_balancer_policies {
     $args{-policy_names} ||= $args{-policy_name};
     $args{-load_balancer_name} or
         croak "describe_load_balancer_policies(): -load_balancer_name argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->member_list_parm('PolicyNames',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'LoadBalancerName',
+                                        member_list_parm => 'PolicyNames',
+                                    });
     return $self->elb_call('DescribeLoadBalancerPolicies',@params);
 }
 
@@ -1045,8 +1038,15 @@ Returns an array of L<VM::EC2::ELB::PolicyTypeDescription> objects if successful
 sub describe_load_balancer_policy_types {
     my $self = shift;
     my %args = @_;
+    $args{-load_balancer_name} ||= $args{-lb_name};
     $args{-policy_type_names} ||= $args{-names};
-    my @params = $self->member_list_parm('PolicyTypeNames',\%args);
+    $args{-load_balancer_name} or
+        croak "describe_load_balancer_policies(): -load_balancer_name argument missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'LoadBalancerName',
+                                        member_list_parm => 'PolicyTypeNames',
+                                    });
     return $self->elb_call('DescribeLoadBalancerPolicyTypes',@params);
 }
 
@@ -1084,9 +1084,11 @@ sub set_load_balancer_policies_of_listener {
         croak "set_load_balancer_policies_of_listener(): -load_balancer_port argument missing";
     $args{-policy_names} or
         croak "set_load_balancer_policies_of_listener(): -policy_names argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->single_parm('LoadBalancerPort',\%args);
-    push @params, $self->member_list_parm('PolicyNames',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(LoadBalancerName LoadBalancerPort)],
+                                        member_list_parm => 'PolicyNames',
+                                    });
     return $self->elb_call('SetLoadBalancerPoliciesOfListener',@params);
 }
 
@@ -1117,8 +1119,11 @@ sub apply_security_groups_to_load_balancer {
         croak "apply_security_groups_to_load_balancer(): -load_balancer_name argument missing";
     $args{-security_groups} or
         croak "apply_security_groups_to_load_balancer(): -security_groups argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->member_list_parm('SecurityGroups',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'LoadBalancerName',
+                                        member_list_parm => 'SecurityGroups',
+                                    });
     my @g = $self->elb_call('ApplySecurityGroupsToLoadBalancer',@params) or return;
     return $self->describe_security_groups(@g);
 }
@@ -1148,8 +1153,11 @@ sub attach_load_balancer_to_subnets {
         croak "attach_load_balancer_to_subnets(): -load_balancer_name argument missing";
     $args{-subnets} or
         croak "attach_load_balancer_to_subnets(): -subnets argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->member_list_parm('Subnets',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'LoadBalancerName',
+                                        member_list_parm => 'Subnets',
+                                    });
     my @sn = $self->elb_call('AttachLoadBalancerToSubnets',@params) or return;
     return $self->describe_subnets(@sn);
 }
@@ -1179,8 +1187,11 @@ sub detach_load_balancer_from_subnets {
         croak "detach_load_balancer_from_subnets(): -load_balancer_name argument missing";
     $args{-subnets} or
         croak "detach_load_balancer_from_subnets(): -subnets argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->member_list_parm('Subnets',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'LoadBalancerName',
+                                        member_list_parm => 'Subnets',
+                                    });
     my @sn = $self->elb_call('DetachLoadBalancerFromSubnets',@params) or return;
     return $self->describe_subnets(@sn);
 }
@@ -1225,9 +1236,11 @@ sub set_load_balancer_policies_for_backend_server {
         croak "set_load_balancer_policies_for_backend_server(): -instance_port argument missing";
     $args{-policy_names} or
         croak "set_load_balancer_policies_for_backend_server(): -policy_names argument missing";
-    my @params = $self->single_parm('LoadBalancerName',\%args);
-    push @params, $self->single_parm('InstancePort',\%args);
-    push @params, $self->member_list_parm('PolicyNames',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(LoadBalancerName InstancePort)],
+                                        member_list_parm => 'PolicyNames',
+                                    });
     return $self->elb_call('SetLoadBalancerPoliciesForBackendServer',@params);
 }
 
@@ -1237,9 +1250,11 @@ L<VM::EC2>
 
 =head1 AUTHOR
 
+Lance Kinley E<lt>lkinley@loyaltymethods.com<gt>.
 Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
 
-Copyright (c) 2011 Ontario Institute for Cancer Research
+Copyright (c) 2012 Loyalty Methods, Inc.
+Copyright (c) 2012 Ontario Institute for Cancer Research
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
@@ -1251,5 +1266,3 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 
 1;
-
-
