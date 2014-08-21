@@ -19,7 +19,8 @@ sub owner {
 sub buckets {
     my $self = shift;
     my $ec2  = $self->ec2;
-    return map {VM::S3::Bucket->new($_,$ec2)} @{$self->SUPER::Buckets->{Bucket}};
+    my $owner = $self->owner;
+    return map {VM::S3::Bucket->new($_,$ec2,$owner)} @{$self->SUPER::Buckets->{Bucket}};
 }
 
 1;

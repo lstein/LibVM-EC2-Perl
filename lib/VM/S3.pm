@@ -8,10 +8,10 @@ use Digest::SHA 'sha256_hex','hmac_sha256','hmac_sha256_hex';
 use Carp 'croak';
 
 VM::EC2::Dispatch->register(
-#    ''   => sub {VM::EC2::Dispatch::load_module('AWS::S3::BucketList');
-#		 return AWS::S3::BucketList->new(@_);
-#    }
-    '' => 'VM::S3::BucketList',
+    ''   => sub {VM::EC2::Dispatch::load_module('VM::S3::BucketList');
+		 my $bl =  VM::S3::BucketList->new(@_);
+		 return $bl ? $bl->buckets : undef
+    }
     );
 
 sub get_service {

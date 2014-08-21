@@ -72,6 +72,11 @@ sub AUTOLOAD {
     my ($pack,$func_name) = $AUTOLOAD=~/(.+)::([^:]+)$/;
     return if $func_name eq 'DESTROY';
     my %fields = map {$_=>1} $self->valid_fields;
+
+    if ($fields{$func_name}) {
+	return $self->{data}{$func_name};
+    }
+
     my $mixed  = VM::EC2->uncanonicalize($func_name);# mixedCase
     my $flat   = VM::EC2->canonicalize($func_name);  # underscore_style
     $flat =~ s/^-//;
