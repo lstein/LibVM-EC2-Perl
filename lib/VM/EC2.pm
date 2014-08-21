@@ -1280,7 +1280,7 @@ sub canonicalize {
     $name    =~ s/DB/Db/g;
     $name    =~ s/AZ/Az/g;
 
-    while ($name =~ /\w[A-Z][^A-Z]/) {
+    while ($name =~ /[A-Z][^A-Z]/) {
         $name    =~ s/(?<!^)([A-Z]*[\d]*)\.?([A-Z])/\L$1_$2/g or last;
     }
     return '-'.lc $name;
