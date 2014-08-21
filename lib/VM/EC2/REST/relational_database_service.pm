@@ -67,6 +67,8 @@ sub rds_call {
     $self->call(@_);
 }
 
+my $VEP = 'VM::EC2::ParmParser';
+
 =head1 NAME VM::EC2::REST::relational_database_service
 
 =head1 SYNOPSIS
@@ -154,9 +156,10 @@ sub add_source_identifier_to_subscription {
     my %args = @_;
     $args{-source_identifier} && $args{-subscription_name} or
         croak "add_source_identifier_to_subscription(): -source_identifier and -subscription_name arguments required";
-    my @params;
-    push @params,$self->single_parm('SourceIdentifier',\%args);
-    push @params,$self->single_parm('SubscriptionName',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(SourceIdentifier SubscriptionName)],
+                                    });
     return $self->rds_call('AddSourceIdentifierToSubscription',@params);
 }
 
@@ -184,9 +187,11 @@ sub add_tags_to_resource {
     my %args = @_;
     $args{-tags} && $args{-resource_name} or
         croak "add_tags_to_resource(): -tags and -resource_name arguments required";
-    my @params;
-    push @params,$self->single_parm('ResourceName',\%args);
-    push @params,$self->member_list_parm('Tags',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => 'ResourceName',
+                                        member_list_parm => 'Tags',
+                                    });
     return $self->rds_call('AddTagsToResource',@params);
 }
 
@@ -225,15 +230,12 @@ sub authorize_db_security_group_ingress {
         croak "authorize_db_security_group_ingress(): -db_security_group_name and one of -cidrip, -ec2_security_group_id, -ec2_security_group_name arguments required";
     ($args{-ec2_security_group_id} || $args{-ec2_security_group_name}) && $args{-ec2_security_group_owner_id} or
         croak "authorize_db_security_group_ingress(): -ec2_security_group_owner_id required when -ec2_security_group_id or -ec2_security_group_name arguments specified";
-    $args{-DBSecurityGroupName} = $args{-db_security_group_name};
-    $args{-EC2SecurityGroupId} = $args{-ec2_security_group_id};
-    $args{-EC2SecurityGroupName} = $args{-ec2_security_group_name};
-    $args{-EC2SecurityGroupOwnerId} = $args{-ec2_security_group_owner_id};
-    $args{-CIDRIP} = $args{-cidrip};
-    my @params;
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(CIDRIP DBSecurityGroupName EC2SecurityGroupId
-                   EC2SecurityGroupName EC2SecurityGroupOwnerId);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(CIDRIP DBSecurityGroupName
+                                                           EC2SecurityGroupId EC2SecurityGroupName
+                                                           EC2SecurityGroupOwnerId)],
+                                    });
     return $self->rds_call('AuthorizeDBSecurityGroupIngress',@params);
 }
 
@@ -280,14 +282,16 @@ Returns a L<VM::EC2::DB::Snapshot> object.
 sub copy_db_snapshot {
     my $self = shift;
     my %args = @_;
-    $args{-cidrip} && $args{-ec2_security_group_id} or
+    $args{-source_db_snapshot_identifier} ||= $args{-source};
+    $args{-target_db_snapshot_identifier} ||= $args{-target};
+    $args{-source_db_snapshot_identifier} && $args{-target_db_snapshot_identifier} or
         croak "authorize_db_security_group_ingress(): -db_security_group_name and one of -cidrip, -ec2_security_group_id, -ec2_security_group_name arguments required";
-    $args{-SourceDBSnapshotIdentifier} = $args{-source_db_snapshot_identifier} || $args{-source};
-    $args{-TargetDBSnapshotIdentifier} = $args{-target_db_snapshot_identifier} || $args{-target};
-    my @params;
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(SourceDBSnapshotIdentifier TargetDBSnapshotIdentifier);
-    push @params,$self->member_list_parm('Tags',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(SourceDBSnapshotIdentifier
+                                                                TargetDBSnapshotIdentifier)],
+                                        member_list_parm => 'Tags',
+                                    });
     return $self->rds_call('CopyDBSnapshot',@params);
 }
 
@@ -519,25 +523,24 @@ sub create_db_instance {
         croak "create_db_instance(): -master_user_password required argument missing";
     $args{-master_username} or
         croak "create_db_instance(): -master_username required argument missing";
-    $args{-MultiAZ} = $args{-multi_az};
-    $args{-DBInstanceClass} = $args{-db_instance_class};
-    $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
-    $args{-DBName} = $args{-db_name};
-    $args{-DBParameterGroupName} = $args{-db_parameter_group_name};
-    $args{-DBSecurityGroups} = $args{-db_security_groups};
-    $args{-DBSubnetGroupName} = $args{-db_subnet_group_name};
-    push @params,$self->boolean_parm($_,\%args)
-        foreach qw(AutoMinorVersionUpgrade MultiAZ PubliclyAccessible);
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(AllocatedStorage AvailabilityZone BackupRetentionPeriod
-                   CharacterSetName DBInstanceClass DBInstanceIdentifier
-                   DBName DBParameterGroupName DBSubnetGroupName Engine
-                   EngineVersion Iops LicenseModel MasterUserPassword
-                   MasterUsername OptionGroupName Port PreferredBackupWindow
-                   PreferredMaintenanceWindow);
-    push @params,$self->member_list_parm($_,\%args)
-        foreach qw(VpcSecurityGroupIds DBSecurityGroups);
-    push @params,$self->member_list_parm('Tags',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => [qw(AutoMinorVersionUpgrade MultiAZ
+                                                                PubliclyAccessible)],
+                                        single_parm      => [qw(AllocatedStorage AvailabilityZone
+                                                                BackupRetentionPeriod
+                                                                CharacterSetName DBInstanceClass
+                                                                DBInstanceIdentifier DBName
+                                                                DBParameterGroupName
+                                                                DBSubnetGroupName Engine
+                                                                EngineVersion Iops LicenseModel
+                                                                MasterUserPassword MasterUsername
+                                                                OptionGroupName Port
+                                                                PreferredBackupWindow
+                                                                PreferredMaintenanceWindow)],
+                                        member_list_parm => [qw(VpcSecurityGroupIds DBSecurityGroups
+                                                                Tags)],
+                                    });
     return $self->rds_call('CreateDBInstance',@params);
 }
 
@@ -620,14 +623,17 @@ sub create_db_instance_read_replica {
         croak "create_db_instance_read_replica(): -db_instance_identifier required argument missing";
     $args{-source_db_instance_identifier} or
         croak "create_db_instance_read_replica(): -source_db_instance_identifier required argument missing";
-    $args{-DBInstanceClass} = $args{-db_instance_class};
-    $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
-    $args{-SourceDBInstanceIdentifier} = $args{-source_db_instance_identifier};
-    push @params,$self->boolean_parm($_,\%args)
-        foreach qw(AutoMinorVersionUpgrade PubliclyAccessible);
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(AvailabilityZone DBInstanceClass DBInstanceIdentifier
-                   Iops OptionGroupName Port SourceDBInstanceIdentifier);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => [qw(AutoMinorVersionUpgrade MultiAZ
+                                                                PubliclyAccessible)],
+                                        single_parm      => [qw(AvailabilityZone DBInstanceClass
+                                                                DBInstanceIdentifier Iops
+                                                                OptionGroupName Port
+                                                                SourceDBInstanceIdentifier)],
+                                        member_list_parm => [qw(VpcSecurityGroupIds DBSecurityGroups
+                                                                Tags)],
+                                    });
     return $self->rds_call('CreateDBInstanceReadReplica',@params);
 }
 
@@ -673,10 +679,11 @@ sub create_db_parameter_group {
         croak "create_db_parameter_group(): -db_parameter_group_name required argument missing";
     $args{-description} or
         croak "create_db_parameter_group(): -description required argument missing";
-    $args{-DBParameterGroupFamily} = $args{-db_parameter_group_family};
-    $args{-DBParameterGroupName} = $args{-db_parameter_group_name};
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(DBParameterGroupFamily DBParameterGroupName Description);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(DBParameterGroupFamily
+                                                           DBParameterGroupName Description)],
+                                    });
     return $self->rds_call('CreateDBParameterGroup',@params);
 }
 
@@ -705,15 +712,15 @@ Returns a L<VM::EC2::DB::SecurityGroup> object.
 sub create_db_security_group {
     my $self = shift;
     my %args = @_;
-    my @params;
-    my $name = $args{-db_security_group_name} || $args{-name};
-    my $desc = $args{-db_security_group_description} || $args{-description};
-    $name or croak "create_db_security_group(): -db_security_group_name required argument missing";
-    $desc or croak "create_db_security_group(): -db_security_group_description required argument missing";
-    $args{-DBSecurityGroupName} = $name;
-    $args{-DBSecurityGroupDescription} = $desc;
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(DBSecurityGroupDescription DBSecurityGroupName);
+    $args{-db_security_group_name} ||= $args{-name} or
+        croak "create_db_security_group(): -db_security_group_name required argument missing";
+    $args{-db_security_group_description} ||= $args{-description} or
+        croak "create_db_security_group(): -db_security_group_description required argument missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(DBSecurityGroupDescription
+                                                           DBSecurityGroupName)],
+                                    });
     return $self->rds_call('CreateDBSecurityGroup',@params);
 }
 
@@ -755,16 +762,15 @@ Returns a L<VM::EC2::DB::Snapshot> object on success.
 sub create_db_snapshot {
     my $self = shift;
     my %args = @_;
-    my @params;
-    my $db_id = $args{-db_instance_identifier} || $args{-db_id};
-    my $snapshot_id = $args{-db_snapshot_identifier} || $args{-snapshot_id};
-    $db_id or 
+    $args{-db_instance_identifier} ||= $args{-db_id} or
         croak "create_db_snapshot(): -db_instance_identifier required argument missing";
-    $snapshot_id or croak "create_db_snapshot(): -db_snapshot_identifier required argument missing";
-    $args{-DBInstanceIdentifier} = $db_id;
-    $args{-DBSnapshotIdentifier} = $snapshot_id;
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(DBInstanceIdentifier DBSnapshotIdentifier);
+    $args{-db_snapshot_identifier} ||= $args{-snapshot_id} or
+        croak "create_db_snapshot(): -db_snapshot_identifier required argument missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(DBInstanceIdentifier
+                                                           DBSnapshotIdentifier)],
+                                    });
     return $self->rds_call('CreateDBSnapshot',@params);
 }
 
@@ -799,17 +805,17 @@ sub create_db_subnet_group {
     my $self = shift;
     my %args = @_;
     my @params;
-    my $name = $args{-db_subnet_group_name} || $args{-name};
-    my $desc = $args{-db_subnet_group_description} || $args{-description};
-    my $subnet_ids = $args{-subnet_ids};
-    $name or croak "create_db_subnet_group(): -db_subnet_group_name required argument missing";
-    $desc or croak "create_db_subnet_group(): -db_subnet_group_description required argument missing";
-    $subnet_ids or croak "create_db_subnet_group(): -subnet_ids required argument missing";
-    $args{-DBSubnetGroupName} = $name;
-    $args{-DBSubnetGroupDescription} = $desc;
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(DBInstanceIdentifier DBSnapshotIdentifier);
-    push @params,$self->member_list_parm('SubnetIds',\%args);
+    $args{-db_subnet_group_name} ||= $args{-name} or
+        croak "create_db_subnet_group(): -db_subnet_group_name required argument missing";
+    $args{-db_subnet_group_description} ||= $args{-description} or
+        croak "create_db_subnet_group(): -db_subnet_group_description required argument missing";
+    $args{-subnet_ids} or croak "create_db_subnet_group(): -subnet_ids required argument missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBInstanceIdentifier
+                                                                DBSnapshotIdentifier)],
+                                        member_list_parm => 'SubnetIds',
+                                    });
     return $self->rds_call('CreateDBSubnetGroup',@params);
 }
 
@@ -878,14 +884,16 @@ sub create_event_subscription {
     my $self = shift;
     my %args = @_;
     my @params;
-    $args{-subscription_name} ||= $args{-name};
+    $args{-subscription_name} ||= $args{-name} or
+        croak "create_event_subscription(): -subscription_name required argument missing";
     $args{-sns_topic_arn} or croak "create_event_subscription(): -sns_topic_arn required argument missing";
-    $args{-subscription_name} or croak "create_event_subscription(): -subscription_name required argument missing";
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(SnsTopicArn SourceType SubscriptionName);
-    push @params,$self->member_list_parm($_,\%args)
-        foreach qw(EventCategories SourceIds);
-    push @params,$self->boolean_parm('Enabled',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => 'Enabled',
+                                        single_parm      => [qw(SnsTopicArn SourceType
+                                                                SubscriptionName)],
+                                        member_list_parm => [qw(EventCategories SourceIds)],
+                                    });
     return $self->rds_call('CreateEventSubscription',@params);
 }
 
@@ -925,13 +933,16 @@ Returns a L<VM::EC2::DB::Option::Group> object on success.
 sub create_option_group {
     my $self = shift;
     my %args = @_;
-    my @params;
-    $args{-option_group_name} ||= $args{-name};
-    $args{-option_group_description} ||= $args{-description};
-    $args{-option_group_name} or croak "create_option_group(): -option_group_name required argument missing";
-    $args{-option_group_description} or croak "create_option_group(): -option_group_description required argument missing";
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(EngineName MajorEngineVersion OptionGroupDescription OptionGroupName);
+    $args{-option_group_name} ||= $args{-name} or
+        croak "create_option_group(): -option_group_name required argument missing";
+    $args{-option_group_description} ||= $args{-description} or
+        croak "create_option_group(): -option_group_description required argument missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(EngineName MajorEngineVersion
+                                                                OptionGroupDescription
+                                                                OptionGroupName)],
+                                    });
     return $self->rds_call('CreateOptionGroup',@params);
 }
 
@@ -941,6 +952,8 @@ All arguments are optional.
 
  -db_parameter_group_family       The specific DB Parameter Group family to
                                   return details for.
+
+ -family                          Alias for -db_parameter_group_family
 
  -default_only                    Return only the default version of the
                                   specified engine or engine and major
@@ -961,20 +974,21 @@ All arguments are optional.
                                   response.  If more records than the max exist,
                                   a marker token is included in the response.
 
+Returns an array of L<VM::EC2::DB::Engine::Version> objects.
+
 =cut
 
 sub describe_db_engine_versions {
     my $self = shift;
     my %args = @_;
-    my $db_pgf = $args{-db_parameter_group_family} || $args{-family};
-    my @params;
-    push @params, ('DBParameterGroupFamily'=>$db_pgf) if $db_pgf;
-    push @params,$self->boolean_parm('DefaultOnly',\%args);
-    push @params,$self->single_parm('Engine',\%args);
-    push @params,$self->single_parm('EngineVersion',\%args);
-    push @params,$self->boolean_parm('ListSupportedCharacterSets',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    $args{-db_parameter_group_family} ||= $args{-family};
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => [qw(DefaultOnly
+                                                                ListSupportedCharacterSets)],
+                                        single_parm      => [qw(DBParameterGroupFamily Engine
+                                                                EngineVersion Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeDBEngineVersions',@params);
 }
 
@@ -1004,11 +1018,12 @@ Returns an array of L<VM::EC2::DB::Instance> objects if any exist.
 sub describe_db_instances {
     my $self = shift;
     my %args = @_;
-    my $db_id = $args{-db_instance_identifier} || $args{-db_instance_id};
-    my @params;
-    push @params, ('DBInstanceIdentifier'=>$db_id) if $db_id;
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    $args{-db_instance_identifier} ||= $args{-db_instance_id};
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBInstanceIdentifier
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeDBInstances',@params);
 }
 
@@ -1029,18 +1044,19 @@ All arguments are optional.
 
  -group_name                alias for -db_subnet_group_name
 
-Returns an array of VM::EC2::DB::Parameter::Group objects if any exist.
+Returns an array of L<VM::EC2::DB::Parameter::Group> objects if any exist.
 
 =cut
 
 sub describe_db_parameter_groups {
     my $self = shift;
     my %args = @_;
-    my $group = $args{-db_parameter_group_name} || $args{-group_name};
-    my @params;
-    push @params, ('DBParameterGroupName'=>$group) if $group;
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    $args{-db_parameter_group_name} ||= $args{-group_name};
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBParameterGroupName
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeDBParameterGroups',@params);
 }
 
@@ -1065,20 +1081,20 @@ Optional arguments:
                             response.  If more records than the max exist,
                             a marker token is included in the response.
 
-Returns an array of VM::EC2::DB::Parameter objects.
+Returns an array of L<VM::EC2::DB::Parameter> objects.
 
 =cut
 
 sub describe_db_parameters {
     my $self = shift;
     my %args = @_;
-    my $group = $args{-db_parameter_group_name} || $args{-group_name};
-    $group || croak "describe_db_parameters(): -db_parameter_group_name argument missing";
-    my @params;
-    push @params, ('DBParameterGroupName'=>$group);
-    push @params,$self->single_parm('Source',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    $args{-db_parameter_group_name} ||= $args{-group_name} or
+        croak "describe_db_parameters(): -db_parameter_group_name argument missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBParameterGroupName Source
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeDBParameters',@params);
 }
 
@@ -1099,18 +1115,19 @@ All arguments are optional.
 
  -group_name                alias for -db_security_group_name
 
-Returns an array of VM::EC2::DB::SecurityGroup objects if any exist.
+Returns an array of L<VM::EC2::DB::SecurityGroup> objects if any exist.
 
 =cut
 
 sub describe_db_security_groups {
     my $self = shift;
     my %args = @_;
-    my $group = $args{-db_security_group_name} || $args{-group_name};
-    my @params;
-    push @params, ('DBSecurityGroupName'=>$group) if $group;
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    $args{-db_security_group_name} ||= $args{-group_name};
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBSecurityGroupName
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeDBSecurityGroups',@params);
 }
 
@@ -1127,47 +1144,40 @@ All arguments are optional.
                             Cannot be used in conjunction with .
                             This value is stored as a lowercase string.
 
- -snapshot_type             An optional snapshot type for which snapshots will
-                            be returned. If not specified, the returned results
-                            will include snapshots of all types.
+ -marker                    An optional pagination token provided by a previous
+                            request.  If specified, the response includes only
+                            records after the marker, up to the value specified by
+                            -max_records.
 
-Returns an array of VM::EC2:DB::Snapshot objects if any exist.
-
-=cut
-
-=head2 @snapshots = $ec2->describe_db_snapshots(%args)
-
-All arguments are optional.
-
- -db_instance_identifier    A DB Instance Identifier to retrieve the list of DB
-                            snapshots for. Cannot be used in conjunction with
-                            -db_snapshot_identifier.
-                            This parameter is not case sensitive.
-
- -db_snapshot_identifier    A specific DB Snapshot Identifier to describe.
-                            Cannot be used in conjunction with .
-                            This value is stored as a lowercase string.
+ -max_records               The maximum number of records to include in the
+                            response.  If more records than the max exist,
+                            a marker token is included in the response.
 
  -snapshot_type             An optional snapshot type for which snapshots will
                             be returned. If not specified, the returned results
                             will include snapshots of all types.
 
-Returns an array of VM::EC2:DB::Snapshot objects if any exist.
+ -db_instance_id            Alias for -db_instance_identifier
+
+ -db_snapshot_id            Alias for -db_snapshot_identifier
+
+Returns an array of L<VM::EC2:DB::Snapshot> objects if any exist.
 
 =cut
 
 sub describe_db_snapshots {
     my $self = shift;
     my %args = @_;
-    my $db_id = $args{-db_instance_identifier} || $args{-db_instance_id};
-    my $snap_id = $args{-db_snapshot_identifier} || $args{-db_snap_id};
-    $db_id && $snap_id and croak "describe_db_snapshots(): Specify only one of -db_instance_identifier or -db_snapshot_identifier";
-    my @params;
-    push @params, ('DBInstanceIdentifier'=>$db_id) if $db_id;
-    push @params, ('DBSnapshotIdentifier'=>$snap_id) if $snap_id;
-    push @params,$self->single_parm('SnapshotType',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    $args{-db_instance_identifier} ||= $args{-db_instance_id};
+    $args{-db_snapshot_identifier} ||= $args{-db_snapshot_id};
+    $args{-db_instance_identifier} && $args{-db_snapshot_identifier} and
+        croak "describe_db_snapshots(): Specify only one of -db_instance_identifier or -db_snapshot_identifier";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBInstanceIdentifier
+                                                                DBSnapshotIdentifier
+                                                                SnapshotType Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeDBSnapshots',@params);
 }
 
@@ -1188,18 +1198,19 @@ All arguments are optional.
 
  -group_name                alias for -db_subnet_group_name
 
-Returns an array of VM::EC2::DB::Subnet::Group objects if any exist.
+Returns an array of L<VM::EC2::DB::Subnet::Group> objects if any exist.
 
 =cut
 
 sub describe_db_subnet_groups {
     my $self = shift;
     my %args = @_;
-    my $group = $args{-db_subnet_group_name} || $args{-group_name};
-    my @params;
-    push @params, ('DBSubnetGroupName'=>$group) if $group;
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    $args{-db_subnet_group_name} ||= $args{-group_name};
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBSubnetGroupName
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeDBSubnetGroups',@params);
 }
 
@@ -1211,19 +1222,20 @@ Required arguments:
 
  -family                       Alias for -db_parameter_group_family
 
-Returns an array of VM::EC2::DB::Parameter objects.
+Returns an array of L<VM::EC2::DB::Parameter> objects.
 
 =cut
 
 sub describe_engine_default_parameters {
     my $self = shift;
     my %args = @_;
-    my $family = $args{-db_parameter_group_family} || $args{-family};
-    $family or croak "describe_engine_default_parameters(): missing argument -db_parameter_group_family";
-    my @params;
-    push @params, ('DBParameterGroupFamily'=>$family);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    $args{-db_parameter_group_family} ||= $args{-family} or
+        croak "describe_engine_default_parameters(): missing argument -db_parameter_group_family";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBParameterGroupFamily
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeEngineDefaultParameters',@params);
 }
 
@@ -1242,10 +1254,11 @@ Returns an array of L<VM::EC2::DB::Event::Category> objects
 sub describe_event_categories {
     my $self = shift;
     my %args = @_;
-    my @params;
-    push @params,$self->single_parm('SourceType',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(SourceType
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeEventCategories',@params);
 }
 
@@ -1255,17 +1268,18 @@ Optional argument:
 
  -subscription_name       The name of the RDS event notification subscription.
 
-Returns an array of VM::EC2::DB::Event::Subscription object.
+Returns an array of L<VM::EC2::DB::Event::Subscription> object.
 
 =cut
 
 sub describe_event_subscriptions {
     my $self = shift;
     my %args = @_;
-    my @params;
-    push @params,$self->single_parm('SubscriptionName',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(SubscriptionName
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeEventSubscriptions',@params);
 }
 
@@ -1315,12 +1329,12 @@ Returns an array of L<VM::EC2::DB::Event> objects.
 sub describe_events {
     my $self = shift;
     my %args = @_;
-    my @params;
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(Duration EndTime SourceIdentifier SourceType StartTime);
-    push @params,$self->member_list_parm('EventCategories',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(Duration EndTime SourceIdentifier SourceType StartTime
+                                                                Marker MaxRecords)],
+                                        member_list_parm => 'EventCategories',
+                                    });
     return $self->rds_call('DescribeEvents',@params);
 }
 
@@ -1337,19 +1351,20 @@ Optional arguments:
  -major_engine_version        If specified, filters the results to include only
                               options for the specified major engine version.
 
-Returns an array of VM::EC2::DB::Option::Group::Option objects.
+Returns an array of L<VM::EC2::DB::Option::Group::Option> objects.
 
 =cut
 
 sub describe_option_group_options {
     my $self = shift;
     my %args = @_;
-    my @params;
-    $args{-engine_name} or croak "describe_option_group_options(): Required argument -engine_name missing";
-    push @params,$self->single_parm('EngineName',\%args);
-    push @params,$self->single_parm('MajorEngineVersion',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    $args{-engine_name} or
+        croak "describe_option_group_options(): Required argument -engine_name missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(EngineName MajorEngineVersion
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeOptionGroupOptions',@params);
 }
 
@@ -1368,7 +1383,7 @@ All arguments are optional.
                               be supplied together with -engine_name or
                               -major_engine_version.
 
-Returns an array of VM::EC2::DB::Option::Group objects.
+Returns an array of L<VM::EC2::DB::Option::Group> objects.
 
 =cut
 
@@ -1379,12 +1394,12 @@ sub describe_option_groups {
         croak "describe_option_groups(): Cannot specify -engine_name and -option_group_name together";
     $args{-major_engine_version} && $args{-option_group_name} and
         croak "describe_option_groups(): Cannot specify -major_engine_version and -option_group_name together";
-    my @params;
-    push @params,$self->single_parm('EngineName',\%args);
-    push @params,$self->single_parm('MajorEngineVersion',\%args);
-    push @params,$self->single_parm('OptionGroupName',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(EngineName MajorEngineVersion
+                                                                OptionGroupName
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeOptionGroups',@params);
 }
 
@@ -1407,21 +1422,23 @@ Optional arguments:
 
  -vpc                    The VPC filter value. (boolean)
 
-Returns an array of VM::EC2::DB::Instance::OrderableOption objects.
+Returns an array of L<VM::EC2::DB::Instance::OrderableOption> objects.
 
 =cut
 
 sub describe_orderable_db_instance_options {
     my $self = shift;
     my %args = @_;
-    my @params;
-    $args{-engine} or croak "describe_orderable_db_instance_options(): Required argument -engine missing";
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(Engine DBInstanceClass EngineVersion LicenseModel);
-    push @params,$self->boolean_parm('Vpc',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
-    return $self->rds_call('DescribeOrderableDBInstanceOptions',@params);
+    $args{-engine} or
+        croak "describe_orderable_db_instance_options(): Required argument -engine missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => 'Vpc',
+                                        single_parm      => [qw(Engine DBInstanceClass
+                                                                EngineVersion LicenseModel
+                                                                Marker MaxRecords)],
+                                    });
+   return $self->rds_call('DescribeOrderableDBInstanceOptions',@params);
 }
 
 =head2 @instances = $ec2->describe_reserved_db_instances(%args)
@@ -1450,21 +1467,22 @@ All arguments are optional:
 
  -reserved_db_instances_offering_id     The offering identifier filter value.
 
-Returns an array of VM::EC2::DB::Reserved::Instance objects.
+Returns an array of L<VM::EC2::DB::Reserved::Instance> objects.
 
 =cut
 
 sub describe_reserved_db_instances {
     my $self = shift;
     my %args = @_;
-    $args{-MultiAZ} = $args{-multi_az};
-    my @params;
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(DBInstanceClass Duration OfferingType ProductDescription
-                   ReservedDBInstanceId ReservedDBInstancesOfferingId);
-    push @params,$self->boolean_parm('MultiAZ',\%args);
-    push @params,$self->single_parm('Marker',\%args);
-    push @params,$self->single_parm('MaxRecords',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => 'MultiAZ',
+                                        single_parm      => [qw(DBInstanceClass Duration
+                                                                OfferingType ProductDescription
+                                                                ReservedDBInstanceId
+                                                                ReservedDBInstancesOfferingId
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeReservedDBInstances',@params);
 }
 
@@ -1500,13 +1518,15 @@ Returns an array of L<VM::EC2::DB::Reserved::Instance> objects.
 sub describe_reserved_db_instances_offerings {
     my $self = shift;
     my %args = @_;
-    $args{-MultiAZ} = $args{-multi_az};
-    my @params;
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(DBInstanceClass Duration OfferingType ProductDescription
-                   ReservedDBInstanceId ReservedDBInstancesOfferingId Marker
-                   MaxRecords);
-    push @params,$self->boolean_parm('MultiAZ',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => 'MultiAZ',
+                                        single_parm      => [qw(DBInstanceClass Duration
+                                                                OfferingType ProductDescription
+                                                                ReservedDBInstanceId
+                                                                ReservedDBInstancesOfferingId
+                                                                Marker MaxRecords)],
+                                    });
     return $self->rds_call('DescribeReservedDBInstancesOfferings',@params);
 }
 
@@ -1534,10 +1554,11 @@ Returns a L<VM::EC2::DB::LogFilePortion> object.
 sub download_db_log_file_portion {
     my $self = shift;
     my %args = @_;
-    $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
-    my @params;
-    push @params,$self->single_parm($_,\%args)
-       foreach qw(DBInstanceIdentifier LogFileName Marker NumberOfLines);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBInstanceIdentifier LogFileName
+                                                                Marker NumberOfLines)],
+                                    });
     return $self->rds_call('DownloadDBLogFilePortion',@params);
 }
 
@@ -1556,7 +1577,10 @@ Returns a hash or hashref of tags.
 sub list_tags_for_resource {
     my $self = shift;
     my %args = @_;
-    my @params = $self->single_parm('ResourceName',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'ResourceName',
+                                    });
     return $self->rds_call('ListTagsForResource',@params);
 }
 
@@ -1786,25 +1810,26 @@ This method returns a L<VM::EC2::DB:Instance> object.
 sub modify_db_instance {
     my $self = shift;
     my %args = @_;
-    my @params;
-    $args{-db_instance_identifier} or croak "modify_db_instance(): -db_instance_identifier required argument missing";
-    $args{-MultiAZ} = $args{-multi_az};
-    $args{-DBInstanceClass} = $args{-db_instance_class};
-    $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
-    $args{-NewDBInstanceIdentifier} = $args{-new_db_instance_identifier};
-    $args{-DBParameterGroupName} = $args{-db_parameter_group_name};
-    $args{-DBSecurityGroups} = $args{-db_security_groups};
-    push @params,$self->boolean_parm($_,\%args)
-        foreach qw(AutoMinorVersionUpgrade MultiAZ PubliclyAccessible);
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(AllocatedStorage AvailabilityZone BackupRetentionPeriod
-                   CharacterSetName DBInstanceClass DBInstanceIdentifier
-                   DBName DBParameterGroupName DBSubnetGroupName Engine
-                   EngineVersion Iops LicenseModel MasterUserPassword
-                   MasterUsername OptionGroupName Port PreferredBackupWindow
-                   PreferredMaintenanceWindow);
-    push @params,$self->member_list_parm($_,\%args)
-        foreach qw(VpcSecurityGroupIds DBSecurityGroups);
+    $args{-db_instance_identifier} or
+        croak "modify_db_instance(): -db_instance_identifier required argument missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => [qw(AutoMinorVersionUpgrade MultiAZ
+                                                                PubliclyAccessible)],
+                                        single_parm      => [qw(AllocatedStorage AvailabilityZone
+                                                                BackupRetentionPeriod
+                                                                CharacterSetName DBInstanceClass
+                                                                DBInstanceIdentifier DBName
+                                                                DBParameterGroupName
+                                                                DBSubnetGroupName Engine
+                                                                EngineVersion Iops LicenseModel
+                                                                MasterUserPassword MasterUsername
+                                                                OptionGroupName Port
+                                                                PreferredBackupWindow
+                                                                PreferredMaintenanceWindow)],
+                                        member_list_parm => [qw(VpcSecurityGroupIds
+                                                                DBSecurityGroups)],
+                                    });
     return $self->rds_call('CreateDBInstance',@params);
 }
 
@@ -1849,12 +1874,15 @@ sub modify_db_parameter_group {
     my $self = shift;
     my %args = @_;
     my @params;
-    $args{-db_parameter_group_name} ||= $args{-name};
-    $args{-db_parameter_group_name} or croak "modify_db_parameter_group(): -db_parameter_group_name required argument missing";
-    $args{-parameters} or croak "modify_db_parameter_group(): -parameters required argument missing";
-    $args{-DBParameterGroupName} = $args{-db_parameter_group_name};
-    push @params, $self->single_parm('DBParameterGroupName',\%args);
-    push @params, $self->member_hash_parms('Parameters',\%args);
+    $args{-db_parameter_group_name} ||= $args{-name} or
+        croak "modify_db_parameter_group(): -db_parameter_group_name required argument missing";
+    $args{-parameters} or
+        croak "modify_db_parameter_group(): -parameters required argument missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'DBParameterGroupName',
+                                        member_hash_parm => 'Parameters',
+                                    });
     return $self->rds_call('ModifyDBParameterGroup',@params);
 }
 
@@ -1880,15 +1908,18 @@ Returns L<VM::EC2::DB::Subnet::Group> object on success.
 sub modify_db_subnet_group {
     my $self = shift;
     my %args = @_;
-    my @params;
-    $args{-db_subnet_group_name} or croak "modify_db_subnet_group(): -db_subnet_group_name required argument missing";
-    $args{-subnet_ids} or croak "modify_db_subnet_group(): -subnet_ids required argument missing";
-    ref $args{-subnet_ids} eq 'ARRAY' or croak "modify_db_subnet_group(): -subnet_ids must be an arrayref";
-    ref $args{-subnet_ids} eq 'ARRAY' or croak "modify_db_subnet_group(): -subnet_ids must be an arrayref";
-    $args{-DBSubnetGroupName} = $args{-db_subnet_group_name};
-    push @params, $self->single_parm('DBSubnetGroupName',\%args);
-    push @params, $self->single_parm('DBSubnetGroupDescription',\%args);
-    push @params, $self->member_list_parm('SubnetIds',\%args);
+    $args{-db_subnet_group_name} or
+        croak "modify_db_subnet_group(): -db_subnet_group_name required argument missing";
+    $args{-subnet_ids} or
+        croak "modify_db_subnet_group(): -subnet_ids required argument missing";
+    ref $args{-subnet_ids} eq 'ARRAY' or
+        croak "modify_db_subnet_group(): -subnet_ids must be an arrayref";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBSubnetGroupName
+                                                                DBSubnetGroupDescription)],
+                                        member_list_parm => 'SubnetIds',
+                                    });
     return $self->rds_call('ModifyDBSubnetGroup',@params);
 }
 
@@ -1931,12 +1962,15 @@ Returns a L<VM::EC2::DB::Event::Subscription> object on success.
 sub modify_event_subscription {
     my $self = shift;
     my %args = @_;
-    my @params;
-    $args{-subscription_name} or croak "modify_event_subscription(): -subscription_name required argument missing";
-    push @params, $self->boolean_parm('Enabled',\%args);
-    push @params, $self->member_list_parm('EventCategories',\%args);
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(SnsTopicArn SourceType SubscriptionName);
+    $args{-subscription_name} or
+        croak "modify_event_subscription(): -subscription_name required argument missing";
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => 'Enabled',
+                                        single_parm      => [qw(SnsTopicArn SourceType
+                                                                SubscriptionName)],
+                                        member_list_parm => 'EventCategories',
+                                    });
     return $self->rds_call('ModifyEventSubscription',@params);
  }
 
@@ -2040,10 +2074,13 @@ sub modify_option_group {
             }
         }
     }
-    push @params, $self->boolean_parm('ApplyImmediately',\%args);
-    push @params, $self->member_hash_parms('OptionsToInclude',\%args);
-    push @params, $self->member_list_parm('OptionsToRemove',\%args);
-    push @params, $self->single_parm('OptionGroupName',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => 'ApplyImmediately',
+                                        single_parm      => 'OptionGroupName',
+                                        member_list_parm => 'OptionsToRemove',
+                                        member_hash_parm => 'OptionsToInclude',
+                                    });
     return $self->rds_call('ModifyOptionGroup',@params);
 }
 
@@ -2098,12 +2135,14 @@ Returns a L<VM::EC2::DB::Instance> object on success.
 sub promote_read_replica {
     my $self = shift;
     my %args = @_;
-    my @params;
     $args{-db_instance_identifier} or
         croak "promote_read_replica(): -db_instance_identifier required argument missing";
-    $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(BackupRetentionPeriod DBInstanceIdentifier PreferredBackupWindow);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(BackupRetentionPeriod
+                                                                DBInstanceIdentifier
+                                                                PreferredBackupWindow)],
+                                    });
     return $self->rds_call('PromoteReadReplica',@params);
 }
 
@@ -2130,14 +2169,14 @@ Returns a L<VM::EC2::DB::Reserved::Instance> object on success.
 sub purchase_reserved_db_instances_offering {
     my $self = shift;
     my %args = @_;
-    my @params;
     $args{-reserved_db_instances_offering_id} or
         croak "purchase_reserved_db_instances_offering(): -reserved_db_instances_offering_id required argument missing";
-    $args{-ReservedDBInstancesOfferingId} = $args{-reserved_db_instances_offering_id};
-    $args{-ReservedDBInstanceId} = $args{-reserved_db_instance_id};
-    $args{-DBInstanceCount} = $args{-db_instance_count};
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(DBInstanceCount ReservedDBInstanceId ReservedDBInstancesOfferingId);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(DBInstanceCount
+                                                                ReservedDBInstanceId
+                                                                ReservedDBInstancesOfferingId)],
+                                    });
     return $self->rds_call('PurchaseReservedDBInstancesOffering',@params);
 }
 
@@ -2170,12 +2209,14 @@ Returns a L<VM::EC2::DB::Instance> object on success.
 sub reboot_db_instance {
     my $self = shift;
     my %args = @_;
-    my @params;
     $args{-db_instance_identifier} or
         croak "reboot_db_instance(): -db_instance_identifier required argument missing";
     $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
-    push @params,$self->single_parm('DBInstanceIdentifier',\%args);
-    push @params,$self->boolean_parm('ForceFailover',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm => 'ForceFailover',
+                                        single_parm  => 'DBInstanceIdentifier',
+                                    });
     return $self->rds_call('RebootDBInstance',@params);
 }
 
@@ -2199,13 +2240,14 @@ Returns a L<VM::EC2::DB::Event::Subscription> object on success.
 sub remove_source_identifier_from_subscription {
     my $self = shift;
     my %args = @_;
-    my @params;
     $args{-instance_identifier} or
         croak "remove_source_identifier_from_subscription(): -instance_identifier required argument missing";
     $args{-subscription_name} or
         croak "remove_source_identifier_from_subscription(): -subscription_name required argument missing";
-    push @params,$self->single_parm('SourceIdentifier',\%args);
-    push @params,$self->single_parm('SubscriptionName',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm  => [qw(SourceIdentifier SubscriptionName)],
+                                    });
     return $self->rds_call('RemoveSourceIdentifierFromSubscription',@params);
 }
 
@@ -2231,9 +2273,11 @@ sub remove_tags_from_resource {
     my %args = @_;
     $args{-tags} && $args{-resource_name} or
         croak "remove_tags_from_resource(): -tags and -resource_name arguments required";
-    my @params;
-    push @params,$self->single_parm('ResourceName',\%args);
-    push @params,$self->member_list_parm('Tags',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => 'ResourceName',
+                                        member_list_parm => 'Tags',
+                                    });
     return $self->rds_call('RemoveTagsFromResource',@params);
 }
 
@@ -2280,10 +2324,12 @@ sub reset_db_parameter_group {
     $args{-db_parameter_group_name} or
         croak "reset_db_parameter_group(): -db_parameter_group_name argument required";
     $args{-DBParameterGroupName} = $args{-db_parameter_group_name};
-    my @params;
-    push @params,$self->single_parm('DBParameterGroupName',\%args);
-    push @params,$self->member_hash_parm('Parameters',\%args);
-    push @params,$self->boolean_parm('ResetAllParameters',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => 'ResetAllParameters',
+                                        single_parm      => 'DBParameterGroupName',
+                                        member_hash_parm => 'Parameters',
+                                    });
     return $self->rds_call('ResetDBParameterGroup',@params);
 }
 
@@ -2390,24 +2436,22 @@ Optional arguments:
 sub restore_db_instance_from_db_snapshot {
     my $self = shift;
     my %args = @_;
-    my @params;
     $args{-db_instance_identifier} or 
         croak "restore_db_instance_from_db_snapshot(): -db_instance_identifier required argument missing";
     $args{-db_snapshot_identifier} or 
         croak "restore_db_instance_from_db_snapshot(): -db_snapshot_identifier required argument missing";
-    $args{-MultiAZ} = $args{-multi_az};
-    $args{-DBInstanceClass} = $args{-db_instance_class};
-    $args{-DBInstanceIdentifier} = $args{-db_instance_identifier};
-    $args{-DBName} = $args{-db_name};
-    $args{-DBSnapshotIdentifier} = $args{-db_snapshot_identifier};
-    $args{-DBSubnetGroupName} = $args{-db_subnet_group_name};
-    push @params,$self->boolean_parm($_,\%args)
-        foreach qw(AutoMinorVersionUpgrade MultiAZ PubliclyAccessible);
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(AvailabilityZone DBInstanceClass DBInstanceIdentifier
-                   DBName DBSnapshotIdentifier DBSubnetGroupName Engine
-                   Iops LicenseModel OptionGroupName Port);
-    push @params,$self->member_list_parm('Tags',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => [qw(AutoMinorVersionUpgrade MultiAZ
+                                                                PubliclyAccessible)],
+                                        single_parm      => [qw(AvailabilityZone DBInstanceClass
+                                                                DBInstanceIdentifier
+                                                                DBName DBSnapshotIdentifier
+                                                                DBSubnetGroupName Engine
+                                                                Iops LicenseModel OptionGroupName
+                                                                Port)],
+                                        member_list_parm => 'Tags',
+                                    });
     return $self->rds_call('RestoreDBInstanceFromDBSnapshot',@params);
 }
 
@@ -2524,22 +2568,23 @@ Optional arguments:
 sub restore_db_instance_to_point_in_time {
     my $self = shift;
     my %args = @_;
-    my @params;
     $args{-source_db_instance_identifier} or 
         croak "restore_db_instance_to_point_in_time(): -source_db_instance_identifier required argument missing";
     $args{-target_db_instance_identifier} or 
         croak "restore_db_instance_to_point_in_time(): -target_db_instance_identifier required argument missing";
-    $args{-MultiAZ} = $args{-multi_az};
-    $args{-DBInstanceClass} = $args{-db_instance_class};
-    $args{-DBName} = $args{-db_name};
-    $args{-DBSubnetGroupName} = $args{-db_subnet_group_name};
-    push @params,$self->boolean_parm($_,\%args)
-        foreach qw(AutoMinorVersionUpgrade MultiAZ PubliclyAccessible UseLatestRestorableTime);
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(AvailabilityZone DBInstanceClass DBName DBSubnetGroupName
-                   Engine Iops OptionGroupName Port RestoreTime
-                   SourceDBInstanceIdentifier TargetDBInstanceIdentifier);
-    push @params,$self->member_list_parm('Tags',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm     => [qw(AutoMinorVersionUpgrade MultiAZ
+                                                                PubliclyAccessible
+                                                                UseLatestRestorableTime)],
+                                        single_parm      => [qw(AvailabilityZone DBInstanceClass
+                                                                DBName DBSubnetGroupName Engine
+                                                                Iops OptionGroupName Port
+                                                                RestoreTime
+                                                                SourceDBInstanceIdentifier
+                                                                TargetDBInstanceIdentifier)],
+                                        member_list_parm => 'Tags',
+                                    });
     return $self->rds_call('RestoreDBInstanceToPointInTime',@params);
 }
 
@@ -2579,15 +2624,13 @@ sub revoke_db_security_group_ingress {
     ($args{-ec2_security_group_id} || $args{-ec2_security_group_name}) &&
      $args{-ec2_security_group_owner_id} or
         croak "revoke_db_security_group_ingress(): -ec2_security_group_owner_id required when -ec2_security_group_id or -ec2_security_group_name arguments specified";
-    $args{-DBSecurityGroupName} = $args{-db_security_group_name};
-    $args{-EC2SecurityGroupId} = $args{-ec2_security_group_id};
-    $args{-EC2SecurityGroupName} = $args{-ec2_security_group_name};
-    $args{-EC2SecurityGroupOwnerId} = $args{-ec2_security_group_owner_id};
-    $args{-CIDRIP} = $args{-cidrip};
-    my @params;
-    push @params,$self->single_parm($_,\%args)
-        foreach qw(CIDRIP DBSecurityGroupName EC2SecurityGroupId
-                   EC2SecurityGroupName EC2SecurityGroupOwnerId);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm      => [qw(CIDRIP DBSecurityGroupName
+                                                                EC2SecurityGroupId
+                                                                EC2SecurityGroupName
+                                                                EC2SecurityGroupOwnerId)],
+                                    });
     return $self->rds_call('RevokeDBSecurityGroupIngress',@params);
 }
 

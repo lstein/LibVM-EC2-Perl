@@ -566,7 +566,7 @@ use strict;
 
 use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
-eval {use AWS::Signature4}; # optional
+eval {require AWS::Signature4}; # optional
 
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
@@ -1275,10 +1275,15 @@ documentation (yet).
 sub canonicalize {
     my $self = shift;
     my $name = shift;
-    while ($name =~ /\w[A-Z.]/) {
-	$name    =~ s/([a-zA-Z])\.?([A-Z])/\L$1_$2/g or last;
+
+    $name =~ s/^-//;
+    $name    =~ s/DB/Db/g;
+    $name    =~ s/AZ/Az/g;
+
+    while ($name =~ /\w[A-Z][^A-Z]/) {
+        $name    =~ s/(?<!^)([A-Z]*[\d]*)\.?([A-Z])/\L$1_$2/g or last;
     }
-    return $name =~ /^-/ ? lc $name : '-'.lc $name;
+    return '-'.lc $name;
 }
 
 sub uncanonicalize {
