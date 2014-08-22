@@ -143,7 +143,10 @@ sub register {
 # new way
 sub content2objects {
     my $self = shift;
-    my ($action,$content,$ec2) = @_;
+    my ($action,$type,$content,$ec2) = @_;
+
+    # quick hack
+    return $content unless $type =~ /xml/;
 
     my $handler = $REGISTRATION->{$action} || 'VM::EC2::Generic';
     my ($method,@params) = split /,/,$handler;
@@ -406,8 +409,15 @@ sub create_error_object {
     my $class   = $REGISTRATION->{Error};
     eval "require $class; 1" || die $@ unless $class->can('new');
     my $parsed = $self->new_xml_parser->XMLin($content);
+    if (exists $parsed->{Message}) { # s3 hack
+	$parsed->{Errors}{Error}{Message}   = $parsed->{Message}; 
+	$parsed->{Errors}{Error}{Code}      = $parsed->{Code}; 
+	$parsed->{Errors}{Error}{Endpoint}  = $parsed->{Endpoint}; 
+    }
     if (defined $API_call) {
 	$parsed->{Errors}{Error}{Message} =~ s/\.$//;
+	$parsed->{Errors}{Error}{Message} .= " ($parsed->{Errors}{Error}{Endpoint})"
+	    if 	$parsed->{Errors}{Error}{Endpoint};
 	$parsed->{Errors}{Error}{Message} .= ", at API call '$API_call'";
     }
     return $class->new($parsed->{Errors}{Error},$ec2,@{$parsed}{'xmlns','RequestID'});

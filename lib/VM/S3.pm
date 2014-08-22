@@ -17,21 +17,32 @@ VM::EC2::Dispatch->register(
 
 sub get_service {
     my $self     = shift;
-    my $action   = shift || '';
-    my $endpoint = shift || 'https://s3.amazonaws.com';
-    local $self->{endpoint} = $endpoint;
+    my ($action,$bucket,$params,$endpoint) = @_;
+    $params    ||= {};
+
+    local $self->{endpoint} = $endpoint || 'https://s3.amazonaws.com';
     local $self->{version}  = '2006-03-01';
-    my $request = GET($self->endpoint.'/',
-		      Host=>URI->new($self->endpoint)->host,
+
+    $self->{endpoint} = "https://".$self->endpoint unless $self->endpoint =~ /^http/;
+
+    my $uri     = URI->new($self->endpoint.($bucket ? "/$bucket/" : '/'));
+
+    ref($params) ? $uri->query_form($params) : $uri->query($params);
+    my $request = GET($uri,
 		      'X-Amz-Content-Sha256'=>sha256_hex('')
 	);
     AWS::Signature4->new(-access_key=>$self->access_key,
-			 -secret_key=>$self->secret)->sign($request);
+			 -secret_key=>$self->secret
+	)->sign($request);
     my $cv = $self->async_request($action,$request);
     if ($VM::EC2::ASYNC) {
 	return $cv;
     } else {
-	return $cv->recv();
+	my @obj = $cv->recv;
+	$self->error($cv->error) if $cv->error;
+	return $obj[0] if @obj == 1;
+	return         if @obj == 0;
+	return @obj;
     }
 }
 
@@ -40,10 +51,25 @@ sub list_buckets {
     return $self->get_service();
 }
 
-sub get_bucket {
+sub list_objects {
     my $self   = shift;
     my $bucket = shift;
-    $self->get_service('get bucket',"https://$bucket.s3.amazonaws.com");
+    my $endpoint = shift;
+    $self->get_service('get bucket',$bucket,'',$endpoint);
+}
+
+sub bucket_location {
+    my $self   = shift;
+    my $bucket = shift;
+    my $region = shift;
+    $self->get_service('get location',$bucket,{location=>undef},$region);
+}
+
+sub bucket_policy {
+    my $self   = shift;
+    my $bucket = shift;
+    my $region = shift;
+    $self->get_service('get policy',$bucket,{policy=>undef},$region);
 }
 
 1;

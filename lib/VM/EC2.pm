@@ -1712,6 +1712,7 @@ sub _call_async {
 sub async_request {
     my $self = shift;
     my ($action,$request) = @_;
+    $action ||= undef;
 
     my @headers;
     $request->headers->scan(sub {push @headers,@_});
@@ -1722,6 +1723,7 @@ sub async_request {
 	http_request(
 	    $request->method => $request->uri,
 	    body    => $request->content,
+	    recurse => 10,
 	    headers => {
 		TE      => undef,
 		Referer => undef,
@@ -1741,7 +1743,7 @@ sub async_request {
 		    }
 		} else { # success
 		    $self->error(undef);
-		    my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
+		    my @obj = VM::EC2::Dispatch->content2objects($action,$hdr->{'content-type'},$body,$self);
 		    $cv->send(@obj);
 		    $timer->success();
 		}
@@ -1761,6 +1763,8 @@ sub async_send_error {
     my $error;
 
     if ($body =~ /<Response>/) {
+	$error = VM::EC2::Dispatch->create_error_object($body,$self,$action);
+    } elsif ($body =~ /<Error>/) {
 	$error = VM::EC2::Dispatch->create_error_object($body,$self,$action);
     } elsif ($body =~ /<ErrorResponse xmlns="http:\/\//) {
         $error = VM::EC2::Dispatch->create_alt_error_object($body,$self,$action);
