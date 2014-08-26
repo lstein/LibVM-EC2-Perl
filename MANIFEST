@@ -103,6 +103,7 @@ lib/VM/EC2/ReservedInstance/Modification.pm
 lib/VM/EC2/ReservedInstance/Modification/Configuration.pm
 lib/VM/EC2/ReservedInstance/Modification/Result.pm
 lib/VM/EC2/ReservedInstance/Offering.pm
+lib/VM/EC2/ReservedInstance/ParmParser.pm
 lib/VM/EC2/REST/ami.pm
 lib/VM/EC2/REST/autoscaling.pm
 lib/VM/EC2/REST/customer_gateway.pm

@@ -3,6 +3,7 @@ package VM::EC2::REST::reserved_instance;
 use strict;
 use VM::EC2 '';  # important not to import anything!
 package VM::EC2;  # add methods to VM::EC2
+require VM::EC2::ReservedInstance::ParmParser;
 
 VM::EC2::Dispatch->register(
     CancelReservedInstancesListing     => 'fetch_items,reservedInstancesListingsSet,VM::EC2::ReservedInstance::Listing',
@@ -18,6 +19,8 @@ VM::EC2::Dispatch->register(
 						my $ri_id = $data->{reservedInstancesId} or return;
 						return $ec2->describe_reserved_instances($ri_id); },
     );
+
+my $VEP = 'VM::EC2::ReservedInstance::ParmParser';
 
 =head1 NAME VM::EC2::REST::reserved_instance
 
@@ -97,15 +100,15 @@ This can be combined with the Offering purchase() method as shown here:
 
 sub describe_reserved_instances_offerings {
     my $self = shift;
-    my %args = $self->args('-reserved_instances_offering_id',@_);
+    my %args = $VEP->args(-reserved_instances_offering_id,@_);
     $args{-availability_zone} ||= $args{-zone};
-    my @param = $self->list_parm('ReservedInstancesOfferingId',\%args);
-    push @param,$self->single_parm('ProductDescription',\%args);
-    push @param,$self->single_parm('InstanceType',\%args);
-    push @param,$self->single_parm('AvailabilityZone',\%args);
-    push @param,$self->single_parm('instanceTenancy',\%args);  # should initial "i" be upcase?
-    push @param,$self->single_parm('offeringType',\%args);     # should initial "o" be upcase?
-    push @param,$self->filter_parm(\%args);
+    my @param = $VEP->format_parms(\%args,
+        {
+            list_parm   => 'ReservedInstancesOfferingId',
+            single_parm => [qw(ProductDescription InstanceType AvailabilityZone
+                               InstanceTenancy OfferingType)],
+            filter_parm => 'Filter',
+        });
     return $self->call('DescribeReservedInstancesOfferings',@param);
 }
 
@@ -132,13 +135,15 @@ L<VM::EC2::ReservedInstance::Offering>.
 
 sub purchase_reserved_instances_offering {
     my $self = shift;
-    my %args = $self->args('-reserved_instances_offering_id'=>@_);
+    my %args = $VEP->args(-reserved_instances_offering_id,@_);
     $args{-reserved_instances_offering_id} ||= $args{-id};
     $args{-reserved_instances_offering_id} or 
 	croak "purchase_reserved_instances_offering(): the -reserved_instances_offering_id argument is required";
     $args{-instance_count} ||= $args{-count};
-    my @param = $self->single_parm('ReservedInstancesOfferingId',\%args);
-    push @param,$self->single_parm('InstanceCount',\%args);
+    my @param = $VEP->format_parms(\%args,
+        {
+            single_parm => [qw(ReservedInstancesOfferingId InstanceCount)],
+        });
     return $self->call('PurchaseReservedInstancesOffering',@param);
 }
 
@@ -167,9 +172,12 @@ The returned objects are of type L<VM::EC2::ReservedInstance>
 
 sub describe_reserved_instances {
     my $self = shift;
-    my %args = $self->args('-reserved_instances_id',@_);
-    my @param = $self->list_parm('ReservedInstancesId',\%args);
-    push @param,$self->filter_parm(\%args);
+    my %args = $VEP->args(-reserved_instances_id,@_);
+    my @param = $VEP->format_parms(\%args,
+                                    {
+                                        list_parm   => 'ReservedInstancesId',
+                                        filter_parm => 'Filter',
+                                    });
     return $self->call('DescribeReservedInstances',@param);
 }
 
@@ -196,6 +204,8 @@ Required arguments:
 
  -id                            -- Alias for -reserved_instances_id
 
+Returns the reserved instances modification ID string.
+
 =cut
 
 sub modify_reserved_instances {
@@ -206,25 +216,12 @@ sub modify_reserved_instances {
 	croak "modify_reserved_instances(): -reserved_instances_id argument required";
     $args{-target_configuration} or 
 	croak "modify_reserved_instances(): -target_configuration argument required";
-    my @param = $self->list_parm('ReservedInstancesId',\%args);
-    push @param,$self->_target_config_parm($args{-target_configuration});
+    my @param = $VEP->format_parms(\%args,
+        {
+            list_parm             => 'ReservedInstancesId',
+            ri_target_config_parm => 'TargetConfiguration',
+        });
     return $self->call('ModifyReservedInstances',@param);
-}
-
-sub _target_config_parm {
-    my $self = shift;
-    my $target_config = shift;
-    my @param;
-
-    my @config = ref $target_config eq 'ARRAY' ? @$target_config : ( $target_config );
-    for (my $i=0; $i<@config; $i++) {
-        my $config = $config[$i];
-        my $n = $i+1;
-        foreach my $p (qw/AvailabilityZone Platform InstanceCount InstanceType/) {
-            push @param, ("ReservedInstancesConfigurationSetItemType.$n.$p" => $config->{$p}) if $config->{$p}
-        }
-    }
-    return @param;
 }
 
 =head2 @mods = $ec2->describe_reserved_instances_modifications(@ids)
@@ -252,10 +249,13 @@ The returned objects are of type L<VM::EC2::ReservedInstance::Modification>
 
 sub describe_reserved_instances_modifications {
     my $self = shift;
-    my %args = $self->args('-reserved_instances_modification_id',@_);
+    my %args = $VEP->args(-reserved_instances_modification_id,@_);
     $args{-reserved_instances_modification_id} ||= $args{-id};
-    my @param = $self->list_parm('ReservedInstancesModificationId',\%args);
-    push @param,$self->filter_parm(\%args);
+    my @param = $VEP->format_parms(\%args,
+        {
+            list_parm   => 'ReservedInstancesModificationId',
+            filter_parm => 'Filter',
+        });
     return $self->call('DescribeReservedInstancesModifications',@param);
 }
 
@@ -284,10 +284,12 @@ The returned objects are of type L<VM::EC2::ReservedInstance::Listing>
 
 sub describe_reserved_instances_listings {
     my $self = shift;
-    my %args = $self->args('-reserved_instances_listing_id',@_);
-    my @param = $self->list_parm('ReservedInstancesListingId',\%args);
-    push @param, $self->list_parm('ReservedInstancesId',\%args);
-    push @param,$self->filter_parm(\%args);
+    my %args = $VEP->args(-reserved_instances_listing_id,@_);
+    my @param = $VEP->format_parms(\%args,
+        {
+            list_parm   => [qw(ReservedInstancesListingId ReservedInstancesId)],
+            filter_parm => 'Filter',
+        });
     return $self->call('DescribeReservedInstancesListings',@param);
 }
 
@@ -307,8 +309,11 @@ Returns an object of type L<VM::EC2::ReservedInstance::Listing>
 
 sub cancel_reserved_instances_listing {
     my $self = shift;
-    my %args = $self->args('-reserved_instances_listing_id',@_);
-    my @param = $self->single_parm('ReservedInstancesListingId',\%args);
+    my %args = $VEP->args(-reserved_instances_listing_id,@_);
+    my @param = $VEP->format_parms(\%args,
+        {
+            single_parm => 'ReservedInstancesListingId',
+        });
     return $self->call('CancelReservedInstancesListing',@param);
 }
 
@@ -355,7 +360,7 @@ Returns an object of type L<VM::EC2::ReservedInstance::Listing>
 
 sub create_reserved_instances_listing {
     my $self = shift;
-    my %args = $self->args('-reserved_instances_listing_id',@_);
+    my %args = $VEP->args(-reserved_instances_listing_id,@_);
     $args{-reserved_instances_id} or
 	croak "create_reserved_instances_listing(): -reserved_instances_id argument required";
     $args{-instance_count} or
@@ -367,25 +372,13 @@ sub create_reserved_instances_listing {
     ref $args{-price_schedules} eq 'HASH' or
 	croak "create_reserved_instances_listing(): -price_schedules argument must be hashref";
 
-    my @param = $self->single_parm('ReservedInstancesId',\%args);
-    push @param, $self->single_parm('InstanceCount',\%args);
-    push @param, $self->_price_sched_parm($args{-price_schedules});
-    push @param, $self->single_parm('ClientToken',\%args);
+    my @param = $VEP->format_parms(\%args,
+        {
+            single_parm         => [qw(ReservedInstancesId InstanceCount
+                                       ClientToken)],
+            ri_price_sched_parm => 'PriceSchedules',
+        });
     return $self->call('CreateReservedInstancesListing',@param);
-}
-
-sub _price_sched_parm {
-    my $self = shift;
-    my $sched = shift;
-    my @param;
-
-    my $i = 0;
-    foreach my $month (keys %$sched) {
-        push @param, "PriceSchedules.$i.Price" => $sched->{$month};
-        push @param, "PriceSchedules.$i.Term" => $month;
-        $i++;
-    }
-    return @param;
 }
 
 =head1 SEE ALSO
@@ -396,7 +389,11 @@ L<VM::EC2>
 
 Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
 
+Lance Kinley E<lt>lkinley@loyaltymethods.comE<gt>.
+
 Copyright (c) 2011 Ontario Institute for Cancer Research
+
+Copyright (c) 2014 Loyalty Methods, Inc.
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
@@ -405,6 +402,5 @@ License 2.0.  Refer to LICENSE for the full license text. In addition,
 please see DISCLAIMER.txt for disclaimers of warranty.
 
 =cut
-
 
 1;
