@@ -17,6 +17,8 @@ VM::EC2::Dispatch->register(
     RejectVpcPeeringConnection        => 'boolean',
     );
 
+my $VEP = 'VM::EC2::ParmParser';
+
 =head1 NAME VM::EC2::REST::vpc
 
 =head1 SYNOPSIS
@@ -66,11 +68,14 @@ Returns a L<VM::EC2::VPC::PeeringConnection> object.
 
 sub accept_vpc_peering_connection {
     my $self = shift;
-    my %args   = $self->args('-vpc_peering_connection_id',@_);
+    my %args = $VEP->args(-vpc_peering_connection_id,@_);
     $args{-vpc_peering_connection_id} or
         croak "accept_vpc_peering_connection(): -vpc_peering_connection_id argument required";
-    my @parm = $self->single_parm('VpcPeeringConnectionId',\%args);
-    return $self->call('AcceptVpcPeeringConnection',@parm);
+    my @param = $VEP->format_parms(\%args,
+        {
+            single_parm => 'VpcPeeringConnectionId',
+        });
+    return $self->call('AcceptVpcPeeringConnection',@param);
 }
 
 =head2 $vpc = $ec2->create_vpc(-cidr_block=>$cidr,-instance_tenancy=>$tenancy)
@@ -84,15 +89,15 @@ Or it can be called with named arguments.
 
 Required arguments:
 
- -cidr_block      The Classless Internet Domain Routing address, in the
-                  form xx.xx.xx.xx/xx. One or more subnets will be allocated
-                  from within this block.
+ -cidr_block         The Classless Internet Domain Routing address, in the
+                     form xx.xx.xx.xx/xx. One or more subnets will be allocated
+                     from within this block.
 
 Optional arguments:
 
- -instance_tenancy "default" or "dedicated". The latter requests AWS to
-                  launch all your instances in the VPC on single-tenant
-                  hardware (at additional cost).
+ -instance_tenancy   "default" or "dedicated". The latter requests AWS to
+                     launch all your instances in the VPC on single-tenant
+                     hardware (at additional cost).
 
 See
 http://docs.amazonwebservices.com/AmazonVPC/latest/UserGuide/VPC_Subnets.html
@@ -110,11 +115,15 @@ then use this object to create new subnets within the VPC:
 
 sub create_vpc {
     my $self = shift;
-    my %args   = $self->args('-cidr_block',@_);
-    $args{-cidr_block} or croak "create_vpc(): must provide a -cidr_block parameter";
-    my @parm   = $self->list_parm('CidrBlock',\%args);
-    push @parm,  $self->single_parm('instanceTenancy',\%args);
-    return $self->call('CreateVpc',@parm);
+    my %args = $VEP->args(-cidr_block,@_);
+    $args{-cidr_block} or
+        croak "create_vpc(): must provide a -cidr_block parameter";
+    my @param = $VEP->format_parms(\%args,
+        {
+            list_parm   => 'CidrBlock',
+            single_parm => 'instanceTenancy',
+        });
+    return $self->call('CreateVpc',@param);
 }
 
 =head2 $pcx = $ec2->create_vpc_peering_connection(-vpc_id        => $vpc_id,
@@ -153,9 +162,10 @@ sub create_vpc_peering_connection {
         croak "create_vpc_peering_connection(): -vpc_id argument required";
     $args{-peer_vpc_id} or
         croak "create_vpc_peering_connection(): -peer_vpc_id argument required";
-    my @param;
-    push @param, $self->single_parm($_,\%args)
-        foreach qw(VpcId PeerVpcId PeerOwnerId);
+    my @param = $VEP->format_parms(\%args,
+        {
+            single_parm => [qw(VpcId PeerVpcId PeerOwnerId)],
+        });
     return $self->call('CreateVpcPeeringConnection',@param);
 }
 
@@ -184,10 +194,13 @@ http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-
 
 sub describe_vpcs {
     my $self = shift;
-    my %args   = $self->args('-vpc_id',@_);
-    my @parm   = $self->list_parm('VpcId',\%args);
-    push @parm,  $self->filter_parm(\%args);
-    return $self->call('DescribeVpcs',@parm);
+    my %args = $VEP->args(-vpc_id,@_);
+    my @param = $VEP->format_parms(\%args,
+        {
+            list_parm   => 'VpcId',
+            filter_parm => 'Filter',
+        });
+    return $self->call('DescribeVpcs',@param);
 }
 
 =head2 @vpx = $ec2->describe_vpc_peering_connections(@vpx_ids)
@@ -214,10 +227,13 @@ Returns a scalar or array of L<VM::EC2::VPC::PeeringConnection> objects.
 
 sub describe_vpc_peering_connections {
     my $self = shift;
-    my %args   = $self->args('-vpc_peering_connection_id',@_);
-    my @parm   = $self->list_parm('VpcPeeringConnectionId',\%args);
-    push @parm,  $self->filter_parm(\%args);
-    return $self->call('DescribeVpcPeeringConnections',@parm);
+    my %args = $VEP->args(-vpc_peering_connection_id,@_);
+    my @param = $VEP->format_parms(\%args,
+        {
+            list_parm   => 'VpcPeeringConnectionId',
+            filter_parm => 'Filter',
+        });
+    return $self->call('DescribeVpcPeeringConnections',@param);
 }
 
 =head2 $success = $ec2->delete_vpc($vpc_id)
@@ -230,8 +246,11 @@ Delete the indicated VPC, returning true if successful.
 
 sub delete_vpc {
     my $self = shift;
-    my %args  = $self->args(-vpc_id => @_);
-    my @param = $self->single_parm(VpcId=>\%args);
+    my %args = $VEP->args(-vpc_id,@_);
+    my @param = $VEP->format_parms(\%args,
+        {
+            single_parm => 'VpcId',
+        });
     return $self->call('DeleteVpc',@param);
 }
 
@@ -254,10 +273,13 @@ Returns true if the deletion was successful.
 
 sub delete_vpc_peering_connection {
     my $self = shift;
-    my %args  = $self->args(-vpc_peering_connection_id => @_);
+    my %args = $VEP->args(-vpc_peering_connection_id,@_);
     $args{-vpc_peering_connection_id} or
         croak "delete_vpc_peering_connection(): -vpc_peering_connection_id argument required";
-    my @param = $self->single_parm(VpcPeeringConnectionId=>\%args);
+    my @param = $VEP->format_parms(\%args,
+        {
+            single_parm => 'VpcPeeringConnectionId',
+        });
     return $self->call('DeleteVpcPeeringConnection',@param);
 }
 
@@ -281,9 +303,12 @@ sub describe_vpc_attribute {
     my $self = shift;
     my %args  = @_;
     $args{-vpc_id} or croak "modify_vpc_attribute(): -vpc_id argument missing";
-    $args{-attribute} or croak "modify_vpc_attribute(): -attribute argument missing";
-    my @param = $self->single_parm(VpcId=>\%args);
-    push @param, $self->single_parm('Attribute',\%args);
+    $args{-attribute} or
+        croak "modify_vpc_attribute(): -attribute argument missing";
+    my @param = $VEP->format_parms(\%args,
+        {
+            single_parm => [qw(VpcId Attribute)],
+        });
     my $result = $self->call('DescribeVpcAttribute',@param);
     return $result && $result->attribute($args{-attribute}) eq 'true';
 }
@@ -298,10 +323,10 @@ Required Arguments:
 
  -vpc_id                  The ID of the VPC.
 
+One or more of the following arguments is required:
+
  -enable_dns_support      Specifies whether the DNS server provided
                           by Amazon is enabled for the VPC.
-
-Optional arguments:
 
  -enable_dns_hostnames    Specifies whether DNS hostnames are provided
                           for the instances launched in this VPC. You
@@ -316,11 +341,13 @@ sub modify_vpc_attribute {
     my $self = shift;
     my %args  = @_;
     $args{-vpc_id} or croak "modify_vpc_attribute(): -vpc_id argument missing";
-    $args{-enable_dns_support} or
-        croak "modify_vpc_attribute(): -enable_dns_support argument missing";
-    my @param = $self->single_parm(VpcId=>\%args);
-    push @param, $self->boolean_parm($_,\%args)
-        foreach qw(enableDnsSupport enableDnsHostnames);
+    $args{-enable_dns_support} || $args{-enable_dns_hostnames} or
+        croak "modify_vpc_attribute(): -enable_dns_support or -enable_dns_hostnames argument required";
+    my @param = $VEP->format_parms(\%args,
+        {
+            boolean_parm => [qw(enableDnsSupport enableDnsHostnames)],
+            single_parm  => 'VpcId',
+        });
     return $self->call('ModifyVpcAttribute',@param);
 }
 
@@ -341,10 +368,13 @@ Returns true if the deletion was successful.
 
 sub reject_vpc_peering_connection {
     my $self = shift;
-    my %args  = $self->args(-vpc_peering_connection_id => @_);
+    my %args = $VEP->args(-vpc_peering_connection_id,@_);
     $args{-vpc_peering_connection_id} or
         croak "reject_vpc_peering_connection(): -vpc_peering_connection_id argument required";
-    my @param = $self->single_parm(VpcPeeringConnectionId=>\%args);
+    my @param = $VEP->format_parms(\%args,
+        {
+            single_parm => 'VpcPeeringConnectionId',
+        });
     return $self->call('RejectVpcPeeringConnection',@param);
 }
 
