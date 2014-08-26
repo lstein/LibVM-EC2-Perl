@@ -10,6 +10,8 @@ VM::EC2::Dispatch->register(
     DeleteCustomerGateway             => 'boolean',
     );
 
+my $VEP = 'VM::EC2::ParmParser';
+
 =head1 NAME VM::EC2::REST::customer_gateway
 
 =head1 SYNOPSIS
@@ -59,12 +61,14 @@ ip-address, state, type, tag-key, tag-value, tag:key
 
 sub describe_customer_gateways {
     my $self = shift;
-    my %args = $self->args('-customer_gateway_id',@_);
-    my @params = $self->list_parm('CustomerGatewayId',\%args);
-    push @params,$self->filter_parm(\%args);
+    my %args = $VEP->args(-customer_gateway_id,@_);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        list_parm   => 'CustomerGatewayId',
+                                        filter_parm => 'Filter',
+                                    });
     return $self->call('DescribeCustomerGateways',@params);
 }
-VM::EC2::Dispatch->register(DescribeCustomerGateways          => 'fetch_items,customerGatewaySet,VM::EC2::VPC::CustomerGateway');
 
 =head2 $cust_gtwy = $ec2->create_customer_gateway(-type      =>$type,
                                                   -ip_address=>$ip,
@@ -100,12 +104,12 @@ sub create_customer_gateway {
         croak "create_customer_gateway(): -ip_address argument missing";
     $args{-bgp_asn} or
         croak "create_customer_gateway(): -bgp_asn argument missing";
-    my @params = $self->single_parm('Type',\%args);
-    push @params, $self->single_parm('IpAddress',\%args);
-    push @params, $self->single_parm('BgpAsn',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(Type IpAddress BgpAsn)],
+                                    });
     return $self->call('CreateCustomerGateway',@params);
 }
-VM::EC2::Dispatch->register(CreateCustomerGateway             => 'fetch_one,customerGateway,VM::EC2::VPC::CustomerGateway');
 
 =head2 $success = $ec2->delete_customer_gateway(-customer_gateway_id=>$id)
 
@@ -124,13 +128,15 @@ Returns true on successful deletion.
 
 sub delete_customer_gateway {
     my $self = shift;
-    my %args = $self->args('-customer_gateway_id',@_);
+    my %args = $VEP->args(-customer_gateway_id,@_);
     $args{-customer_gateway_id} or
         croak "delete_customer_gateway(): -customer_gateway_id argument missing";
-    my @params = $self->single_parm('CustomerGatewayId',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => 'CustomerGatewayId',
+                                    });
     return $self->call('DeleteCustomerGateway',@params);
 }
-VM::EC2::Dispatch->register(DeleteCustomerGateway             => 'boolean');
 
 =head1 SEE ALSO
 
