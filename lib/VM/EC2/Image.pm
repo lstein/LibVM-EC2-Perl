@@ -45,6 +45,8 @@ These object methods are supported:
  kernelId      -- The kernel associated with the image.
  ramdiskId     -- The RAM disk associated with the image.
  platform      -- "Windows" for Windows AMIs, otherwise undef.
+ sriovNetSupport -- Specifies whether enhanced networking is enabled.
+                    "simple" if enabled.
  stateReason   -- Explanation of a "failed" imageState. This is
                   a VM::EC2::Instance::State::Reason
                   object.
@@ -244,8 +246,8 @@ sub valid_fields {
     my $self = shift;
     return qw(imageId imageLocation imageState imageOwnerId isPublic
               productCodes architecture imageType kernelId ramdiskId
-              platform stateReason imageOwnerAlias name description
-              rootDeviceType rootDeviceName blockDeviceMapping
+              platform sriovNetSupport stateReason imageOwnerAlias name
+              description rootDeviceType rootDeviceName blockDeviceMapping
               virtualizationType tagSet hypervisor);
 }
 

@@ -14,6 +14,8 @@ VM::EC2::Dispatch->register(
     ReplaceNetworkAclEntry            => 'boolean',
     );
 
+my $VEP = 'VM::EC2::ParmParser';
+
 =head1 NAME VM::EC2::REST::network_acl
 
 =head1 SYNOPSIS
@@ -73,9 +75,12 @@ tag:key, vpc-id
 
 sub describe_network_acls {
     my $self = shift;
-    my %args = $self->args('-network_acl_id',@_);
-    my @params = $self->list_parm('NetworkAclId',\%args);
-    push @params,$self->filter_parm(\%args);
+    my %args = $VEP->args(-network_acl_id,@_);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        list_parm   => 'NetworkAclId',
+                                        filter_parm => 'Filter',
+                                    });
     return $self->call('DescribeNetworkAcls',@params);
 }
 
@@ -96,10 +101,13 @@ Retuns a VM::EC2::VPC::NetworkAcl object on success.
 
 sub create_network_acl {
     my $self = shift;
-    my %args = $self->args('-vpc_id',@_);
+    my %args = $VEP->args(-vpc_id,@_);
     $args{-vpc_id} or
         croak "create_network_acl(): -vpc_id argument missing";
-    my @params = $self->single_parm('VpcId',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => 'VpcId',
+                                    });
     return $self->call('CreateNetworkAcl',@params);
 }
 
@@ -120,8 +128,11 @@ Returns true on successful deletion.
 
 sub delete_network_acl {
     my $self = shift;
-    my %args = $self->args('-network_acl_id',@_);
-    my @params = $self->single_parm('NetworkAclId',\%args);
+    my %args = $VEP->args(-network_acl_id,@_);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => 'NetworkAclId',
+                                    });
     return $self->call('DeleteNetworkAcl',@params);
 }
 
@@ -159,10 +170,14 @@ Arguments:
  -icmp_type            -- For the ICMP protocol, the ICMP type. You can use
                           -1 to specify all ICMP types.  Required if
                           specifying 1 (ICMP) for the protocol
- -port_from            -- The first port in the range.  Required if specifying
+ -port_range_from      -- The first port in the range.  Required if specifying
                           6 (TCP) or 17 (UDP) for the protocol.
- -port_to              -- The last port in the range.  Required if specifying
+ -port_range_to        -- The last port in the range.  Required if specifying
                           6 (TCP) or 17 (UDP) for the protocol.
+
+ -port_from            -- Alias for -port_range_from
+
+ -port_to              -- Alias for -port_range_to
 
 Returns true on successful creation.
 
@@ -181,24 +196,24 @@ sub create_network_acl_entry {
         croak "create_network_acl_entry(): -rule_action argument missing";
     $args{-cidr_block} or
         croak "create_network_acl_entry(): -cidr_block argument missing";
+    $args{-port_range_from} ||= $args{-port_from};
+    $args{-port_range_to} ||= $args{-port_to};
     if ($args{-protocol} == 1) {
-	defined $args{-icmp_type} && defined $args{-icmp_code} or
+        defined $args{-icmp_type} && defined $args{-icmp_code} or
         croak "create_network_acl_entry(): -icmp_type or -icmp_code argument missing";
     }
     elsif ($args{-protocol} == 6 || $args{-protocol} == 17) {
-	defined $args{-port_from} or
-		croak "create_network_acl_entry(): -port_from argument missing";
-	$args{-port_to} = $args{-port_from} if (! defined $args{-port_to});
+        defined $args{-port_range_from} or
+            croak "create_network_acl_entry(): -port_range_from argument missing";
+        $args{-port_range_to} = $args{-port_range_from} if ! defined $args{-port_range_to};
     }
-    $args{-egress}    ||= $args{-egress} ? 'true' : 'false';
-    $args{'-Icmp.Type'} = $args{-icmp_type};
-    $args{'-Icmp.Code'} = $args{-icmp_code};
-    $args{'-PortRange.From'} = $args{-port_from};
-    $args{'-PortRange.To'} = $args{-port_to};
-    my @params;
-    push @params,$self->single_parm($_,\%args) foreach
-        qw(NetworkAclId RuleNumber Protocol RuleAction Egress CidrBlock
-           Icmp.Code Icmp.Type PortRange.From PortRange.To);
+    $args{-egress} ||= $args{-egress} ? 'true' : 'false';
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(NetworkAclId RuleNumber Protocol
+                                                           RuleAction Egress CidrBlock Icmp.Code
+                                                           Icmp.Type PortRange.From PortRange.To)],
+                                    });
     return $self->call('CreateNetworkAclEntry',@params);
 }
 
@@ -230,9 +245,10 @@ sub delete_network_acl_entry {
         croak "delete_network_acl_entry(): -network_acl_id argument missing";
     $args{-rule_number} or
         croak "delete_network_acl_entry(): -rule_number argument missing";
-    my @params;
-    push @params,$self->single_parm($_,\%args) foreach
-        qw(NetworkAclId RuleNumber Egress);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(NetworkAclId RuleNumber Egress)],
+                                    });
     return $self->call('DeleteNetworkAclEntry',@params);
 }
 
@@ -259,9 +275,10 @@ sub replace_network_acl_association {
         croak "replace_network_acl_association(): -association_id argument missing";
     $args{-network_acl_id} or
         croak "replace_network_acl_association(): -network_acl_id argument missing";
-    my @params;
-    push @params,$self->single_parm($_,\%args) foreach
-        qw(AssociationId NetworkAclId);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(AssociationId NetworkAclId)],
+                                    });
     return $self->call('ReplaceNetworkAclAssociation',@params);
 }
 
@@ -291,11 +308,15 @@ Arguments:
  -icmp_type            -- For the ICMP protocol, the ICMP type. You can use
                           -1 to specify all ICMP types.  Required if
                           specifying 1 (ICMP) for the protocol
- -port_from            -- The first port in the range.  Required if specifying
+ -port_range_from      -- The first port in the range.  Required if specifying
                           6 (TCP) or 17 (UDP) for the protocol.
- -port_to              -- The last port in the range.  Only required if
+ -port_range_to        -- The last port in the range.  Only required if
                           specifying 6 (TCP) or 17 (UDP) for the protocol and
-                          is a different port than -port_from.
+                          is a different port than -port_range_from.
+
+ -port_from            -- Alias for -port_range_from
+
+ -port_to              -- Alias for -port_range_from
 
 Returns true on successful replacement.
 
@@ -312,23 +333,23 @@ sub replace_network_acl_entry {
         croak "replace_network_acl_entry(): -protocol argument missing";
     $args{-rule_action} or
         croak "replace_network_acl_entry(): -rule_action argument missing";
+    $args{-port_range_from} ||= $args{-port_from};
+    $args{-port_range_to} ||= $args{-port_to};
     if ($args{-protocol} == 1) { 
         defined $args{-icmp_type} && defined $args{-icmp_code} or
         croak "replace_network_acl_entry(): -icmp_type or -icmp_code argument missing";
     }
     elsif ($args{-protocol} == 6 || $args{-protocol} == 17) {
-	defined $args{-port_from} or
-		croak "create_network_acl_entry(): -port_from argument missing";
-	$args{-port_to} = $args{-port_from} if (! defined $args{-port_to});
+        defined $args{-port_range_from} or
+            croak "create_network_acl_entry(): -port_range_from argument missing";
+        $args{-port_range_to} = $args{-port_range_from} if ! defined $args{-port_range_to};
     }
-    $args{'-Icmp.Type'} = $args{-icmp_type};
-    $args{'-Icmp.Code'} = $args{-icmp_code};
-    $args{'-PortRange.From'} = $args{-port_from};
-    $args{'-PortRange.To'} = $args{-port_to};
-    my @params;
-    push @params,$self->single_parm($_,\%args) foreach
-        qw(NetworkAclId RuleNumber Protocol RuleAction Egress CidrBlock
-           Icmp.Code Icmp.Type PortRange.From PortRange.To);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(NetworkAclId RuleNumber Protocol
+                                                           RuleAction Egress CidrBlock Icmp.Code
+                                                           Icmp.Type PortRange.From PortRange.To)],
+                                    });
     return $self->call('ReplaceNetworkAclEntry',@params);
 }
 
@@ -338,9 +359,11 @@ L<VM::EC2>
 
 =head1 AUTHOR
 
+Lance Kinley E<lt>lkinley@loyaltymethods.comE<gt>.
 Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
 
-Copyright (c) 2011 Ontario Institute for Cancer Research
+Copyright (c) 2012 Loyalty Methods, Inc.
+Copyright (c) 2012 Ontario Institute for Cancer Research
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
@@ -349,6 +372,5 @@ License 2.0.  Refer to LICENSE for the full license text. In addition,
 please see DISCLAIMER.txt for disclaimers of warranty.
 
 =cut
-
 
 1;

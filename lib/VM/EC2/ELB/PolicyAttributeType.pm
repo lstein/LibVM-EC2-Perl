@@ -63,11 +63,13 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
+use overload
+    '""'     => sub { shift->AttributeName },
+    fallback => 1;
+
 sub valid_fields {
     my $self = shift;
     return qw(AttributeName AttributeType Cardinality DefaultValue Description);
 }
-
-sub primary_id { shift->AttributeName }
 
 1;

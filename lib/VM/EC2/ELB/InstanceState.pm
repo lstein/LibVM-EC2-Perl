@@ -69,7 +69,14 @@ sub valid_fields {
     return qw(Description InstanceId ReasonCode State);
 }
 
-sub primary_id { shift->State }
+use overload
+    '""'     => sub {
+                        my $self = shift;
+                        return $self->InstanceId . ': ' .
+                               $self->State . ' (Reason: ' .
+                               $self->ReasonCode . ')';
+                    },
+    fallback => 1;
 
 sub instance {
     my $self = shift;

@@ -57,14 +57,15 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
+use overload
+    '""'     => sub {
+        my $self = shift;
+        return $self->AttributeName . '=' . $self->AttributeValue},
+    fallback => 1;
+
 sub valid_fields {
     my $self = shift;
     return qw(AttributeName AttributeValue);
-}
-
-sub primary_id {
-    my $self = shift;
-    return $self->AttributeName . '=' . $self->AttributeValue;
 }
 
 1;

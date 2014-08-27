@@ -163,6 +163,9 @@ Common optional arguments:
  -architecture        Architecture of the image ("i386" or "x86_64")
  -kernel_id           ID of the kernel to use
  -ramdisk_id          ID of the RAM disk to use
+ -virtualization_type Type of virtualization ("paravirtual" or "hvm")
+                      Default is "paravirtual"
+ -sriov_net_support   Set to "simple" to enable enhanced networking for the AMI
  
 While you do not have to specify the kernel ID, it is strongly
 recommended that you do so. Otherwise the kernel will have to be
@@ -186,7 +189,8 @@ sub register_image {
 
     my @param;
     for my $a (qw(Name RootDeviceName ImageLocation Description
-                  Architecture KernelId RamdiskId)) {
+                  Architecture KernelId RamdiskId VirtualizationType 
+                  SriovNetSupport)) {
 	push @param,$self->single_parm($a,\%args);
     }
     push @param,$self->block_device_parm($args{-block_devices} || $args{-block_device_mapping});
@@ -219,6 +223,7 @@ retrieved:
  launchPermission       -- list of scalar
  productCodes           -- array
  blockDeviceMapping     -- list of hashref
+ sriovNetSupport        -- scalar
 
 All of these values can be retrieved more conveniently from the
 L<VM::EC2::Image> object returned from describe_images(), so there is
@@ -266,7 +271,7 @@ Only one attribute can be changed in a single request.
 
 For example:
 
-  $ec2->modify_image_attribute('i-12345',-product_code=>['abcde','ghijk']);
+  $ec2->modify_image_attribute('ami-12345',-product_code=>['abcde','ghijk']);
 
 The result code is true if the attribute was successfully modified,
 false otherwise. In the latter case, $ec2->error() will provide the

@@ -28,7 +28,7 @@ These object methods are supported:
                 'one-time' or 'persistent'.
 
  state       -- The state of this request, one of 'open',
-                'closed', 'cancelled' or 'failed'.
+                'closed', 'fulfilled', 'cancelled' or 'failed'.
 
  fault       -- Fault code for the request, if any, an
                 instance of VM::EC2::Error.
@@ -43,6 +43,8 @@ These object methods are supported:
  launchGroup -- Launch group of the instances run under this request.
                 Instances in the same launch group are launched
                 and terminated together.
+
+ launchedAvailabilityZone -- Availability zone of launched instance.
 
  availabilityZoneGroup -- Availability zone group of the instances
                 run under this request. Instances in the same

@@ -70,10 +70,4 @@ sub PolicyNames {
     return @{$policies->{member}};
 }
 
-sub InstancePort {
-    my $self = shift;
-    my $listener = $self->SUPER::InstancePort;
-    
-}
-
 1;

@@ -88,7 +88,19 @@ sub single_parm {
 
 sub list_parm {
     my $self = shift;
-    my ($argname,$val) = @_;
+    return $self->_list_parm(@_);
+}
+
+sub member_list_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    return $self->_list_parm($argname,$args,'member');
+}
+
+sub _list_parm {
+    my $self = shift;
+    my ($argname,$val,$append) = @_;
+    $argname .= ".$append" if $append;
     return unless $val;
     my @params;
     my $c = 1;
@@ -241,6 +253,68 @@ sub boolean_parm {
     my $self = shift;
     my ($argname,$val) = @_;
     return ($argname => $val ? 'true' : 'false');
+}
+
+sub key_value_parm {
+    my $self = shift;
+    my ($parm,$values,$skip_undef_values) = @_;
+    return $self->_key_value_parm($parm,$values,'Key','Value',$skip_undef_values);
+}
+
+sub member_key_value_parm {
+    my $self = shift;
+    my ($parm,$values,$skip_undef_values) = @_;
+    return $self->_key_value_parm($parm,$values,'Key','Value',$skip_undef_values,'member');
+}
+
+sub _key_value_parm {
+    my $self = shift;
+    my ($parm,$values,$keyname,$valuename,$skip_undef_values,$append) = @_;
+
+    my @params;
+    $parm .= ".$append" if $append;
+    my $c = 1;
+    if (ref $values && ref $values eq 'HASH') {
+        while (my ($name,$value) = each %$values) {
+            push @params,("$parm.$c.$keyname"   => $name);
+            if (ref $value && ref $value eq 'ARRAY') {
+                for (my $m=1;$m<=@$value;$m++) {
+                    push @params,("$parm.$c.$valuename.$m" => $value->[$m-1])
+                }
+            } else {
+                push @params,("$parm.$c.$valuename" => $value)
+                    unless !defined $value && $skip_undef_values;
+            }
+            $c++;
+        }
+    } else {
+        for (ref $values ? @$values : $values) {
+            my ($name,$value) = /([^=]+)\s*=\s*(.+)/;
+            push @params,("$parm.$c.$keyname"   => $name);
+            push @params,("$parm.$c.$valuename" => $value)
+                unless !defined $value && $skip_undef_values;
+            $c++;
+        }
+    }
+    return @params;
+}
+
+sub member_hash_parm {
+    my $self = shift;
+    my ($parm,$values) = @_;
+
+    my @params;
+    $values = [ $values ] if ref $values eq 'HASH';
+    return unless ref $values eq 'ARRAY';
+    my $c = 1;
+    foreach my $value (@$values) {
+        next unless ref $value eq 'HASH';
+        foreach my $key (keys %$value) {
+            push @params, ("$parm.member.$c.$key" => $value->{$key});
+        }
+        $c++;
+    }
+    return @params;
 }
 
 1;

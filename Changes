@@ -4,6 +4,9 @@
     - Compliant to 2014-05-01 API.
     - Volume and snapshot encryption supported.
     - AWS Signature Version 4 supported.
+    - RDS support added.
+    - VPC peering support added.
+    - ParmParser support added for elastic load balancer, RDS, VPN, VPC and customer gateway modules.
 
 1.25
     - Change behavior of create_network_acl_entry() so that -egress option defaults to false as originally
