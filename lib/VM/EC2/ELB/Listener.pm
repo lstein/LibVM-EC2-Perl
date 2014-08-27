@@ -63,13 +63,14 @@ sub valid_fields {
     return qw(InstancePort InstanceProtocol LoadBalancerPort Protocol SSLCertificateId);
 }
 
-sub primary_id {
-    my $self = shift;
-    my $string = $self->Protocol . ':' . $self->LoadBalancerPort . ' --> ' . $self->InstanceProtocol . ':' . $self->InstancePort;
-    my $ssl_id = $self->SSLCertificateId;
-    $string .= ':' . $ssl_id if (defined $ssl_id);
-    return $string;
-}
+use overload
+    '""'     => sub {
+        my $self = shift;
+        my $string = $self->Protocol . ':' . $self->LoadBalancerPort . ' --> ' . $self->InstanceProtocol . ':' . $self->InstancePort;
+        my $ssl_id = $self->SSLCertificateId;
+        $string .= ':' . $ssl_id if (defined $ssl_id);
+        return $string},
+    fallback => 1;
 
 sub InstanceProtocol {
     my $self = shift;

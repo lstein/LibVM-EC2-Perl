@@ -19,6 +19,15 @@ VM::EC2::Dispatch->register(
 
 =head1 METHODS
 
+Implemented:
+ DescribeKeyPairs
+ CreateKeyPair
+ ImportKeyPair
+ DeleteKeyPair
+
+Unimplemented:
+ (none)
+
 These methods let you manipulate ssh key pairs.
 
 =head2 @keys = $ec2->describe_key_pairs(@names);

@@ -43,7 +43,7 @@ The following object methods are supported:
  status           -- Volume state, one of "creating", "available",
                      "in-use", "deleting", "deleted", "error"
  createTime       -- Timestamp for when volume was created.
- volumeType       -- The volume type, one of "standard" or "io1"
+ volumeType       -- The volume type, one of "standard", "io1", or "gp2"
  iops             -- The number of I/O operations per second that the volume
                      supports, an integer between 100 and 4000. Only valid for
                      volumes of type "io1".
@@ -193,7 +193,7 @@ use Carp 'croak';
 sub valid_fields {
     my $self = shift;
     return qw(volumeId size snapshotId availabilityZone status 
-              createTime attachmentSet volumeType iops tagSet encrypted);
+              createTime attachmentSet volumeType iops encrypted tagSet);
 }
 
 sub primary_id {shift->volumeId}
@@ -309,5 +309,10 @@ sub product_codes {
     return map {VM::EC2::ProductCode->new($_,$self->aws)} @codes;
 }
 
+sub encrypted {
+    my $self = shift;
+    my $enc = $self->SUPER::encrypted;
+    return $enc eq 'true';
+}
 
 1;

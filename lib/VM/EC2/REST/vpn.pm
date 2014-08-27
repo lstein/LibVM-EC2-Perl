@@ -12,6 +12,8 @@ VM::EC2::Dispatch->register(
     DescribeVpnConnections            => 'fetch_items,vpnConnectionSet,VM::EC2::VPC::VpnConnection',
     );
 
+my $VEP = 'VM::EC2::ParmParser';
+
 =head1 NAME VM::EC2::REST::vpn
 
 =head1 SYNOPSIS
@@ -67,9 +69,12 @@ vpn-gateway-id
 
 sub describe_vpn_connections {
     my $self = shift;
-    my %args = $self->args('-vpn_connection_id',@_);
-    my @params = $self->list_parm('VpnConnectionId',\%args);
-    push @params,$self->filter_parm(\%args);
+    my %args = $VEP->args(-vpn_connection_id,@_);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        list_parm   => 'VpnConnectionId',
+                                        filter_parm => 'Filter',
+                                    });
     return $self->call('DescribeVpnConnections',@params);
 }
 
@@ -83,18 +88,20 @@ type is ipsec.1.
 
 Required Arguments:
 
- -customer_gateway_id       -- The ID of the customer gateway
+ -customer_gateway_id        -- The ID of the customer gateway
 
- -vpn_gateway_id            -- The ID of the VPN gateway
+ -vpn_gateway_id             -- The ID of the VPN gateway
 
 Optional arguments:
- -type                      -- Default is the only currently available option:
-                               ipsec.1 (API 2012-06-15)
+ -type                       -- Default is the only currently available option:
+                                ipsec.1 (API 2012-06-15)
 
- -static_routes_only        -- Indicates whether or not the VPN connection
-                               requires static routes. If you are creating a VPN
-                               connection for a device that does not support
-                               BGP, you must specify this value as true.
+ -options_static_routes_only -- Indicates whether or not the VPN connection
+                                requires static routes. If you are creating a VPN
+                                connection for a device that does not support
+                                BGP, you must specify this value as true.
+
+ -static_routes_only         -- Alias for -options_static_routes_only
 
 Returns a L<VM::EC2::VPC::VpnConnection> object.
 
@@ -108,11 +115,12 @@ sub create_vpn_connection {
         croak "create_vpn_connection(): -vpn_gateway_id argument missing";
     $args{-customer_gateway_id} or
         croak "create_vpn_connection(): -customer_gateway_id argument missing";
-    $args{'Options.StaticRoutesOnly'} = $args{-static_routes_only};
-    my @params;
-    push @params,$self->single_parm($_,\%args) foreach
-        qw(VpnGatewayId CustomerGatewayId Type);
-    push @params,$self->boolean_parm('Options.StaticRoutesOnly',\%args);
+    $args{'-options_static_routes_only'} ||= $args{-static_routes_only};
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        boolean_parm => 'Options.StaticRoutesOnly',
+                                        single_parm  => [qw(VpnGatewayId CustomerGatewayId Type)],
+                                    });
     return $self->call('CreateVpnConnection',@params);
 }
 
@@ -139,10 +147,13 @@ Returns true on successful deletion.
 
 sub delete_vpn_connection {
     my $self = shift;
-    my %args = $self->args('-vpn_connection_id',@_);
+    my %args = $VEP->args(-vpn_connection_id,@_);
     $args{-vpn_connection_id} or
         croak "delete_vpn_connection(): -vpn_connection_id argument missing";
-    my @params = $self->single_parm('VpnConnectionId',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm  => 'VpnConnectionId',
+                                    });
     return $self->call('DeleteVpnConnection',@params);
 }
 
@@ -172,8 +183,10 @@ sub create_vpn_connection_route {
         croak "create_vpn_connection_route(): -destination_cidr_block argument missing";
     $args{-vpn_connection_id} or
         croak "create_vpn_connection_route(): -vpn_connection_id argument missing";
-    my @params = $self->single_parm($_,\%args)
-        foreach qw(DestinationCidrBlock VpnConnectionId);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm  => [qw(DestinationCidrBlock VpnConnectionId)],
+                                    });
     return $self->call('CreateVpnConnectionRoute',@params);
 }
 
@@ -203,8 +216,10 @@ sub delete_vpn_connection_route {
         croak "delete_vpn_connection_route(): -destination_cidr_block argument missing";
     $args{-vpn_connection_id} or
         croak "delete_vpn_connection_route(): -vpn_connection_id argument missing";
-    my @params = $self->single_parm($_,\%args)
-        foreach qw(DestinationCidrBlock VpnConnectionId);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm  => [qw(DestinationCidrBlock VpnConnectionId)],
+                                    });
     return $self->call('DeleteVpnConnectionRoute',@params);
 }
 
@@ -214,9 +229,11 @@ L<VM::EC2>
 
 =head1 AUTHOR
 
+Lance Kinley E<lt>lkinley@loyaltymethods.comE<gt>.
 Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
 
-Copyright (c) 2011 Ontario Institute for Cancer Research
+Copyright (c) 2012 Loyalty Methods, Inc.
+Copyright (c) 2012 Ontario Institute for Cancer Research
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either

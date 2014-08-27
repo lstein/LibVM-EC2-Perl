@@ -257,6 +257,9 @@ The -target value can be any one of the following:
  3. A VM::EC2::NetworkInterface object, or a network interface ID
     matching the regex /^eni-[0-9a-f]{8}$/.
 
+ 4. A VM::EC2::VPC::PeeringConnection object, or a VPC peering connection ID
+    matching the regex /^pcx-[0-9a-f]{8}$/.
+
 On success, this method returns true.
 
 =cut
@@ -324,6 +327,9 @@ The -target value can be any one of the following:
  3. A VM::EC2::NetworkInterface object, or a network interface ID
     matching the regex /^eni-[0-9a-f]{8}$/.
 
+ 4. A VM::EC2::VPC::PeeringConnection object, or a VPC peering connection ID
+    matching the regex /^pcx-[0-9a-f]{8}$/.
+
 On success, this method returns true.
 
 =cut
@@ -355,9 +361,13 @@ sub _manipulate_route {
                                              || $args{-target} =~ /^i-[0-9a-f]{8}$/;
     $args{-network_interface_id} = $args{-target} if eval{$args{-target}->isa('VM::EC2::NetworkInterface')}
                                              || $args{-target} =~ /^eni-[0-9a-f]{8}$/;
+    $args{-vpc_peering_connection_id} = $args{-target} if eval{$args{-target}->isa('VM::EC2::VPC::PeeringConnection')}
+                                             || $args{-target} =~ /^pcx-[0-9a-f]{8}$/;
+
 
     my @parm = map {$self->single_parm($_,\%args)} 
-               qw(RouteTableId DestinationCidrBlock GatewayId InstanceId NetworkInterfaceId);
+               qw(RouteTableId DestinationCidrBlock GatewayId InstanceId
+                  NetworkInterfaceId VpcPeeringConnectionId);
 
     return $self->call($api_call,@parm);
 }

@@ -243,6 +243,11 @@ end server authentication policy type can be applied to the back-end ports;
 this policy type is composed of multiple public key policies.  Returns true on
 success.
 
+=head2 $success = $elb->add_tags({ Name => Value[, Name => Value,...]);
+=head2 $success = $elb->add_tags(\%tags);
+
+Adds tags to the ELB.  Up to ten tags can be applied.
+
 =head1 INFORMATION METHODS
 
 =head2 $state = $lb->describe_instance_health(-instances=>\@instances)
@@ -272,7 +277,7 @@ L<VM::EC2::ELB::Policies>
 
 Lance Kinley E<lt>lkinley@loyaltymethods.comE<gt>.
 
-Copyright (c) 2012 Loyalty Methods, Inc.
+Copyright (c) 2012-2014 Loyalty Methods, Inc.
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
@@ -561,5 +566,25 @@ sub args {
     return @_ if $_[0] =~ /^-/;
     return ($default_param_name => \@_);
 }
+
+# the following functions override Generic
+sub add_tags {
+    my $self = shift;
+    my $tags = ref $_[0] && ref $_[0] eq 'HASH' ? shift : {@_};
+    return $self->aws->add_load_balancer_tags(-load_balancer_names => $self->LoadBalancerName, -tags => $tags);
+}
+
+sub tags {
+    my $self = shift;
+    my $tags = $self->aws->describe_load_balancer_tags(-load_balancer_names => $self->LoadBalancerName);
+    return $tags->{$self->LoadBalancerName};
+}
+
+sub delete_tags {
+    my $self = shift;
+    my $tags = shift;
+    return $self->aws->remove_load_balancer_tags(-load_balancer_names => $self->LoadBalancerName, -tags => $tags);
+}
+
 
 1;

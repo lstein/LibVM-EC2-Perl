@@ -342,7 +342,7 @@ sub fetch_items {
 
 Used for XML responses from ELB API calls which contain a key that is the name
 of the API call with 'Result' appended.  All these XML responses contain
-'member' as the item delimter instead of 'item'
+'member' as the item delimiter instead of 'item'
 
 =cut
 
@@ -355,6 +355,34 @@ sub fetch_members {
     my ($result_key) = grep /Result$/,keys %$parsed;
     my $list   = $parsed->{$result_key}{$tag}{member} or return;
     return map {$class->new($_,$ec2,@{$parsed}{'xmlns','RequestId'})} @$list;
+}
+
+=head2 @objects = $dispatch->fetch_rds_objects($raw_xml,$ec2,$container_tag,$object_class,$nokey)
+
+Used for XML responses from RDS API calls which contain a key that is the name
+of the API call with 'Result' appended.  In addition, the structure is a list
+of objects wrapped in a plural version of the object's name.
+
+=cut
+
+sub fetch_rds_objects {
+    my $self = shift;
+    my ($content,$ec2,$tag,$class,$nokey) = @_;
+    load_module($class);
+    my $parser = $self->new_xml_parser($nokey);
+    my $parsed = $parser->XMLin($content);
+    my ($result_key) = grep /Result$/,keys %$parsed;
+    # xml tags in api are not entirely consistent
+    my @endings = qw/s sList List/;
+    my $list_tag;
+    foreach (@endings) {
+        $list_tag = $tag . $_;
+        last if exists $parsed->{$result_key}{$list_tag};
+    }
+    my $list = $parsed->{$result_key}{$list_tag}{$tag} or return;
+    return ref $list eq 'HASH' ?
+        ($class->new($list,$ec2,@{$parsed}{'xmlns','RequestId'})) :
+        map {$class->new($_,$ec2,@{$parsed}{'xmlns','RequestId'})} @$list;
 }
 
 =head2 @objects = $dispatch->fetch_items_iterator($raw_xml,$ec2,$container_tag,$object_class,$token_name)

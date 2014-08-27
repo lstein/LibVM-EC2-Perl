@@ -40,6 +40,22 @@ EC2 instances, launch new instances, control the instance lifecycle
 (e.g. starting and stopping them), and fetching the console output
 from instances.
 
+Implemented:
+ ConfirmProductInstance
+ DescribeInstanceAttribute
+ DescribeInstances
+ DescribeInstanceStatus
+ ModifyInstanceAttribute
+ RebootInstances
+ ResetInstanceAttribute
+ RunInstances
+ StartInstances
+ StopInstances
+ TerminateInstances
+
+Unimplemented:
+ (none)
+
 The primary object manipulated by these methods is
 L<VM::EC2::Instance>. Please see the L<VM::EC2::Instance> manual page
 for additional methods that allow you to attach and detach volumes,
@@ -633,6 +649,9 @@ retrieved:
  blockDeviceMapping                -- list of hashref
  sourceDestCheck                   -- scalar
  groupSet                          -- list of scalar
+ productCodes                      -- list of hashref
+ ebsOptimized                      -- scalar
+ sriovNetSupport                   -- scalar
 
 All of these values can be retrieved more conveniently from the
 L<VM::EC2::Instance> object returned from describe_instances(), so
@@ -671,6 +690,8 @@ The following is the list of attributes that can be set:
  -block_devices           -- Specify block devices to change 
                              deleteOnTermination flag
  -block_device_mapping    -- Alias for -block_devices
+ -ebs_optimization        -- EBS Optmization
+ -sriov_net_support       -- Enhanced networking support
 
 Only one attribute can be changed in a single request. For example:
 
@@ -707,9 +728,11 @@ sub modify_instance_attribute {
     my (@param) = $VEP->format_parms(\%args,{
 	single_parm => 'InstanceId',
 	value_parm  => [qw(InstanceType Kernel Ramdisk UserData DisableApiTermination
-                           InstanceInitiatedShutdownBehavior SourceDestCheck)],
+                           InstanceInitiatedShutdownBehavior SourceDestCheck
+                           SriovNetSupport)],
 	list_parm   => 'GroupId',
 	block_device_parm => 'BlockDeviceMapping',
+        boolean_parm => 'ebsOptimized',
 					   });
     return $self->call('ModifyInstanceAttribute',@param);
 }

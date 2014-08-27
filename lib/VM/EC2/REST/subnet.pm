@@ -8,6 +8,7 @@ VM::EC2::Dispatch->register(
     CreateSubnet                      => 'fetch_one,subnet,VM::EC2::VPC::Subnet',
     DeleteSubnet                      => 'boolean',
     DescribeSubnets                   => 'fetch_items,subnetSet,VM::EC2::VPC::Subnet',
+    ModifySubnetAttribute             => 'boolean',
 );
 
 =head1 NAME VM::EC2::REST::subnet
@@ -131,6 +132,36 @@ sub describe_subnets {
     my @parm   = $self->list_parm('SubnetId',\%args);
     push @parm,  $self->filter_parm(\%args);
     return $self->call('DescribeSubnets',@parm);
+}
+
+=head2 $success = $ec2->modify_subnet_attribute(-subnet_id => $sub_id, -map_public_ip_on_launch => $boolean)
+
+Modifies a subnet attribute.
+
+Required arguments:
+
+ -subnet_id                 The ID of the subnet to modify.
+
+ -map_public_ip_on_launch   Modifies the public IP addressing behavior for the
+                            subnet. Specify true to indicate that instances
+                            launched into the specified subnet should be
+                            assigned a public IP address. If set to true, the
+                            instance receives a public IP address only if the
+                            instance is launched with a single, new network
+                            interface with the device index of 0.
+
+Returns true on success.
+
+=cut
+
+sub modify_subnet_attribute {
+    my $self = shift;
+    my %args = @_;
+    $args{-subnet_id} && $args{-map_public_ip_on_launch} 
+      or croak "Usage: modify_subnet_attribute(-subnet_id=>\$id,-map_public_ip_on_launch=>\$boolean)";
+    my @parm = $self->single_parm(SubnetId=>\%args);
+    push @parm, $self->boolean_value_parm(MapPublicIpOnLaunch=>\%args);
+    return $self->call('ModifySubnetAttribute',@parm);
 }
 
 =head1 SEE ALSO

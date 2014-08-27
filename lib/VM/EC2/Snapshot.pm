@@ -403,4 +403,10 @@ sub copy {
     return $snapshot;
 }
 
+sub encrypted {
+    my $self = shift;
+    my $enc = $self->SUPER::encrypted;
+    return $enc eq 'true';
+}
+
 1;

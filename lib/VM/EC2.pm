@@ -566,7 +566,7 @@ use strict;
 
 use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
-eval {use AWS::Signature4}; # optional
+eval {require AWS::Signature4}; # optional
 
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
@@ -622,6 +622,7 @@ use constant import_tags => {
     ':hpc'      => ['placement_group'],
     ':scaling'  => ['elastic_load_balancer','autoscaling'],
     ':elb'      => ['elastic_load_balancer'],
+    ':rds'      => ['relational_database_service'],
     ':misc'     => ['devpay','reserved_instance', 'spot_instance','vm_export','vm_import','windows'],
     ':all'      => [qw(:standard :vpc :hpc :scaling :misc)],
     ':DEFAULT'  => [':all'],
@@ -1274,10 +1275,15 @@ documentation (yet).
 sub canonicalize {
     my $self = shift;
     my $name = shift;
-    while ($name =~ /\w[A-Z.]/) {
-	$name    =~ s/([a-zA-Z])\.?([A-Z])/\L$1_$2/g or last;
+
+    $name =~ s/^-//;
+    $name    =~ s/DB/Db/g;
+    $name    =~ s/AZ/Az/g;
+
+    while ($name =~ /[A-Z][^A-Z]/) {
+        $name    =~ s/(?<!^)([A-Z]*[\d]*)\.?([A-Z])/\L$1_$2/g or last;
     }
-    return $name =~ /^-/ ? lc $name : '-'.lc $name;
+    return '-'.lc $name;
 }
 
 sub uncanonicalize {
@@ -1346,20 +1352,57 @@ sub prefix_parm {
     return ("$prefix.$argname"=>$v);
 }
 
-=head2 @parameters = $ec2->member_list_parm(ParameterName => \%args)
+=head2 @arguments = $ec2->member_hash_parms(ParameterName => \%args)
+
+Create a parameter list from a hashref or arrayref of hashes
+
+Created specifically for the RDS ModifyDBParameterGroup parameter
+'Parameters', but may be useful for other calls in the future.
+
+ie:
+
+The argument would be in the form:
+
+   [
+           {
+                   ParameterName=>'max_user_connections',
+                   ParameterValue=>24,
+                   ApplyMethod=>'pending-reboot'
+           },
+           {
+                   ParameterName=>'max_allowed_packet',
+                   ParameterValue=>1024,
+                   ApplyMethod=>'immediate'
+           },
+   ];
+
+The resulting output would be if the argname is '-parameters':
+
+Parameters.member.1.ParameterName => max_user_connections
+Parameters.member.1.ParameterValue => 24
+Parameters.member.1.ApplyMethod => pending-reboot
+Parameters.member.2.ParameterName => max_allowed_packet
+Parameters.member.2.ParameterValue => 1024
+Parameters.member.2.ApplyMethod => immediate
 
 =cut
 
-sub member_list_parm {
+sub member_hash_parms {
     my $self = shift;
     my ($argname,$args) = @_;
     my $name = $self->canonicalize($argname);
 
     my @params;
-    if (my $a = $args->{$name}||$args->{"-$argname"}) {
+    if (my $arg = $args->{$name}||$args->{"-$argname"}) {
+        $arg = [ $arg ] if ref $arg eq 'HASH';
+        return unless ref $arg eq 'ARRAY';
         my $c = 1;
-        for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
-            push @params,("$argname.member.".$c++ => $_);
+        foreach my $a (@$arg) {
+            next unless ref $a eq 'HASH';
+            foreach my $key (keys %$a) {
+                push @params, ("$argname.member.$c.$key" => $a->{$key});
+            }
+            $c++;
         }
     }
     return @params;
@@ -1372,10 +1415,27 @@ sub member_list_parm {
 sub list_parm {
     my $self = shift;
     my ($argname,$args) = @_;
+    return $self->_list_parm($argname,$args);
+}
+
+=head2 @parameters = $ec2->member_list_parm(ParameterName => \%args)
+
+=cut
+
+sub member_list_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    return $self->_list_parm($argname,$args,'member');
+}
+
+sub _list_parm {
+    my $self = shift;
+    my ($argname,$args,$append) = @_;
     my $name = $self->canonicalize($argname);
 
     my @params;
     if (my $a = $args->{$name}||$args->{"-$argname"}) {
+        $argname .= ".$append" if $append;
 	my $c = 1;
 	for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
 	    push @params,("$argname.".$c++ => $_);
@@ -1402,11 +1462,28 @@ sub filter_parm {
 sub key_value_parameters {
     my $self = shift;
     # e.g. 'Filter', 'Name','Value',{-filter=>{a=>b}}
+    return $self->_key_value_parameters(@_);
+}
+
+=head2 @arguments = $ec2->member_key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
+
+=cut
+
+sub member_key_value_parameters {
+    my $self = shift;
     my ($parameter_name,$keyname,$valuename,$args,$skip_undef_values) = @_;  
+    return $self->_key_value_parameters($parameter_name,$keyname,$valuename,$args,$skip_undef_values,'member');
+}
+
+sub _key_value_parameters {
+    my $self = shift;
+    # e.g. 'Filter', 'Name','Value',{-filter=>{a=>b}}
+    my ($parameter_name,$keyname,$valuename,$args,$skip_undef_values,$append) = @_;  
     my $arg_name     = $self->canonicalize($parameter_name);
     
     my @params;
     if (my $a = $args->{$arg_name}||$args->{"-$parameter_name"}) {
+        $parameter_name .= ".$append" if $append;
 	my $c = 1;
 	if (ref $a && ref $a eq 'HASH') {
 	    while (my ($name,$value) = each %$a) {
@@ -1594,6 +1671,15 @@ sub boolean_parm {
     return unless exists $args->{$name} || exists $args->{$argname};
     my $val = $args->{$name} || $args->{$argname};
     return ($argname => $val ? 'true' : 'false');
+}
+
+sub boolean_value_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    my $name = $self->canonicalize($argname);
+    return unless exists $args->{$name} || exists $args->{$argname};
+    my $val = $args->{$name} || $args->{$argname};
+    return ("$argname.Value" => $val ? 'true' : 'false');
 }
 
 =head2 $version = $ec2->version()

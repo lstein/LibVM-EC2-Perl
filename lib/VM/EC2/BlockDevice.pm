@@ -108,7 +108,9 @@ sub noDevice {
 
 sub ebs {
     my $self = shift;
-    return $self->{ebs} = VM::EC2::BlockDevice::EBS->new($self->SUPER::ebs,$self->aws);
+    my $ebs = $self->SUPER::ebs;
+    return unless $ebs;  # some of these devices are ephemeral
+    return $self->{ebs} ||= VM::EC2::BlockDevice::EBS->new($ebs,$self->aws);
 }
 
 sub snapshotId { shift->ebs->snapshotId }

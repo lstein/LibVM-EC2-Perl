@@ -55,12 +55,14 @@ use strict;
 use base 'VM::EC2::Generic';
 use VM::EC2::ELB::PolicyAttributeType;
 
+use overload
+    '""'     => sub { shift->PolicyTypeName },
+    fallback => 1;
+
 sub valid_fields {
     my $self = shift;
     return qw(Description PolicyAttributeTypeDescriptions PolicyTypeName);
 }
-
-sub primary_id { shift->PolicyTypeName }
 
 sub PolicyAttributeTypeDescriptions {
     my $self = shift;

@@ -163,6 +163,8 @@ These object methods are supported:
  instanceInitiatedShutdownBehavior -- Action to take when the instance calls
                    shutdown or halt. One of "stop" or "terminate". CHANGEABLE.
 
+ sriovNetSupport -- Specifies whether enhanced networking is enabled.  "simple" if so.
+
  tagSet         -- Tags for the instance as a hashref. CHANGEABLE via add_tags()
                    and delete_tags().
 
@@ -518,6 +520,7 @@ sub valid_fields {
               clientToken
               hypervisor
               tagSet
+              sriovNetSupport
              );
 }
 

@@ -14,6 +14,8 @@ VM::EC2::Dispatch->register(
     EnableVgwRoutePropagation         => 'boolean',
     );
 
+my $VEP = 'VM::EC2::ParmParser';
+
 =head1 NAME VM::EC2::REST::vpn_gateway
 
 =head1 SYNOPSIS
@@ -70,9 +72,12 @@ vpn-gateway-id
 
 sub describe_vpn_gateways {
     my $self = shift;
-    my %args = $self->args('-vpn_gateway_id',@_);
-    my @params = $self->list_parm('VpnGatewayId',\%args);
-    push @params,$self->filter_parm(\%args);
+    my %args = $VEP->args(-vpn_gateway_id,@_);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        list_parm   => 'VpnGatewayId',
+                                        filter_parm => 'Filter',
+                                    });
     return $self->call('DescribeVpnGateways',@params);
 }
 
@@ -94,9 +99,12 @@ Returns a VM::EC2::VPC::VpnGateway object on success
 
 sub create_vpn_gateway {
     my $self = shift;
-    my %args = $self->args('-type',@_);
+    my %args = $VEP->args(-type,@_);
     $args{-type} ||= 'ipsec.1';
-    my @params = $self->list_parm('Type',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        list_parm => 'Type',
+                                    });
     return $self->call('CreateVpnGateway',@params);
 }
 
@@ -120,10 +128,13 @@ Returns true on successful deletion
 
 sub delete_vpn_gateway {
     my $self = shift;
-    my %args = $self->args('-vpn_gateway_id',@_);
+    my %args = $VEP->args(-vpn_gateway_id,@_);
     $args{-vpn_gateway_id} or
         croak "delete_vpn_gateway(): -vpn_gateway_id argument missing";
-    my @params = $self->single_parm('VpnGatewayId',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => 'VpnGatewayId',
+                                    });
     return $self->call('DeleteVpnGateway',@params);
 }
 
@@ -150,8 +161,10 @@ sub attach_vpn_gateway {
         croak "attach_vpn_gateway(): -vpn_gateway_id argument missing";
     $args{-vpc_id} or
         croak "attach_vpn_gateway(): -vpc_id argument missing";
-    my @params = $self->single_parm('VpnGatewayId',\%args);
-    push @params, $self->single_parm('VpcId',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(VpnGatewayId VpcId)],
+                                    });
     return $self->call('AttachVpnGateway',@params);
 }
 
@@ -185,8 +198,10 @@ sub detach_vpn_gateway {
         croak "detach_vpn_gateway(): -vpn_gateway_id argument missing";
     $args{-vpc_id} or
         croak "detach_vpn_gateway(): -vpc_id argument missing";
-    my @params = $self->single_parm('VpnGatewayId',\%args);
-    push @params, $self->single_parm('VpcId',\%args);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(VpnGatewayId VpcId)],
+                                    });
     return $self->call('DetachVpnGateway',@params);
 }
 
@@ -213,8 +228,10 @@ sub enable_vgw_route_propagation {
         croak "enable_vgw_route_propagation(): -route_table_id argument missing";
     $args{-gateway_id} or
         croak "enable_vgw_route_propagation(): -gateway_id argument missing";
-    my @params = $self->single_parm($_,\%args)
-        foreach qw(RouteTableId GatewayId);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(RouteTableId GatewayId)],
+                                    });
     return $self->call('EnableVgwRoutePropagation',@params);
 }
 
@@ -241,14 +258,16 @@ sub disable_vgw_route_propagation {
         croak "disable_vgw_route_propagation(): -route_table_id argument missing";
     $args{-gateway_id} or
         croak "disable_vgw_route_propagation(): -gateway_id argument missing";
-    my @params = $self->single_parm($_,\%args)
-        foreach qw(RouteTableId GatewayId);
+    my @params = $VEP->format_parms(\%args,
+                                    {
+                                        single_parm => [qw(RouteTableId GatewayId)],
+                                    });
     return $self->call('DisableVgwRoutePropagation',@params);
 }
 
 # aliases for backward compatibility to a typo
 *enable_vgw_route_propogation = \&enable_vgw_route_propagation;
-*disable_vgw_route_propogation =\&dispable_vgw_route_propagation;
+*disable_vgw_route_propogation = \&dispable_vgw_route_propagation;
 
 =head1 SEE ALSO
 
@@ -256,9 +275,11 @@ L<VM::EC2>
 
 =head1 AUTHOR
 
+Lance Kinley E<lt>lkinley@loyaltymethods.comE<gt>.
 Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
 
-Copyright (c) 2011 Ontario Institute for Cancer Research
+Copyright (c) 2012 Loyalty Methods, Inc.
+Copyright (c) 2012 Ontario Institute for Cancer Research
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
