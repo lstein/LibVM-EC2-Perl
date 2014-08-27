@@ -47,9 +47,12 @@ In addition, this object supports the following convenience methods:
     internet_gateways() -- Return the list of internet gateways attached to
                            this VPC as a list of VM::EC2::VPC::InternetGateway.
 
-    create_subnet($cidr_block, $options)
+    create_subnet($cidr_block [,$availability_zone] )
                         -- Create a subnet with the indicated CIDR block and
-                           return the VM::EC2::VPC::Subnet object.
+                           return the VM::EC2::VPC::Subnet object. The
+                           optional $availability_zone argument selects the
+                           zone for the subnet. Otherwise Amazon selects one
+                           for you.
 
     create_internet_gateway()
                         -- Create an internet gateway and immediately attach
@@ -154,12 +157,12 @@ sub detach_internet_gateway {
 
 sub create_subnet {
     my $self = shift;
-    my $cidr_block = shift or croak "usage: create_subnet(\$cidr_block)";
-    my $options = shift || {};
-    my %params = (
-	(-vpc_id=>$self->vpcId, -cidr_block=>$cidr_block),
-	map { $_=>$options->{$_} } keys %{$options},
-    );
+    my $cidr_block         = shift or croak "usage: create_subnet(\$cidr_block)";
+    my $availability_zone  = shift;
+
+    my %params = (-vpc_id=>$self->vpcId, -cidr_block=>$cidr_block);
+    $params{-availability_zone} = $availability_zone if $availability_zone;
+
     my $result = $self->aws->create_subnet(%params);
     $self->refresh if $result;
     return $result;
