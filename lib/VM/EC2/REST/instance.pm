@@ -285,7 +285,8 @@ following:
             specified, this will default to 'true' and the volume will be
             deleted.
 
-         - '<volume-type>': The volume type. One of "standard" or "io1".
+         - '<volume-type>': The volume type. One of "standard", "gp2" or "io1".
+            "gp2" is the new general purpose SSD type.
 
          - '<iops>': The number of I/O operations per second (IOPS) that
            the volume suports. A number between 100 to 4000. Only valid
