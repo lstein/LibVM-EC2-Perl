@@ -11,11 +11,12 @@ use Carp 'croak';
 memoize('bucket_region','valid_bucket_name');
 
 VM::EC2::Dispatch->register(
-    'get service'   => sub {VM::EC2::Dispatch::load_module('VM::S3::BucketList');
+    'list buckets'   => sub {VM::EC2::Dispatch::load_module('VM::S3::BucketList');
 			    my $bl =  VM::S3::BucketList->new(@_);
 			    return $bl ? $bl->buckets : undef
     },
-    'get bucket'     => sub {VM::EC2::Dispatch::load_module('VM::S3::BucketKey');
+
+    'list objects'     => sub {VM::EC2::Dispatch::load_module('VM::S3::BucketKey');
 			     my $data = shift;
 			     my $s3   = shift;
 
@@ -31,7 +32,14 @@ VM::EC2::Dispatch->register(
 			     }
 			     return map {VM::S3::BucketKey->new($_,$s3,@_)} @contents;
     },
+
+    'bucket acl'       => 'VM::S3::Acl',
+
+    'bucket cors'      => 'fetch_items_container,CORSRule,VM::S3::Cors',
+
     );
+
+sub s3 { shift->ec2 }
 
 sub get_service {
     my $self     = shift;
@@ -77,7 +85,7 @@ sub get_service {
 
 sub list_buckets {
     my $self = shift;
-    return $self->get_service('get service');
+    return $self->get_service('list buckets');
 }
 
 sub list_objects {
@@ -94,7 +102,7 @@ sub list_objects {
 	$self->{list_buckets_args}{$bucket}   = \@args;
     }
 
-    $self->get_service('get bucket',$bucket,{@args});
+    $self->get_service('list objects',$bucket,{@args});
 }
 
 sub more_objects {
@@ -103,19 +111,25 @@ sub more_objects {
     return exists $self->{list_buckets_marker}{$bucket};
 }
 
-sub bucket_location {
+sub _bucket_p {
     my $self   = shift;
-    my $bucket = shift;
-
-    $self->get_service('get location',$bucket,{location=>undef});
+    my ($op,$bucket) = @_;
+    $self->get_service("bucket $op",$bucket,{$op => undef});
 }
 
-sub bucket_policy {
-    my $self   = shift;
-    my $bucket = shift;
+sub bucket_acl             { shift->_bucket_p('acl',@_)       }
+sub bucket_cors            { shift->_bucket_p('cors',@_)      }
+sub bucket_lifecycle       { shift->_bucket_p('lifecycle',@_) }
+sub bucket_policy          { shift->_bucket_p('policy',@_)    }
+sub bucket_location        { shift->_bucket_p('location',@_)  }
+sub bucket_logging         { shift->_bucket_p('logging',@_)  }
+sub bucket_notification    { shift->_bucket_p('notification',@_)  }
+sub bucket_tagging         { shift->_bucket_p('tagging',@_)  }
+sub bucket_object_versions { shift->_bucket_p('versions',@_)  }
+sub bucket_request_payment { shift->_bucket_p('requestPayment',@_)  }
+sub bucket_website         { shift->_bucket_p('website',@_)  }
 
-    $self->get_service('get policy',$bucket,{policy=>undef});
-}
+
 
 sub bucket_region {
     my $self   = shift;

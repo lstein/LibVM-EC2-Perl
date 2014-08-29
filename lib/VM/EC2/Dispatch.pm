@@ -146,7 +146,7 @@ sub content2objects {
     my ($action,$type,$content,$ec2) = @_;
 
     # quick hack
-    return $content unless $type =~ /xml/;
+    return $content unless $type =~ /xml/ || $content =~ /^<\?xml/;
 
     my $handler = $REGISTRATION->{$action} || 'VM::EC2::Generic';
     my ($method,@params) = split /,/,$handler;
@@ -301,23 +301,31 @@ sub fetch_one {
 
 This is used for XML responses like this:
 
- <DescribeKeyPairsResponse xmlns="http://ec2.amazonaws.com/doc/2011-05-15/">
-    <requestId>59dbff89-35bd-4eac-99ed-be587EXAMPLE</requestId> 
-    <keySet>
+ <DescribeVolumesResponse xmlns="http://ec2.amazonaws.com/doc/2014-02-01/">
+   <requestId>59dbff89-35bd-4eac-99ed-be587EXAMPLE</requestId> 
+   <volumeSet>
       <item>
-         <keyName>gsg-keypair</keyName>
-         <keyFingerprint>
-         1f:51:ae:28:bf:89:e9:d8:1f:25:5d:37:2d:7d:b8:ca:9f:f5:f1:6f
-         </keyFingerprint>
+         <volumeId>vol-1a2b3c4d</volumeId>
+         <size>80</size>
+         <snapshotId/>
+         <availabilityZone>us-east-1a</availabilityZone>
+         <status>in-use</status>
+         <createTime>YYYY-MM-DDTHH:MM:SS.SSSZ</createTime>
+         <attachmentSet>
+            <item>
+               <volumeId>vol-1a2b3c4d</volumeId>
+               <instanceId>i-1a2b3c4d</instanceId>
+               <device>/dev/sdh</device>
+               <status>attached</status>
+               <attachTime>YYYY-MM-DDTHH:MM:SS.SSSZ</attachTime>
+               <deleteOnTermination>false</deleteOnTermination>
+            </item>
+         </attachmentSet>
+         <volumeType>standard</volumeType>
+         <encrypted>true</encrypted>
       </item>
-      <item>
-         <keyName>default-keypair</keyName>
-         <keyFingerprint>
-         0a:93:bb:e8:c2:89:e9:d8:1f:42:5d:37:1d:8d:b8:0a:88:f1:f1:1a
-         </keyFingerprint>
-      </item>
-   </keySet>
- </DescribeKeyPairsResponse>
+   </volumeSet>
+ </DescribeVolumesResponse>
 
 It looks inside the structure for the tag named $container_tag, pulls
 out the items that are stored under <item> and then passes the parsed
@@ -327,7 +335,7 @@ named "key" into hash keys.
 
 Pass it to replace() like this:
 
-  VM::EC2::Dispatch->replace(DescribeVolumes => 'fetch_items,volumeSet,VM::EC2::Volume')
+ VM::EC2::Dispatch->replace(DescribeVolumes => 'fetch_items,volumeSet,VM::EC2::Volume')
 
 =cut
 
@@ -422,6 +430,40 @@ sub fetch_items_iterator {
     } else {
 	$ec2->{$token} = $parsed->{nextToken};
     }
+    return map {$class->new($_,$ec2,@{$parsed}{'xmlns','requestId'})} @$list;
+}
+
+=head2 @list = $dispatch->fetch_items_container($raw_xml,$ec2,$container_tag,$class)
+
+This is used for XML responses from the S3 API such as this:
+
+ <CORSConfiguration>
+     <CORSRule>
+       <AllowedOrigin>http://www.example.com</AllowedOrigin>
+       <AllowedMethod>GET</AllowedMethod>
+       <MaxAgeSeconds>3000</MaxAgeSec>
+       <ExposeHeader>x-amz-server-side-encryption</ExposeHeader>
+     </CORSRule>
+     <CORSRule>
+       ...
+     </CORSRule>
+     ...
+ </CORSConfiguration>
+
+Provide the repeated tag, in this case 'CORSRule', and the class to load
+
+    VM::EC2::Dispatch->replace('bucket cors'=>'fetch_items_container,CORSRule,VM::S3::Cors');
+
+=cut
+
+sub fetch_items_container {
+    my $self = shift;
+    my ($content,$ec2,$tag,$class) = @_;
+    load_module($class);
+    my $parser = $self->new_xml_parser();
+    my $parsed = $parser->XMLin($content);
+    my $list   = $parsed->{$tag} or return;
+    my @list   = ref($list) eq 'ARRAY' ? @$list : $list;
     return map {$class->new($_,$ec2,@{$parsed}{'xmlns','requestId'})} @$list;
 }
 
