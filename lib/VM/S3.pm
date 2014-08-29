@@ -35,16 +35,20 @@ VM::EC2::Dispatch->register(
 
     'bucket acl'       => 'VM::S3::Acl',
 
-    'bucket cors'      => 'fetch_items_container,CORSRule,VM::S3::Cors',
+    'bucket cors'      => 'VM::S3::CorsRules',
 
     );
 
 sub s3 { shift->ec2 }
 
-sub get_service {
+sub get_service { shift->_service('get',@_) }
+sub put_service { shift->_service('put',@_) }
+
+sub _service {
     my $self     = shift;
-    my ($action,$bucket,$params) = @_;
+    my ($method,$action,$bucket,$params,$payload) = @_;
     $params    ||= {};
+    $payload   ||= '';
 
     local $self->{endpoint} = 'https://s3.amazonaws.com';
     local $self->{version}  = '2006-03-01';
@@ -64,9 +68,11 @@ sub get_service {
     }
 
     ref($params) ? $uri->query_form($params) : $uri->query($params);
-    my $request = GET($uri,
-		      $host ? (Host => $host) : (),
-		      'X-Amz-Content-Sha256'=>sha256_hex('')
+    my $code    = eval '\\&'.uc($method);
+    my $request = $code->($uri,
+			  $host ? (Host => $host) : (),
+			  'X-Amz-Content-Sha256'=>sha256_hex($payload),
+			  'Content'     => $payload,
 	);
     AWS::Signature4->new(-access_key=>$self->access_key,
 			 -secret_key=>$self->secret
@@ -111,25 +117,31 @@ sub more_objects {
     return exists $self->{list_buckets_marker}{$bucket};
 }
 
-sub _bucket_p {
+sub _bucket_g {
     my $self   = shift;
     my ($op,$bucket) = @_;
     $self->get_service("bucket $op",$bucket,{$op => undef});
 }
 
-sub bucket_acl             { shift->_bucket_p('acl',@_)       }
-sub bucket_cors            { shift->_bucket_p('cors',@_)      }
-sub bucket_lifecycle       { shift->_bucket_p('lifecycle',@_) }
-sub bucket_policy          { shift->_bucket_p('policy',@_)    }
-sub bucket_location        { shift->_bucket_p('location',@_)  }
-sub bucket_logging         { shift->_bucket_p('logging',@_)  }
-sub bucket_notification    { shift->_bucket_p('notification',@_)  }
-sub bucket_tagging         { shift->_bucket_p('tagging',@_)  }
-sub bucket_object_versions { shift->_bucket_p('versions',@_)  }
-sub bucket_request_payment { shift->_bucket_p('requestPayment',@_)  }
-sub bucket_website         { shift->_bucket_p('website',@_)  }
+sub _bucket_p {
+    my $self = shift;
+    my ($op,$bucket,$payload) = @_;
+    $self->put_service("bucket $op",$bucket,{$op=>undef},$payload);
+}
 
+sub bucket_acl             { shift->_bucket_g('acl',@_)       }
+sub bucket_cors            { shift->_bucket_g('cors',@_)      }
+sub bucket_lifecycle       { shift->_bucket_g('lifecycle',@_) }
+sub bucket_policy          { shift->_bucket_g('policy',@_)    }
+sub bucket_location        { shift->_bucket_g('location',@_)  }
+sub bucket_logging         { shift->_bucket_g('logging',@_)  }
+sub bucket_notification    { shift->_bucket_g('notification',@_)  }
+sub bucket_tagging         { shift->_bucket_g('tagging',@_)  }
+sub bucket_object_versions { shift->_bucket_g('versions',@_)  }
+sub bucket_request_payment { shift->_bucket_g('requestPayment',@_)  }
+sub bucket_website         { shift->_bucket_g('website',@_)  }
 
+sub put_bucket_cors         { shift->_bucket_p('cors',@_) };
 
 sub bucket_region {
     my $self   = shift;
