@@ -23,4 +23,18 @@ sub owner {
     $self->{data}{owner};
 }
 
+sub objects {
+    my $self = shift;
+    $self->s3->list_objects($self->Name);
+}
+
+sub cors {
+    my $self = shift;
+    if (@_) {
+	return $self->s3->put_bucket_cors($self->Name,shift);
+    } else {
+	return $self->s3->bucket_cors($self->Name);
+    }
+}
+
 1;

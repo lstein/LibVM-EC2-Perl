@@ -1829,7 +1829,7 @@ sub async_request {
 		    }
 		} else { # success
 		    $self->error(undef);
-		    my @obj = VM::EC2::Dispatch->content2objects($action,$hdr->{'content-type'},$body,$self);
+		    my @obj = VM::EC2::Dispatch->content2objects($action,$hdr->{'content-type'},$body,$self,$hdr);
 		    $cv->send(@obj);
 		    $timer->success();
 		}

@@ -5,6 +5,7 @@ use base 'VM::EC2';
 use AnyEvent::HTTP;
 use HTTP::Request::Common;
 use Digest::SHA 'sha256_hex','hmac_sha256','hmac_sha256_hex';
+use Digest::MD5 'md5_base64';
 use Memoize;
 use Carp 'croak';
 
@@ -37,6 +38,8 @@ VM::EC2::Dispatch->register(
 
     'bucket cors'      => 'VM::S3::CorsRules',
 
+    'put bucket cors'  => 'response_ok',
+
     );
 
 sub s3 { shift->ec2 }
@@ -46,8 +49,9 @@ sub put_service { shift->_service('put',@_) }
 
 sub _service {
     my $self     = shift;
-    my ($method,$action,$bucket,$params,$payload) = @_;
+    my ($method,$action,$bucket,$params,$payload,$headers) = @_;
     $params    ||= {};
+    $headers   ||= {};
     $payload   ||= '';
 
     local $self->{endpoint} = 'https://s3.amazonaws.com';
@@ -73,6 +77,7 @@ sub _service {
 			  $host ? (Host => $host) : (),
 			  'X-Amz-Content-Sha256'=>sha256_hex($payload),
 			  'Content'     => $payload,
+			  %$headers,
 	);
     AWS::Signature4->new(-access_key=>$self->access_key,
 			 -secret_key=>$self->secret
@@ -87,6 +92,14 @@ sub _service {
 	return         if @obj == 0;
 	return @obj;
     }
+}
+
+sub bucket {
+    my $self   = shift;
+    my $bucket = shift or croak "usage: \$s3->bucket('bucket-name')";
+    my @buckets = $self->list_buckets;
+    my ($buck)  = grep {$_->Name eq $bucket} @buckets;
+    return $buck;
 }
 
 sub list_buckets {
@@ -119,14 +132,14 @@ sub more_objects {
 
 sub _bucket_g {
     my $self   = shift;
-    my ($op,$bucket) = @_;
-    $self->get_service("bucket $op",$bucket,{$op => undef});
+    my ($op,$bucket,$headers,) = @_;
+    $self->get_service("bucket $op",$bucket,{$op => undef},undef,$headers);
 }
 
 sub _bucket_p {
     my $self = shift;
-    my ($op,$bucket,$payload) = @_;
-    $self->put_service("bucket $op",$bucket,{$op=>undef},$payload);
+    my ($op,$bucket,$payload,$headers) = @_;
+    $self->put_service("put bucket $op",$bucket,{$op=>undef},$payload,$headers);
 }
 
 sub bucket_acl             { shift->_bucket_g('acl',@_)       }
@@ -141,7 +154,17 @@ sub bucket_object_versions { shift->_bucket_g('versions',@_)  }
 sub bucket_request_payment { shift->_bucket_g('requestPayment',@_)  }
 sub bucket_website         { shift->_bucket_g('website',@_)  }
 
-sub put_bucket_cors         { shift->_bucket_p('cors',@_) };
+sub put_bucket_cors         { 
+    my $self = shift;
+    croak "usage: put_bucket_cors(\$bucket,\$cors_xml)" unless @_ == 2;
+    my ($bucket,$cors) = @_;
+    my $c   = "$cors"; # in case it is an interpolated CorsRules object.
+    $c      =~ s/\s+<requestId>.+//;
+    $c      =~ s/\s+<xmlns>.+//;
+    my $md5 = md5_base64($c);
+    $md5   .= '==' unless $md5 =~ /=$/;  # because Digest::MD5 does not generate correct modulo 3 digests
+    $self->_bucket_p('cors',$bucket,$c,{'Content-MD5'=>$md5,'Content-length'=>length $c});
+}
 
 sub bucket_region {
     my $self   = shift;
