@@ -2,9 +2,14 @@ package VM::EC2;
 
 =head1 NAME
 
-VM::EC2 - Control the Amazon EC2 and Open Stack Clouds
+VM::EC2 - Perl interface to Amazon EC2, Virtual Private Cloud, Elastic Load Balancing, Autoscaling, and Relational Database services
 
 =head1 SYNOPSIS
+
+NOTE: For information on AWS's VPC, load balancing, autoscaling and relational
+databases services, see L<VM::EC2::VPC>, L<VM::EC2::ELB>,
+L<VM::EC2::REST::autoscaling>, and
+L<VM::EC2::REST::relational_database_service>
 
  # set environment variables EC2_ACCESS_KEY, EC2_SECRET_KEY and/or EC2_URL
  # to fill in arguments automatically
@@ -566,7 +571,7 @@ use strict;
 
 use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
-eval "use AWS::Signature4"; # optional
+eval "require AWS::Signature4"; # optional
 
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
@@ -581,7 +586,7 @@ use VM::EC2::Error;
 use Carp 'croak','carp';
 use JSON;
 
-our $VERSION = '1.26';
+our $VERSION = '1.27';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
