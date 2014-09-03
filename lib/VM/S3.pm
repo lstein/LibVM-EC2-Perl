@@ -54,22 +54,9 @@ sub _service {
     $headers   ||= {};
     $payload   ||= '';
 
-    local $self->{endpoint} = 'https://s3.amazonaws.com';
+    my ($endpoint,$uri,$host) = $self->_get_service_endpoint($bucket);
+    local $self->{endpoint} = $endpoint;
     local $self->{version}  = '2006-03-01';
-
-    my ($uri,$host);
-    if ($bucket) {
-	my $region        = $self->bucket_region($bucket);
-	$self->{endpoint} = "https://s3-$region.amazonaws.com" unless $region eq 'us standard';
-	if ($self->valid_bucket_name($bucket)) {
-	    $host = "$bucket.s3.amazonaws.com";
-	    $uri  = URI->new($self->endpoint.'/');
-	}  else {
-	    $uri = URI->new($self->endpoint."/$bucket/");
-	}
-    } else {
-	$uri  = URI->new($self->endpoint.'/');
-    }
 
     ref($params) ? $uri->query_form($params) : $uri->query($params);
     my $code    = eval '\\&'.uc($method);
@@ -92,6 +79,31 @@ sub _service {
 	return         if @obj == 0;
 	return @obj;
     }
+}
+
+sub _get_service_endpoint {
+    my $self = shift;
+    my ($bucket,$key) = @_;
+    $key ||= '';
+
+    my ($endpoint,$uri,$host);
+    $endpoint = 'https://s3.amazonaws.com';
+
+    if ($bucket) {
+	my $region        = $self->bucket_region($bucket);
+	$endpoint = "https://s3-$region.amazonaws.com" unless $region eq 'us standard' || $region eq 'us-east-1'; 
+
+	if ($self->valid_bucket_name($bucket)) {
+	    $host = "$bucket.s3.amazonaws.com";
+	    $uri  = URI->new("$endpoint/$key");
+	}  else {
+	    $uri = URI->new("$endpoint/$bucket/$key");
+	}
+    } else {
+	$uri  = URI->new("$endpoint/");
+    }
+
+    return ($endpoint,$uri,$host);
 }
 
 sub bucket {
@@ -190,6 +202,67 @@ sub bucket_region {
 	);
     return  $cv->recv();
 }
+# get_object($bucket,$key,
+#            -on_body   => \&callback,
+#            -on_header => \&callback,
+#            -range     => ...
+#            -if_modified_since => ...            
+#            -if_unmodified_since=> ...
+#            -if_match =>  $etag
+#            -if_none_match => $etag
+sub get_object {
+    my $self = shift;
+    croak "usage: get_object(\$bucket,\$key,\@params)" unless @_ >= 2;
+    my ($bucket,$key) = splice(@_,0,2);
+    my %options       = @_;
+
+    my $on_body    = $options{-on_body};
+    my $on_header  = $options{-on_header};
+    
+    my ($endpoint,$uri,$host) = $self->_get_service_endpoint($bucket,$key);
+    local $self->{endpoint} = $endpoint;
+    local $self->{version}  = '2006-03-01';
+
+    my $headers       = $self->_options_to_headers(
+	\%options,
+	['If-Modified-Since','If-Unmodified-Since','If-Match','If-None-Match']
+	);
+
+    my $request = GET($uri,
+		      $host ? (Host => $host) : (),
+		      'X-Amz-Content-Sha256'=>sha256_hex(''),
+		      %$headers);
+    AWS::Signature4->new(-access_key=>$self->access_key,
+			 -secret_key=>$self->secret
+	)->sign($request);
+    
+    %$headers = ();
+    $request->headers->scan(sub {$headers->{$_[0]}=$_[1]});
+
+    my @args;
+    push @args,(on_body=>$on_body)     if $on_body;
+    push @args,(on_header=>$on_header) if $on_header;
+
+    my $cv = $self->condvar;
+    my $callback = sub {
+	my ($body,$hdr) = @_;
+	if ($hdr->{Status} !~ /^2/) {
+	    $self->async_send_error('get object',$hdr,$body,$cv);
+	} else {
+	    $cv->send($body);
+	}
+    };
+
+    http_get($request->uri,headers=>$headers,@args,$callback);
+
+    if ($VM::EC2::ASYNC) {
+	return $cv;
+    } else {
+	my $body = $cv->recv;
+	$self->error($cv->error) if $cv->error;
+	return $body;
+    }
+}
 
 sub valid_bucket_name {
     my $self = shift;
@@ -199,6 +272,23 @@ sub valid_bucket_name {
     return if $bucket =~ /\.$/;   # no trailing dot
     return if $bucket =~ /\.\./;  # dots without intervening label  disallowed
     return $bucket =~ /^[a-z0-9.-]{3,63}/;
+}
+
+sub _options_to_headers {
+    my $self = shift;
+    my ($options,$keys) = @_;
+    $keys ||= [];
+
+    my $headers = {};
+
+    for my $key (@$keys) {
+	my $arg = $key;
+	$arg =~ s/-/_/g;
+	$arg = '-' . lc($arg);
+
+	$headers->{$key} = $options->{$arg} if exists $options->{$arg};
+    }
+    return $headers;
 }
 
 1;
