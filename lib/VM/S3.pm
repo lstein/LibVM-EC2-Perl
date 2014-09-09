@@ -3,19 +3,14 @@ package VM::S3;
 use strict;
 use base 'VM::EC2';
 use AnyEvent::HTTP;
-use AnyEvent::HTTP::LWP::UserAgent;
+use AnyEvent::Handle;
 use HTTP::Request::Common;
+use HTTP::Response;
 use Digest::SHA 'sha256_hex','hmac_sha256','hmac_sha256_hex';
 use Digest::MD5 'md5_base64';
 use Memoize;
 use Carp 'croak';
 
-# memoize('bucket_region',
-# 	NORMALIZER=>sub {
-# 	    my @args = shift;
-# 	    return join(',',@args,$VM::EC2::ASYNC);
-# 	}
-#     );
 memoize('valid_bucket_name');
 
 VM::EC2::Dispatch->register(
@@ -253,55 +248,67 @@ sub put_object {
     my $self = shift;
     croak "Usage: put_object(\$bucket,\$key,\$data,\@options)" unless @_ >=3;
     my ($bucket,$key,$data,%options) = @_;
+}
 
-#    my $uri      = "http://$bucket.s3.amazonaws.com/$key";
-#    my $host     = "$bucket.s3.amazonaws.com";
-#    my $endpoint = "https://s3.amazonaws.com";
+# Shame on AnyEvent::HTTP! Doesn't correctly support 100-continue, which we need
+sub _put_request {
+    my $self    = shift;
+    my $request = shift;
 
-    my ($endpoint,$uri,$host) = $self->_get_service_endpoint($bucket,$key);
-    local $self->{endpoint} = $endpoint;
-    local $self->{version}  = '2006-03-01';
+    # force the request into shape
+    $request->method('PUT');
+    $request->header(Expect => '100-continue');
+    $request->header(Host   => $request->uri->host) unless $request->header('Host');
 
-    my @meta          = grep {/x_amz_meta_.+/} keys %options;
-    my $headers       = $self->_options_to_headers(
-	\%options,
-	[qw(Cache-Control Content-Disposition Content-Encoding Content-type Expires X-AMZ-Storage-Class X-AMZ-Website-Redirect-Location),@meta]
-	);
-    
-    my $request = PUT($uri,
-		      $host ?         (Host => $host) : (),
-		      Expect                => '100-continue',
-		      'Content-Length'      => length $data,
-		      'X-Amz-Content-Sha256'=> sha256_hex($data),
-		      %$headers);
-    AWS::Signature4->new(-access_key=>$self->access_key,
-			 -secret_key=>$self->secret
-	)->sign($request);
+    my $uri      = $request->uri;
+    my $method   = $request->method;
+    my $headers  = $request->headers->as_string;
+    my $host     = $uri->host;
+    my $scheme   = $uri->scheme;
+    my $resource = $uri->path;
+    my $port     = $uri->port;
+    my @tls      = $scheme eq 'https' ? (tls=>'connect') : ();
 
-    my $ua = AnyEvent::HTTP::LWP::UserAgent->new();
-    
     my $cv = $self->condvar;
-    my $condval = $ua->request_async($request,$data);
-    $condval->cb(sub {
-	my $r   = shift->recv();
-	my $body = $r->decoded_content;
-	if ($r->is_error) {
-	    my %hdr;
-	    $r->scan(sub {$hdr{$_[0]}=$_[1]});
-	    $self->async_send_error('get object',\%hdr,$body,$cv);
-	} else {
-	    $cv->send($body);
-	}
-		 });
+    my $response;  # will be filled in by read queue
 
-    if ($VM::EC2::ASYNC) {
-	return $cv;
-    } else {
-	my $body = $cv->recv;
-	$self->error($cv->error) if $cv->error;
-	return $body;
-    }
+    # BUG: ignore http proxy environment variable
+    my $handle; $handle = AnyEvent::Handle->new(connect => [$host,$port],
+						@tls,
+						on_error => sub {
+						    my ($handle,$fatal, $message) = @_;
+						    warn "ERROR $message";
+						    $self->error(VM::EC2::Error->new({Message=>$message,Code=>500},$self));
+						    $handle->destroy();
+						    $cv->send();
+						},
+						on_starttls => sub { warn "start tls" },
+						on_stoptls  => sub { warn "stop tls" },
+						on_eof => sub {
+						    warn "EOF";
+						    $handle->destroy();
+						    $cv->send($response);
+						},
+						on_connect => sub { print STDERR "connected(@_)\n" },
+						
+	);
 
+    my $crlf  = "\015\012";
+    my $crlf2 = "$crlf$crlf";
+    
+    # do the writes
+    $handle->push_write("PUT $resource HTTP/1.1$crlf");
+    $handle->push_write("$headers$crlf");  # headers already has a crlf, so we get two
+    $handle->push_write($request->content);
+
+    # read the status line & headers
+    $handle->push_read (line => $crlf2,sub {
+    	my ($handle,$str) = @_;
+	$response = HTTP::Response->parse($str);
+#	$cv->send($response);
+    			});
+
+    return $cv;
 }
 
 
