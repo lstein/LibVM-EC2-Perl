@@ -1,7 +1,7 @@
 package VM::S3;
 
 use strict;
-use base 'VM::EC2';
+use base 'VM::EC2','VM::S3::Http_helper';
 use AnyEvent::HTTP;
 use AnyEvent::Handle;
 use HTTP::Request::Common;
@@ -53,7 +53,7 @@ sub _service {
     my $self     = shift;
     my ($method,$action,$bucket,$params,$payload,$headers) = @_;
     $params    ||= {};
-    $headers   ||= {};
+    $headers   ||= [];
     $payload   ||= '';
 
     my $cv = $self->condvar;
@@ -68,9 +68,9 @@ sub _service {
 	my $code    = eval '\\&'.uc($method);
 	my $request = $code->($uri,
 			      $host ? (Host => $host) : (),
-			      'X-Amz-Content-Sha256'=>sha256_hex($payload),
-			      'Content'     => $payload,
-			      %$headers,
+			      'X-Amz-Content-Sha256' => sha256_hex($payload),
+			      'Content'              => $payload,
+			      @$headers,
 	    );
 	AWS::Signature4->new(-access_key=>$self->access_key,
 			     -secret_key=>$self->secret
@@ -237,6 +237,8 @@ sub bucket_region {
 #    -x_amz_meta-*     => ...
 #    -x_amz_storage_class => {'STANDARD','REDUCED_REDUNDANCY'}
 #    -x_amz_website_redirect_location => ...
+#    -x_amz_acl => private | public-read | public-read-write | authenticated-read | bucket-owner-read | bucket-owner-full-control
+#    -x_amz_grant_{read,write,read-acp,write-acp,full-control}
 #
 #  $data can be:
 #               1) a simple scalar
@@ -247,176 +249,52 @@ sub bucket_region {
 sub put_object {
     my $self = shift;
     croak "Usage: put_object(\$bucket,\$key,\$data,\@options)" unless @_ >=3;
-    my ($bucket,$key,$data,%options) = @_;
+    my ($bucket,$key,$data,@options) = @_;
+
+    my @x_amz = map {s/_/-/g; $_} grep {/x_amz_.+/} keys {@options};
+    
+    my $cv = $self->condvar;
+    my $cv1 = $self->_get_service_endpoint($bucket,$key);
+    
+    $cv1->cb(sub {
+	my ($endpoint,$uri,$host) = shift->recv();
+
+	my $headers       = $self->_options_to_headers(
+	    \@options,
+	    qw(Cache-Control Content-Disposition Content-Encoding Content-Type Expires X-Amz-Storage-Class X-Amz-Website-Redirect-Location),@x_amz);
+
+	my $request = PUT($uri,
+			  Host                  => $host,
+			  'Content-Length'      => length $data,
+			  'X-Amz-Content-Sha256'=> sha256_hex($data),
+			  Expect                => '100-continue',
+			  Content               => $data,
+			  @$headers,
+	    );
+	AWS::Signature4->new(-access_key=>$self->access_key,
+			     -secret_key=>$self->secret
+	    )->sign($request);
+
+	$self->submit_http_request($request,$cv);
+	     });
+
+    if ($VM::EC2::ASYNC) {
+	return $cv;
+    } else {
+	my $response = $cv->recv;
+	$self->error($cv->error) if $cv->error;
+	return $response;
+    }
+
 }
 
-# Shame on AnyEvent::HTTP! Doesn't correctly support 100-continue, which we need!
-# BUG: put this into its own module
-use constant MAX_RECURSE => 5;
-use constant CRLF        => "\015\012";
-use constant CRLF2       => CRLF.CRLF;
-    
-
-my %_cached_handles;
-sub _put_request {
-    my $self    = shift;
-    my ($req,$cv,$state) = @_;
-
-    # force the request into shape
-    my $request = $req->clone();
+# return a cv
+sub put_request {
+    my $self     = shift;
+    my $request  = shift;
     $request->method('PUT');
     $request->header(Expect => '100-continue');
-    $request->header(Host   => $request->uri->host) unless $request->header('Host');
- 
-    # state variables for recursion handling
-    $cv               ||= $self->condvar;
-    $state            ||= {};
-    $state->{recurse}   = MAX_RECURSE unless exists $state->{recurse};
-    if ($state->{recurse} <= 0) {
-	$self->error(VM::EC2::Error->new({Message=>'too many redirects',Code=>500},$self));
-	$cv->send();
-	return $cv;
-    }
-    $state->{request}  ||= $request;
-    $state->{response} ||= undef;
-
-    print STDERR "Request: ",$request->as_string,"\n";
-
-    my $uri      = $request->uri;
-    my $method   = $request->method;
-    my $headers  = $request->headers->as_string;
-    my $host     = $uri->host;
-    my $scheme   = $uri->scheme;
-    my $resource = $uri->path;
-    my $port     = $uri->port;
-    my $tls      = $scheme eq 'https';
-
-    # BUG: ignore http proxy environment variable
-    my $handle = $self->_get_http_handle($host,$port,$tls);
-    $handle->on_error(sub {
-	my ($handle,$fatal, $message) = @_;
-	warn "ERROR $message";
-	$self->error(VM::EC2::Error->new({Message=>$message,Code=>500},$self));
-	$handle->destroy();
-	$cv->send();
-		      });
-    $handle->on_read(undef);
-    
-    # do the writes
-    $handle->push_write("PUT $resource HTTP/1.1".CRLF);
-    $handle->push_write($headers.CRLF);  # headers already has a crlf, so we get two
-
-    # read the status line & headers
-    $handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($cv,$state,@_)});
-
-    return $cv;
-}
-
-sub _get_http_handle {
-    my $self = shift;
-    my ($host,$port,$tls) = @_;
-
-    if ($_cached_handles{$host,$port}) {
-	return $_cached_handles{$host,$port} unless $_cached_handles{$host,$port}->destroyed;
-    }
-
-    my $handle; 
-    $handle = AnyEvent::Handle->new(connect => [$host,$port],
-				    $tls ? (tls=>'connect') : (),
-				    on_eof => sub {
-					warn "EOF";
-					$handle->destroy();
-				    },
-				    on_connect => sub { print STDERR "connected(@_)\n" },
-	);
-    warn "new handle";
-    return $_cached_handles{$host,$port} = $handle;
-}
-
-sub _handle_http_headers {
-    my $self = shift;
-    my ($cv,$state,$handle,$str) = @_;
-    my $response = HTTP::Response->parse($str);
-
-    print STDERR "RESPONSE:", $response->as_string,"\n\n";
-
-    $state->{response} = $response;
-    # handle continue
-    if ($response->code == 100) {
-	$handle->push_write($state->{request}->content);
-	$handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($cv,$state,@_)});	
-    } 
-
-    # handle counted content
-    elsif (my $len = $response->header('Content-Length')) {
-	$state->{length} = $len;
-	$handle->on_read(sub {$self->_handle_http_body($cv,$state,@_)} );
-    } 
-
-    # handle chunked content
-    elsif ($response->header('Transfer-Encoding') =~ /\bchunked\b/) {
-	$handle->push_read(line=>CRLF,sub {$self->_handle_http_chunk_header($cv,$state,@_)});
-    }
-}
-
-sub _handle_http_body {
-    my $self = shift;
-    my ($cv,$state,$handle) = @_;
-    my $headers = $state->{response} or croak "garbled body"; # BUG: report error properly
-    my $data    = $handle->rbuf;
-    $state->{body} .= $data;
-    $handle->rbuf = '';
-    $state->{length} -= length $data;
-    print STDERR "_handle_http_body() $state->{length} more bytes expected\n";
-    $self->_handle_http_finish($cv,$state) if $state->{length} <= 0;
-}
-
-
-sub _handle_http_chunk_header {
-    my $self = shift;
-    my ($cv,$state,$handle,$str) = @_;
-    $str =~ /^([0-9a-fA-F]+)/ or croak "garbled body"; # BUG: report error properly
-    my $chunk_len = hex $1;
-    if ($chunk_len > 0) {
-	$state->{length} = $chunk_len + 2;  # extra CRLF terminates chunk
-	$handle->push_read(chunk=>$state->{length}, sub {$self->_handle_http_chunk($cv,$state,@_)});
-    } else {
-	$handle->push_read(line=>CRLF, sub {$self->_handle_http_finish($cv,$state,$handle)});
-    }
-}
-
-sub _handle_http_chunk {
-    my $self = shift;
-    my ($cv,$state,$handle,$str) = @_;
-    $state->{length} -= length $str;
-
-    local $/ = CRLF;
-    chomp($str);
-    $state->{body}   .= $str;
-
-    if ($state->{length} > 0) { # more to fetch
-	$handle->push_read(chunk=>$state->{length}, sub {$self->_handle_http_chunk($cv,$state,@_)});
-    } else { # next chunk
-	$handle->push_read(line=>CRLF,sub {$self->_handle_http_chunk_header($cv,$state,@_)});
-    }
-
-}
-
-sub _handle_http_finish {
-    my $self = shift;
-    my ($cv,$state,$handle) = @_;
-    my $response = $state->{response} or croak "something wrong"; # BUG: report properly
-    if ($response->is_redirect) {
-	my $location = $response->header('Location');
-	my $uri = URI->new($location);
-	$state->{request}->uri($uri);
-	$state->{request}->header(Host => $uri->host);
-	$state->{recurse}--;
-	$self->_put_request($state->{request},$cv,$state);
-    } else {
-	$cv->send($response);
-    }
-    $handle->destroy() if $response->header('Connection') eq 'close';
+    return $self->submit_http_request($request);
 }
 
 # get_object($bucket,$key,
@@ -444,10 +322,7 @@ sub get_object {
 	local $self->{endpoint} = $endpoint;
 	local $self->{version}  = '2006-03-01';
 
-	my $headers       = $self->_options_to_headers(
-	    \%options,
-	    ['If-Modified-Since','If-Unmodified-Since','If-Match','If-None-Match']
-	    );
+	my $headers       = $self->_options_to_headers(\@_,'If-Modified-Since','If-Unmodified-Since','If-Match','If-None-Match');
 
 	my $request = GET($uri,
 			  $host ? (Host => $host) : (),
@@ -497,19 +372,22 @@ sub valid_bucket_name {
 
 sub _options_to_headers {
     my $self = shift;
-    my ($options,$keys) = @_;
-    $keys ||= [];
+    my ($options,@keys) = @_;
+    my %keys = map {
+	s/^-//;
+	s/-/_/g;
+	(lc($_)=>1);
+    } @keys;
 
-    my $headers = {};
-
-    for my $key (@$keys) {
-	my $arg = $key;
-	$arg =~ s/-/_/g;
-	$arg = '-' . lc($arg);
-
-	$headers->{$key} = $options->{$arg} if exists $options->{$arg};
+    my @result;
+    while (my ($key,$value) = splice(@$options,0,2)) {
+	$key =~ s/^-//;
+	$key =~ s/-/_/g;
+	$key = lc ($key);
+	next unless $keys{$key};
+	push @result,($key=>$value);
     }
-    return $headers;
+    return \@result;
 }
 
 1;
