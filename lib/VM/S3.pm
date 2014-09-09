@@ -250,15 +250,37 @@ sub put_object {
     my ($bucket,$key,$data,%options) = @_;
 }
 
-# Shame on AnyEvent::HTTP! Doesn't correctly support 100-continue, which we need
+# Shame on AnyEvent::HTTP! Doesn't correctly support 100-continue, which we need!
+# BUG: put this into its own module
+use constant MAX_RECURSE => 5;
+use constant CRLF        => "\015\012";
+use constant CRLF2       => CRLF.CRLF;
+    
+
+my %_cached_handles;
 sub _put_request {
     my $self    = shift;
-    my $request = shift;
+    my ($req,$cv,$state) = @_;
 
     # force the request into shape
+    my $request = $req->clone();
     $request->method('PUT');
     $request->header(Expect => '100-continue');
     $request->header(Host   => $request->uri->host) unless $request->header('Host');
+ 
+    # state variables for recursion handling
+    $cv               ||= $self->condvar;
+    $state            ||= {};
+    $state->{recurse}   = MAX_RECURSE unless exists $state->{recurse};
+    if ($state->{recurse} <= 0) {
+	$self->error(VM::EC2::Error->new({Message=>'too many redirects',Code=>500},$self));
+	$cv->send();
+	return $cv;
+    }
+    $state->{request}  ||= $request;
+    $state->{response} ||= undef;
+
+    print STDERR "Request: ",$request->as_string,"\n";
 
     my $uri      = $request->uri;
     my $method   = $request->method;
@@ -267,51 +289,135 @@ sub _put_request {
     my $scheme   = $uri->scheme;
     my $resource = $uri->path;
     my $port     = $uri->port;
-    my @tls      = $scheme eq 'https' ? (tls=>'connect') : ();
-
-    my $cv = $self->condvar;
-    my $response;  # will be filled in by read queue
+    my $tls      = $scheme eq 'https';
 
     # BUG: ignore http proxy environment variable
-    my $handle; $handle = AnyEvent::Handle->new(connect => [$host,$port],
-						@tls,
-						on_error => sub {
-						    my ($handle,$fatal, $message) = @_;
-						    warn "ERROR $message";
-						    $self->error(VM::EC2::Error->new({Message=>$message,Code=>500},$self));
-						    $handle->destroy();
-						    $cv->send();
-						},
-						on_starttls => sub { warn "start tls" },
-						on_stoptls  => sub { warn "stop tls" },
-						on_eof => sub {
-						    warn "EOF";
-						    $handle->destroy();
-						    $cv->send($response);
-						},
-						on_connect => sub { print STDERR "connected(@_)\n" },
-						
-	);
-
-    my $crlf  = "\015\012";
-    my $crlf2 = "$crlf$crlf";
+    my $handle = $self->_get_http_handle($host,$port,$tls);
+    $handle->on_error(sub {
+	my ($handle,$fatal, $message) = @_;
+	warn "ERROR $message";
+	$self->error(VM::EC2::Error->new({Message=>$message,Code=>500},$self));
+	$handle->destroy();
+	$cv->send();
+		      });
+    $handle->on_read(undef);
     
     # do the writes
-    $handle->push_write("PUT $resource HTTP/1.1$crlf");
-    $handle->push_write("$headers$crlf");  # headers already has a crlf, so we get two
-    $handle->push_write($request->content);
+    $handle->push_write("PUT $resource HTTP/1.1".CRLF);
+    $handle->push_write($headers.CRLF);  # headers already has a crlf, so we get two
 
     # read the status line & headers
-    $handle->push_read (line => $crlf2,sub {
-    	my ($handle,$str) = @_;
-	$response = HTTP::Response->parse($str);
-#	$cv->send($response);
-    			});
+    $handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($cv,$state,@_)});
 
     return $cv;
 }
 
+sub _get_http_handle {
+    my $self = shift;
+    my ($host,$port,$tls) = @_;
 
+    if ($_cached_handles{$host,$port}) {
+	return $_cached_handles{$host,$port} unless $_cached_handles{$host,$port}->destroyed;
+    }
+
+    my $handle; 
+    $handle = AnyEvent::Handle->new(connect => [$host,$port],
+				    $tls ? (tls=>'connect') : (),
+				    on_eof => sub {
+					warn "EOF";
+					$handle->destroy();
+				    },
+				    on_connect => sub { print STDERR "connected(@_)\n" },
+	);
+    warn "new handle";
+    return $_cached_handles{$host,$port} = $handle;
+}
+
+sub _handle_http_headers {
+    my $self = shift;
+    my ($cv,$state,$handle,$str) = @_;
+    my $response = HTTP::Response->parse($str);
+
+    print STDERR "RESPONSE:", $response->as_string,"\n\n";
+
+    $state->{response} = $response;
+    # handle continue
+    if ($response->code == 100) {
+	$handle->push_write($state->{request}->content);
+	$handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($cv,$state,@_)});	
+    } 
+
+    # handle counted content
+    elsif (my $len = $response->header('Content-Length')) {
+	$state->{length} = $len;
+	$handle->on_read(sub {$self->_handle_http_body($cv,$state,@_)} );
+    } 
+
+    # handle chunked content
+    elsif ($response->header('Transfer-Encoding') =~ /\bchunked\b/) {
+	$handle->push_read(line=>CRLF,sub {$self->_handle_http_chunk_header($cv,$state,@_)});
+    }
+}
+
+sub _handle_http_body {
+    my $self = shift;
+    my ($cv,$state,$handle) = @_;
+    my $headers = $state->{response} or croak "garbled body"; # BUG: report error properly
+    my $data    = $handle->rbuf;
+    $state->{body} .= $data;
+    $handle->rbuf = '';
+    $state->{length} -= length $data;
+    print STDERR "_handle_http_body() $state->{length} more bytes expected\n";
+    $self->_handle_http_finish($cv,$state) if $state->{length} <= 0;
+}
+
+
+sub _handle_http_chunk_header {
+    my $self = shift;
+    my ($cv,$state,$handle,$str) = @_;
+    $str =~ /^([0-9a-fA-F]+)/ or croak "garbled body"; # BUG: report error properly
+    my $chunk_len = hex $1;
+    if ($chunk_len > 0) {
+	$state->{length} = $chunk_len + 2;  # extra CRLF terminates chunk
+	$handle->push_read(chunk=>$state->{length}, sub {$self->_handle_http_chunk($cv,$state,@_)});
+    } else {
+	$handle->push_read(line=>CRLF, sub {$self->_handle_http_finish($cv,$state,$handle)});
+    }
+}
+
+sub _handle_http_chunk {
+    my $self = shift;
+    my ($cv,$state,$handle,$str) = @_;
+    $state->{length} -= length $str;
+
+    local $/ = CRLF;
+    chomp($str);
+    $state->{body}   .= $str;
+
+    if ($state->{length} > 0) { # more to fetch
+	$handle->push_read(chunk=>$state->{length}, sub {$self->_handle_http_chunk($cv,$state,@_)});
+    } else { # next chunk
+	$handle->push_read(line=>CRLF,sub {$self->_handle_http_chunk_header($cv,$state,@_)});
+    }
+
+}
+
+sub _handle_http_finish {
+    my $self = shift;
+    my ($cv,$state,$handle) = @_;
+    my $response = $state->{response} or croak "something wrong"; # BUG: report properly
+    if ($response->is_redirect) {
+	my $location = $response->header('Location');
+	my $uri = URI->new($location);
+	$state->{request}->uri($uri);
+	$state->{request}->header(Host => $uri->host);
+	$state->{recurse}--;
+	$self->_put_request($state->{request},$cv,$state);
+    } else {
+	$cv->send($response);
+    }
+    $handle->destroy() if $response->header('Connection') eq 'close';
+}
 
 # get_object($bucket,$key,
 #            -on_body   => \&callback,
