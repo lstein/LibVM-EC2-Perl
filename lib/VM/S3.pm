@@ -3,13 +3,20 @@ package VM::S3;
 use strict;
 use base 'VM::EC2';
 use AnyEvent::HTTP;
+use AnyEvent::HTTP::LWP::UserAgent;
 use HTTP::Request::Common;
 use Digest::SHA 'sha256_hex','hmac_sha256','hmac_sha256_hex';
 use Digest::MD5 'md5_base64';
 use Memoize;
 use Carp 'croak';
 
-memoize('bucket_region','valid_bucket_name');
+# memoize('bucket_region',
+# 	NORMALIZER=>sub {
+# 	    my @args = shift;
+# 	    return join(',',@args,$VM::EC2::ASYNC);
+# 	}
+#     );
+memoize('valid_bucket_name');
 
 VM::EC2::Dispatch->register(
     'list buckets'   => sub {VM::EC2::Dispatch::load_module('VM::S3::BucketList');
@@ -54,31 +61,39 @@ sub _service {
     $headers   ||= {};
     $payload   ||= '';
 
-    my ($endpoint,$uri,$host) = $self->_get_service_endpoint($bucket);
-    local $self->{endpoint} = $endpoint;
-    local $self->{version}  = '2006-03-01';
+    my $cv = $self->condvar;
 
-    ref($params) ? $uri->query_form($params) : $uri->query($params);
-    my $code    = eval '\\&'.uc($method);
-    my $request = $code->($uri,
-			  $host ? (Host => $host) : (),
-			  'X-Amz-Content-Sha256'=>sha256_hex($payload),
-			  'Content'     => $payload,
-			  %$headers,
-	);
-    AWS::Signature4->new(-access_key=>$self->access_key,
-			 -secret_key=>$self->secret
-	)->sign($request);
-    my $cv = $self->async_request($action,$request);
-    if ($VM::EC2::ASYNC) {
-	return $cv;
-    } else {
-	my @obj = $cv->recv;
-	$self->error($cv->error) if $cv->error;
-	return $obj[0] if @obj == 1;
-	return         if @obj == 0;
-	return @obj;
-    }
+    my $cv1 = $self->_get_service_endpoint($bucket);
+    $cv1->cb(sub {
+	my ($endpoint,$uri,$host) = shift->recv();
+	local $self->{endpoint}   = $endpoint;
+	local $self->{version}    = '2006-03-01';
+
+	ref($params) ? $uri->query_form($params) : $uri->query($params);
+	my $code    = eval '\\&'.uc($method);
+	my $request = $code->($uri,
+			      $host ? (Host => $host) : (),
+			      'X-Amz-Content-Sha256'=>sha256_hex($payload),
+			      'Content'     => $payload,
+			      %$headers,
+	    );
+	AWS::Signature4->new(-access_key=>$self->access_key,
+			     -secret_key=>$self->secret
+	    )->sign($request);
+
+	my $cv2 = $self->async_request($action,$request);
+	$cv2->cb(sub {
+	    my $cv2  = shift;
+	    my @obj  = $cv2->recv();
+	    $self->error($cv2->error) if $cv2->error;
+	    $cv->send($obj[0]) if @obj == 1;
+	    $cv->send()        if @obj == 0;
+	    $cv->send(@obj);
+		 });
+	     });
+
+    return $cv if $VM::EC2::ASYNC;
+    return $cv->recv();
 }
 
 sub _get_service_endpoint {
@@ -86,24 +101,30 @@ sub _get_service_endpoint {
     my ($bucket,$key) = @_;
     $key ||= '';
 
+    my $cv = AnyEvent->condvar;
+    
     my ($endpoint,$uri,$host);
     $endpoint = 'https://s3.amazonaws.com';
 
     if ($bucket) {
-	my $region        = $self->bucket_region($bucket);
-	$endpoint = "https://s3-$region.amazonaws.com" unless $region eq 'us standard' || $region eq 'us-east-1'; 
-
-	if ($self->valid_bucket_name($bucket)) {
-	    $host = "$bucket.s3.amazonaws.com";
-	    $uri  = URI->new("$endpoint/$key");
-	}  else {
-	    $uri = URI->new("$endpoint/$bucket/$key");
-	}
+	my $br_cv = $self->bucket_region_async($bucket);
+	$br_cv->cb(sub {
+	    my $region = shift->recv();
+	    $endpoint  = "https://s3-$region.amazonaws.com" unless $region eq 'us standard' || $region eq 'us-east-1'; 
+	    if ($self->valid_bucket_name($bucket)) {
+		$host = "$bucket.s3.amazonaws.com";
+		$uri  = URI->new("$endpoint/$key");
+	    }  else {
+		$uri = URI->new("$endpoint/$bucket/$key");
+	    }
+	    $cv->send($endpoint,$uri,$host);
+		   });
+	return $cv;
     } else {
 	$uri  = URI->new("$endpoint/");
+	$cv->send($endpoint,$uri,$host);
+	return $cv;
     }
-
-    return ($endpoint,$uri,$host);
 }
 
 sub bucket {
@@ -178,30 +199,113 @@ sub put_bucket_cors         {
     $self->_bucket_p('cors',$bucket,$c,{'Content-MD5'=>$md5,'Content-length'=>length $c});
 }
 
+my %BR_cache;
 sub bucket_region {
     my $self   = shift;
     my $bucket = shift;
-    return 'us standard' unless $self->valid_bucket_name($bucket);
 
-    my $url = "http://$bucket.s3.amazonaws.com";
     my $cv  = AnyEvent->condvar;
-    http_head('http://s3.amazonaws.com/',
-	      recurse => 0,
-	      headers => { Host => $bucket },
-	      sub {
-		  my ($body,$hdr) = @_;
-		  if ($hdr->{Status} == 200 || $hdr->{Status} == 403) {
-		      $cv->send('us standard');
-		  } elsif ($hdr->{Status} == 307 || $hdr->{Status} == 302) {
-		      $hdr->{location} =~ /s3-([\w-]+)\.amazonaws\.com/;
-		      $cv->send($1);
-		  } else {
-		      $cv->send(undef);
+    if (exists $BR_cache{$bucket}) {
+	$cv->send($BR_cache{$bucket});
+    }
+    elsif (!$self->valid_bucket_name($bucket)) {
+	$cv->send('us standard');
+    } else {
+	http_head('http://s3.amazonaws.com/',
+		  recurse => 0,
+		  headers => { Host => $bucket },
+		  sub {
+		      my ($body,$hdr) = @_;
+		      if ($hdr->{Status} == 200 || $hdr->{Status} == 403) {
+			  $cv->send($BR_cache{$bucket} = 'us standard');
+		      } elsif ($hdr->{Status} == 307 || $hdr->{Status} == 302) {
+			  $hdr->{location} =~ /s3-([\w-]+)\.amazonaws\.com/;
+			  $cv->send($BR_cache{$bucket} = $1);
+		      } else {
+			  $cv->send($BR_cache{$bucket} = undef);
+		      }
 		  }
-	      }
-	);
-    return  $cv->recv();
+	    );
+    }
+    return $cv if $VM::EC2::ASYNC;
+    return $cv->recv();
 }
+
+# put_object($bucket,$key,$data,@options)
+# 
+# options:
+#    -cache_control => ...
+#    -content_disposition => ...
+#    -content_encoding => ...
+#    -content_type     => ...
+#    -expires          => ...
+#    -x_amz_meta-*     => ...
+#    -x_amz_storage_class => {'STANDARD','REDUCED_REDUNDANCY'}
+#    -x_amz_website_redirect_location => ...
+#
+#  $data can be:
+#               1) a simple scalar
+#               2) a filehandle on an opened file/pipe
+#               3) a callback that will be called to retrieve the next n bytes of data:
+#                        callback($bytes_wanted)
+#
+sub put_object {
+    my $self = shift;
+    croak "Usage: put_object(\$bucket,\$key,\$data,\@options)" unless @_ >=3;
+    my ($bucket,$key,$data,%options) = @_;
+
+#    my $uri      = "http://$bucket.s3.amazonaws.com/$key";
+#    my $host     = "$bucket.s3.amazonaws.com";
+#    my $endpoint = "https://s3.amazonaws.com";
+
+    my ($endpoint,$uri,$host) = $self->_get_service_endpoint($bucket,$key);
+    local $self->{endpoint} = $endpoint;
+    local $self->{version}  = '2006-03-01';
+
+    my @meta          = grep {/x_amz_meta_.+/} keys %options;
+    my $headers       = $self->_options_to_headers(
+	\%options,
+	[qw(Cache-Control Content-Disposition Content-Encoding Content-type Expires X-AMZ-Storage-Class X-AMZ-Website-Redirect-Location),@meta]
+	);
+    
+    my $request = PUT($uri,
+		      $host ?         (Host => $host) : (),
+		      Expect                => '100-continue',
+		      'Content-Length'      => length $data,
+		      'X-Amz-Content-Sha256'=> sha256_hex($data),
+		      %$headers);
+    AWS::Signature4->new(-access_key=>$self->access_key,
+			 -secret_key=>$self->secret
+	)->sign($request);
+
+    my $ua = AnyEvent::HTTP::LWP::UserAgent->new();
+    
+    my $cv = $self->condvar;
+    my $condval = $ua->request_async($request,$data);
+    $condval->cb(sub {
+	my $r   = shift->recv();
+	my $body = $r->decoded_content;
+	if ($r->is_error) {
+	    my %hdr;
+	    $r->scan(sub {$hdr{$_[0]}=$_[1]});
+	    $self->async_send_error('get object',\%hdr,$body,$cv);
+	} else {
+	    $cv->send($body);
+	}
+		 });
+
+    if ($VM::EC2::ASYNC) {
+	return $cv;
+    } else {
+	my $body = $cv->recv;
+	$self->error($cv->error) if $cv->error;
+	return $body;
+    }
+
+}
+
+
+
 # get_object($bucket,$key,
 #            -on_body   => \&callback,
 #            -on_header => \&callback,
@@ -218,42 +322,46 @@ sub get_object {
 
     my $on_body    = $options{-on_body};
     my $on_header  = $options{-on_header};
-    
-    my ($endpoint,$uri,$host) = $self->_get_service_endpoint($bucket,$key);
-    local $self->{endpoint} = $endpoint;
-    local $self->{version}  = '2006-03-01';
-
-    my $headers       = $self->_options_to_headers(
-	\%options,
-	['If-Modified-Since','If-Unmodified-Since','If-Match','If-None-Match']
-	);
-
-    my $request = GET($uri,
-		      $host ? (Host => $host) : (),
-		      'X-Amz-Content-Sha256'=>sha256_hex(''),
-		      %$headers);
-    AWS::Signature4->new(-access_key=>$self->access_key,
-			 -secret_key=>$self->secret
-	)->sign($request);
-    
-    %$headers = ();
-    $request->headers->scan(sub {$headers->{$_[0]}=$_[1]});
-
-    my @args;
-    push @args,(on_body=>$on_body)     if $on_body;
-    push @args,(on_header=>$on_header) if $on_header;
 
     my $cv = $self->condvar;
-    my $callback = sub {
-	my ($body,$hdr) = @_;
-	if ($hdr->{Status} !~ /^2/) {
-	    $self->async_send_error('get object',$hdr,$body,$cv);
-	} else {
-	    $cv->send($body);
-	}
-    };
+    my $cv1 = $self->_get_service_endpoint($bucket,$key);
+    
+    $cv1->cb(sub {
+	my ($endpoint,$uri,$host) = shift->recv();
+	local $self->{endpoint} = $endpoint;
+	local $self->{version}  = '2006-03-01';
 
-    http_get($request->uri,headers=>$headers,@args,$callback);
+	my $headers       = $self->_options_to_headers(
+	    \%options,
+	    ['If-Modified-Since','If-Unmodified-Since','If-Match','If-None-Match']
+	    );
+
+	my $request = GET($uri,
+			  $host ? (Host => $host) : (),
+			  'X-Amz-Content-Sha256'=>sha256_hex(''),
+			  %$headers);
+	AWS::Signature4->new(-access_key=>$self->access_key,
+			     -secret_key=>$self->secret
+	    )->sign($request);
+    
+	%$headers = ();
+	$request->headers->scan(sub {$headers->{$_[0]}=$_[1]});
+
+	my @args;
+	push @args,(on_body=>$on_body)     if $on_body;
+	push @args,(on_header=>$on_header) if $on_header;
+
+	my $callback = sub {
+	    my ($body,$hdr) = @_;
+	    if ($hdr->{Status} !~ /^2/) {
+		$self->async_send_error('get object',$hdr,$body,$cv);
+	    } else {
+		$cv->send($body);
+	    }
+	};
+
+	http_get($request->uri,headers=>$headers,@args,$callback);
+	     });
 
     if ($VM::EC2::ASYNC) {
 	return $cv;
