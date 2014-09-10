@@ -263,17 +263,27 @@ sub put_object {
 	    \@options,
 	    qw(Cache-Control Content-Disposition Content-Encoding Content-Type Expires X-Amz-Storage-Class X-Amz-Website-Redirect-Location),@x_amz);
 
+	my $chunked_transfer_size = $self->_is_fh($data);
+
+	my @content = $chunked_transfer_size ? (Content_Encoding      => 'aws-chunked',
+						Content_Length        => $chunked_transfer_size,
+						Transfer_Encoding     => 'chunked')
+	                                     : (Content_Length        => length $data,
+						X_Amz_Content_Sha256  => sha256_hex($data));
+
 	my $request = PUT($uri,
 			  Host                  => $host,
-			  'Content-Length'      => length $data,
-			  'X-Amz-Content-Sha256'=> sha256_hex($data),
 			  Expect                => '100-continue',
-			  Content               => $data,
+			  Content               => $data,  # surprisingly enough, this will work
+			  @content,
 			  @$headers,
 	    );
+
+	my @signing_parms = $chunked_transfer_size ? ($request,undef,'STREAMING-AWS4-HMAC-SHA256-PAYLOAD') : ($request);
+
 	AWS::Signature4->new(-access_key=>$self->access_key,
 			     -secret_key=>$self->secret
-	    )->sign($request);
+	    )->sign(@signing_parms);
 
 	$self->submit_http_request($request,$cv);
 	     });
@@ -327,13 +337,17 @@ sub get_object {
 	my $request = GET($uri,
 			  $host ? (Host => $host) : (),
 			  'X-Amz-Content-Sha256'=>sha256_hex(''),
-			  %$headers);
+			  @$headers);
 	AWS::Signature4->new(-access_key=>$self->access_key,
 			     -secret_key=>$self->secret
 	    )->sign($request);
     
-	%$headers = ();
-	$request->headers->scan(sub {$headers->{$_[0]}=$_[1]});
+	my %headers;
+	$request->headers->scan(sub {
+	    my ($key,$value) = @_;
+	    if (exists $headers{$key}) { $headers{$key} .= ", $value" }
+	    else                       { $headers{$key}  = $value     }
+				});
 
 	my @args;
 	push @args,(on_body=>$on_body)     if $on_body;
@@ -348,7 +362,7 @@ sub get_object {
 	    }
 	};
 
-	http_get($request->uri,headers=>$headers,@args,$callback);
+	http_get($request->uri,headers=>\%headers,@args,$callback);
 	     });
 
     if ($VM::EC2::ASYNC) {

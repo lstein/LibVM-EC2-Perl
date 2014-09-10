@@ -492,6 +492,7 @@ sub create_error_object {
 	$parsed->{Errors}{Error}{Message}   = $parsed->{Message}; 
 	$parsed->{Errors}{Error}{Code}      = $parsed->{Code}; 
 	$parsed->{Errors}{Error}{Endpoint}  = $parsed->{Endpoint}; 
+	$parsed->{Errors}{Error}{Message} ||= "'$parsed->{ArgumentName}: $parsed->{ArgumentValue}' is invalid" if $parsed->{Code} eq 'InvalidArgument';
     }
 
     if (defined $API_call) {
