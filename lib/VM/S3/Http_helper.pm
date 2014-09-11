@@ -7,11 +7,14 @@ use AWS::Signature4;
 # utility class for http requests; forms a virtual base class for VM::S3
 
 # Shame on AnyEvent::HTTP! Doesn't correctly support 100-continue, which we need!
-use constant MAX_RECURSE => 5;
-use constant CRLF        => "\015\012";
-use constant CRLF2       => CRLF.CRLF;
-#use constant CHUNK_SIZE  => 65536; # 64K
-use constant CHUNK_SIZE  => 8192;   # 8K
+use constant MAX_RECURSE    => 5;
+use constant CRLF           => "\015\012";
+use constant CRLF2          => CRLF.CRLF;
+use constant CHUNK_SIZE    => 65536; # 64K
+
+# chunk metadata overhead calculation
+use constant SHA256_HEX_LEN => 64;
+use constant CHUNK_SIG_LEN  => length(';chunk-signature=');
 
 my %_cached_handles;
 sub submit_http_request {
@@ -33,8 +36,6 @@ sub submit_http_request {
     }
     $state->{request}  ||= $request;
     $state->{response} ||= undef;
-
-    warn $request->as_string;
 
     my $uri      = $request->uri;
     my $method   = $request->method;
@@ -96,8 +97,6 @@ sub _handle_http_headers {
     my $self = shift;
     my ($cv,$state,$handle,$str) = @_;
     my $response = HTTP::Response->parse($str);
-
-    warn $response->as_string;
 
     $state->{response} = $response;
     # handle continue
@@ -196,7 +195,7 @@ sub _push_body_writes {
     my $request     = $state->{request} or return;
     my $content     = $request->content;
 
-    unless ($self->_is_fh($content)) {
+    unless ($self->_is_stream($content)) {
 	$handle->push_write($content);
 	return;
     }
@@ -216,9 +215,7 @@ sub _push_body_writes {
 	    my $buffer = '';
 	    my $bytes_left = CHUNK_SIZE;
 	    while ($bytes_left) {
-		warn "trying to read $bytes_left bytes";
 		my $bytes  = sysread($content,$buffer,$bytes_left,length $buffer);
-		warn "got $bytes bytes";
 		if (length $buffer >= CHUNK_SIZE) {# got everything we need
 		    $self->_write_chunk($cv,$state,$handle,$buffer);
 		} elsif ($bytes==0) { # eof!
@@ -234,7 +231,7 @@ sub _push_body_writes {
 sub _write_chunk {
     my $self = shift;
     my ($cv,$state,$handle,$data) = @_;
-    warn "write chunk length=",length $data;
+
     # first compute the chunk signature
     my $hash = sha256_hex($data);
     my $string_to_sign = join("\n",
@@ -244,32 +241,54 @@ sub _write_chunk {
 			      $state->{signature}{previous},
 			      sha256_hex(''),
 			      $hash);
-    warn "chunk-string-to-sign=\n$string_to_sign.";
+
     my $signature = hmac_sha256_hex($string_to_sign,$state->{signature}{signing_key});
+    $state->{signature}{previous} = $signature;
 
     my $len            = sprintf('%x',length $data);
     my $chunk_metadata = "$len;chunk-signature=$signature"; 
-    warn "chunk-metadata = .$chunk_metadata.";
     my $chunk          = join (CRLF,$chunk_metadata,$data).CRLF;
     $handle->push_write($chunk);
-    $state->{signature}{previous} = $signature;
 
     if (length $data == 0) {
-	warn "last chunk";
 	delete $state->{signature};
 	$handle->on_drain(undef);
     }
 
 }
 
-sub _is_fh {
+sub _is_stream {
     my $self = shift;
     my $obj  = shift;
     return unless ref $obj;
-    return unless ref($obj) eq 'GLOB';
+    return unless eval {$obj->isa('GLOB')};
     my @s = stat($obj);
     defined $s[7] or return;
     return $s[7];
+}
+
+sub _chunked_encoding_overhead {
+    my $self = shift;
+    my $data_len       = shift;
+    my $chunk_count    = int($data_len/CHUNK_SIZE);
+    my $last_chunk_len = $data_len % CHUNK_SIZE;
+
+    my $full_chunk_len = length(sprintf('%x',CHUNK_SIZE))    # length of the chunksize, in hex
+	               + CHUNK_SIG_LEN                       # the ";chunk-signature=' part
+                       + SHA256_HEX_LEN                      # the hmac signature
+		       + length(CRLF)*2;                     # the CRLFs at the end of the signature and the chunk data
+
+    my $final_chunk_len = length(sprintf('%x',$last_chunk_len))  # length of the chunk size
+	                + CHUNK_SIG_LEN
+                        + SHA256_HEX_LEN
+			+ length(CRLF) * 2;
+
+    my $terminal_chunk  = length('0')
+	                + CHUNK_SIG_LEN
+                        + SHA256_HEX_LEN
+			+ length(CRLF) * 2;
+
+    return $chunk_count * $full_chunk_len + $final_chunk_len + $terminal_chunk;
 }
 
 1;

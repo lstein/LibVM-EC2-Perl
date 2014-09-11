@@ -263,14 +263,16 @@ sub put_object {
 	    \@options,
 	    qw(Cache-Control Content-Disposition Content-Encoding Content-Type Expires X-Amz-Storage-Class X-Amz-Website-Redirect-Location),@x_amz);
 
-	my $chunked_transfer_size = $self->_is_fh($data);
+	my $chunked_transfer_size = $self->_is_stream($data);
+	my $data_len              = $chunked_transfer_size || length $data;
 
 	my @content = $chunked_transfer_size ? (Content_Encoding      => 'aws-chunked',
-						Transfer_Encoding     => 'chunked',
+#						Transfer_Encoding     => 'chunked',  # not working for some reason - content length always required
+						Content_Length        => $data_len + $self->_chunked_encoding_overhead($data_len),
 						X_Amz_Decoded_Content_Length=> $chunked_transfer_size,
 						X_Amz_Content_Sha256  => 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD',
-	    )
-	                                     : (Content_Length        => length $data,
+	                                        )
+	                                     : (Content_Length        => $data_len,
 						X_Amz_Content_Sha256  => sha256_hex($data));
 
 	my $request = PUT($uri,
@@ -280,7 +282,6 @@ sub put_object {
 			  @$headers,
 	    );
 	$request->content($data);
-	$request->remove_header('Content-Length') if $chunked_transfer_size; # because HTTP::Request::Common adds it automatically
 
 	my @signing_parms = $chunked_transfer_size ? ($request,undef,'STREAMING-AWS4-HMAC-SHA256-PAYLOAD') : ($request);
 
