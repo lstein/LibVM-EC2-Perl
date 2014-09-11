@@ -1,6 +1,8 @@
 package VM::S3::Http_helper;
 
 use strict;
+use Digest::SHA 'sha256_hex','hmac_sha256','hmac_sha256_hex';
+use AWS::Signature4;
 
 # utility class for http requests; forms a virtual base class for VM::S3
 
@@ -8,6 +10,8 @@ use strict;
 use constant MAX_RECURSE => 5;
 use constant CRLF        => "\015\012";
 use constant CRLF2       => CRLF.CRLF;
+#use constant CHUNK_SIZE  => 65536; # 64K
+use constant CHUNK_SIZE  => 8192;   # 8K
 
 my %_cached_handles;
 sub submit_http_request {
@@ -29,6 +33,8 @@ sub submit_http_request {
     }
     $state->{request}  ||= $request;
     $state->{response} ||= undef;
+
+    warn $request->as_string;
 
     my $uri      = $request->uri;
     my $method   = $request->method;
@@ -90,6 +96,8 @@ sub _handle_http_headers {
     my $self = shift;
     my ($cv,$state,$handle,$str) = @_;
     my $response = HTTP::Response->parse($str);
+
+    warn $response->as_string;
 
     $state->{response} = $response;
     # handle continue
@@ -195,11 +203,63 @@ sub _push_body_writes {
 
     # we get here if we are uploading from a filehandle
     # using chunked transfer-encoding
-    my $authorization               = $request->header('Authorization');
-    ($state->{signature}{previous}) = $authorization =~ /Signature=([0-9a-f]+)/;
-    ($state->{signature}{scope})    = $authorization =~ m!Credential=[^/]+(.+),!;
-    $state->{signature}{timedate}   = $request->header('X-Amz-Date');
-    
+    my $authorization                = $request->header('Authorization');
+    $state->{signature}{timedate}    = $request->header('X-Amz-Date');
+    ($state->{signature}{previous})  = $authorization =~ /Signature=([0-9a-f]+)/;
+    ($state->{signature}{scope})     = $authorization =~ m!Credential=[^/]+/([^,]+),!;
+    my ($date,$region,$service)      = split '/',$state->{signature}{scope};
+    $state->{signature}{signing_key} = AWS::Signature4->signing_key($self->secret,$service,$region,$date);
+
+    $handle->on_drain(
+	sub { 
+	    my $handle = shift;
+	    my $buffer = '';
+	    my $bytes_left = CHUNK_SIZE;
+	    while ($bytes_left) {
+		warn "trying to read $bytes_left bytes";
+		my $bytes  = sysread($content,$buffer,$bytes_left,length $buffer);
+		warn "got $bytes bytes";
+		if (length $buffer >= CHUNK_SIZE) {# got everything we need
+		    $self->_write_chunk($cv,$state,$handle,$buffer);
+		} elsif ($bytes==0) { # eof!
+		    $self->_write_chunk($cv,$state,$handle,$buffer);
+		    $self->_write_chunk($cv,$state,$handle,'');  # last chunk
+		    last;
+		}
+		$bytes_left -= $bytes;
+	    }
+	});
+}
+
+sub _write_chunk {
+    my $self = shift;
+    my ($cv,$state,$handle,$data) = @_;
+    warn "write chunk length=",length $data;
+    # first compute the chunk signature
+    my $hash = sha256_hex($data);
+    my $string_to_sign = join("\n",
+			      'AWS4-HMAC-SHA256-PAYLOAD',
+			      $state->{signature}{timedate},
+			      $state->{signature}{scope},
+			      $state->{signature}{previous},
+			      sha256_hex(''),
+			      $hash);
+    warn "chunk-string-to-sign=\n$string_to_sign.";
+    my $signature = hmac_sha256_hex($string_to_sign,$state->{signature}{signing_key});
+
+    my $len            = sprintf('%x',length $data);
+    my $chunk_metadata = "$len;chunk-signature=$signature"; 
+    warn "chunk-metadata = .$chunk_metadata.";
+    my $chunk          = join (CRLF,$chunk_metadata,$data).CRLF;
+    $handle->push_write($chunk);
+    $state->{signature}{previous} = $signature;
+
+    if (length $data == 0) {
+	warn "last chunk";
+	delete $state->{signature};
+	$handle->on_drain(undef);
+    }
+
 }
 
 sub _is_fh {

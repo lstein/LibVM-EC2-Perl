@@ -266,18 +266,21 @@ sub put_object {
 	my $chunked_transfer_size = $self->_is_fh($data);
 
 	my @content = $chunked_transfer_size ? (Content_Encoding      => 'aws-chunked',
-						Content_Length        => $chunked_transfer_size,
-						Transfer_Encoding     => 'chunked')
+						Transfer_Encoding     => 'chunked',
+						X_Amz_Decoded_Content_Length=> $chunked_transfer_size,
+						X_Amz_Content_Sha256  => 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD',
+	    )
 	                                     : (Content_Length        => length $data,
 						X_Amz_Content_Sha256  => sha256_hex($data));
 
 	my $request = PUT($uri,
 			  Host                  => $host,
 			  Expect                => '100-continue',
-			  Content               => $data,  # surprisingly enough, this will work
 			  @content,
 			  @$headers,
 	    );
+	$request->content($data);
+	$request->remove_header('Content-Length') if $chunked_transfer_size; # because HTTP::Request::Common adds it automatically
 
 	my @signing_parms = $chunked_transfer_size ? ($request,undef,'STREAMING-AWS4-HMAC-SHA256-PAYLOAD') : ($request);
 
