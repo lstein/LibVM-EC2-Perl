@@ -251,7 +251,8 @@ sub put_object {
     croak "Usage: put_object(\$bucket,\$key,\$data,\@options)" unless @_ >=3;
     my ($bucket,$key,$data,@options) = @_;
 
-    my @x_amz = map {s/_/-/g; $_} grep {/x_amz_.+/} keys {@options};
+    my @x_amz   = map {s/_/-/g; $_} grep {/x_amz_.+/} keys {@options};
+    my %opt     = @options;
     
     my $cv = $self->condvar;
     my $cv1 = $self->_get_service_endpoint($bucket,$key);
@@ -263,11 +264,10 @@ sub put_object {
 	    \@options,
 	    qw(Cache-Control Content-Disposition Content-Encoding Content-Type Expires X-Amz-Storage-Class X-Amz-Website-Redirect-Location),@x_amz);
 
-	my $chunked_transfer_size = $self->_is_stream($data);
+	my $chunked_transfer_size = $self->_stream_size($data);
 	my $data_len              = $chunked_transfer_size || length $data;
 
 	my @content = $chunked_transfer_size ? (Content_Encoding      => 'aws-chunked',
-#						Transfer_Encoding     => 'chunked',  # not working for some reason - content length always required
 						Content_Length        => $data_len + $self->_chunked_encoding_overhead($data_len),
 						X_Amz_Decoded_Content_Length=> $chunked_transfer_size,
 						X_Amz_Content_Sha256  => 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD',
@@ -289,15 +289,27 @@ sub put_object {
 			     -secret_key=>$self->secret
 	    )->sign(@signing_parms);
 
-	$self->submit_http_request($request,$cv);
+	$self->submit_http_request($request,$cv,
+				   {
+				       on_complete    => $opt{-on_complete},
+				       on_header      => $opt{-on_header},
+				       on_body        => $opt{-on_body},
+				       on_write_chunk => $opt{-on_write_chunk},
+				   });
 	     });
 
-    if ($VM::EC2::ASYNC) {
-	return $cv;
-    } else {
-	my $response = $cv->recv;
+    my $cv2 = AnyEvent->condvar;
+    $cv->cb(sub {
+	my $response = shift->recv;
 	$self->error($cv->error) if $cv->error;
-	return $response;
+	$cv2->send(eval{$response->is_success && $response->header('ETag')});
+	    });
+    
+    if ($VM::EC2::ASYNC) {
+	return $cv2;
+    } else {
+	my $etag = $cv2->recv;
+	return $etag;
     }
 
 }
@@ -325,17 +337,11 @@ sub get_object {
     my ($bucket,$key) = splice(@_,0,2);
     my %options       = @_;
 
-    my $on_body    = $options{-on_body};
-    my $on_header  = $options{-on_header};
-
     my $cv = $self->condvar;
     my $cv1 = $self->_get_service_endpoint($bucket,$key);
     
     $cv1->cb(sub {
 	my ($endpoint,$uri,$host) = shift->recv();
-	local $self->{endpoint} = $endpoint;
-	local $self->{version}  = '2006-03-01';
-
 	my $headers       = $self->_options_to_headers(\@_,'If-Modified-Since','If-Unmodified-Since','If-Match','If-None-Match');
 
 	my $request = GET($uri,
@@ -345,28 +351,24 @@ sub get_object {
 	AWS::Signature4->new(-access_key=>$self->access_key,
 			     -secret_key=>$self->secret
 	    )->sign($request);
-    
-	my %headers;
-	$request->headers->scan(sub {
-	    my ($key,$value) = @_;
-	    if (exists $headers{$key}) { $headers{$key} .= ", $value" }
-	    else                       { $headers{$key}  = $value     }
-				});
-
-	my @args;
-	push @args,(on_body=>$on_body)     if $on_body;
-	push @args,(on_header=>$on_header) if $on_header;
 
 	my $callback = sub {
 	    my ($body,$hdr) = @_;
 	    if ($hdr->{Status} !~ /^2/) {
 		$self->async_send_error('get object',$hdr,$body,$cv);
-	    } else {
+	    } elsif (!$options{-on_body}) {
 		$cv->send($body);
+	    } else {
+		$cv->send(1);
 	    }
 	};
 
-	http_get($request->uri,headers=>\%headers,@args,$callback);
+	$self->submit_http_request($request,$cv,
+				   { on_body       => $options{-on_body},
+				     on_header     => $options{-on_header},
+				     on_read_chunk => $options{-on_read_chunk},
+				     on_complete   => $callback
+				   });
 	     });
 
     if ($VM::EC2::ASYNC) {
