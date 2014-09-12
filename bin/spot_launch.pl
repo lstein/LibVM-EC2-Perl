@@ -6,11 +6,15 @@
 
 =head1 SYNOPSIS
 
+ # Create two spot instance requests in the cheapest availability region.
+
  % spot_launch.pl -verbose --tag=testlaunch --region=us-west-2 --image=ami-c04fc4f0 --count=2 --price=0.02 --security_group=web+ssh --key_name=my_default
  Insufficient active spot requests (1 active, 0 pending). Requesting 1 new spot instances
  Examining 30 day spot market for cheapest zone in which to run platform=Linux/UNIX, instance_type=t1.micro
  Cheapest zone is us-west-2a; 30 day pricing for t1.micro = $ 0.003000/0.003100/0.00305215946843854 (min/max/mean)
  1  new spot instance requests launched in zone us-west-2a
+
+ # View the status of the instances
 
  % spot_launch.pl --status --tag=testlaunch --region=us-west-2
  sir-03dppl2h: state=active status=fulfilled bid=0.020000 instanceId=i-2e500c25 instance_status=running created=2014-08-27T03:17:46.000Z public_dns=ec2-54-190-148-127.us-west-2.compute.amazonaws.com current_price=0.003100
@@ -147,21 +151,26 @@ $Tag           ||= 'my_spot_instance';
 $Max_price     || croak 'Must specificy maximum bid using the -price option' unless $Status_report;
 $Verbose       ||= 0;
 
-
 # EC2 object creation
 my $ec2 = VM::EC2->new(-access_key => $Access_key,
 		       -secret_key => $Secret_key,
 		       -region     => $Region) or croak 'Could not create VM::EC2 object';
 
-do_status_report($ec2,$Tag) && exit 0 if $Status_report;
-do_instance_update($ec2,{-tag   => $Tag,
-			 -image => $Ami,
-			 -type  => $Instance_type,
-			 -count => $Instance_count,
-			 -price => $Max_price,
-			 -key   => $Keyname,
-			 -sg    => $Security_group,
-		   }) && exit 0;
+if ($Status_report) {
+    do_status_report($ec2,$Tag);
+}
+
+if ($Ami) {
+    do_instance_update($ec2,{-tag   => $Tag,
+			     -image => $Ami,
+			     -type  => $Instance_type,
+			     -count => $Instance_count,
+			     -price => $Max_price,
+			     -key   => $Keyname,
+			     -sg    => $Security_group,
+		       }) && exit 0;
+}
+
 exit 0;
 
 sub do_status_report {
@@ -176,7 +185,7 @@ sub do_status_report {
 	print ' fault=',$r->fault if $r->fault;
 	
 	if (my $i = $r->instance) {
-	    my $current_price = get_current_price($ec2,$r->launched_availability_zone,$r->productDescription,$i->instance_type);
+    my $current_price = get_current_price($ec2,$r->launched_availability_zone,$r->productDescription,$i->instance_type);
 	    print " instanceId=$i",' instance_status=',$i->status,' created=',$r->create_time," public_dns=",$i->dnsName," current_price=$current_price";
 	}
 
@@ -235,14 +244,18 @@ sub do_make_request {
     croak $ec2->error unless @requests;
 
     logit(scalar(@requests)," new spot instance requests launched in zone $zone");
-    foreach (@requests) { $_->add_tag($opt->{-tag}) }
+    if (defined $opt->{-tag}) {
+	logit("tagging instances with $opt->{-tag}");
+	sleep 2; # wait for requests to register
+	foreach (@requests) { $_->add_tag($opt->{-tag}) }
+    }
 }
 
 sub find_best_zone {
     my ($ec2,$opt) = @_;
     
     my $ami = $ec2->describe_images($opt->{-image});
-    $ami || croak "AMI $ami not found in region ",$ec2->region;
+    $ami || croak "AMI $opt->{-image} not found: ",$ec2->error;
     my $platform = $ami->platform =~ /Windows/ ? 'Windows' : 'Linux/UNIX';
 
     logit("Examining 30 day spot market for cheapest zone in which to run platform=$platform, instance_type=$opt->{-type}");
