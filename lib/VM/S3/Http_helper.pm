@@ -119,7 +119,7 @@ sub _handle_http_headers {
 
     # no content, just finish up
     else {
-	$self->_handle_http_finish($cv,$state);
+	$self->_handle_http_finish($cv,$state,$handle);
     }
 }
 
@@ -131,7 +131,7 @@ sub _handle_http_body {
     $state->{body} .= $data;
     $handle->rbuf = '';
     $state->{length} -= length $data;
-    $self->_handle_http_finish($cv,$state) if $state->{length} <= 0;
+    $self->_handle_http_finish($cv,$state,$handle) if $state->{length} <= 0;
 }
 
 
