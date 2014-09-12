@@ -118,7 +118,7 @@ sub _handle_http_headers {
 
     # no content, just finish up
     else {
-	$self->_handle_http_finish($cv,$state);
+	$self->_handle_http_finish($cv,$state,$handle);
     }
 }
 
@@ -130,7 +130,7 @@ sub _handle_http_body {
     $state->{body} .= $data;
     $handle->rbuf = '';
     $state->{length} -= length $data;
-    $self->_handle_http_finish($cv,$state) if $state->{length} <= 0;
+    $self->_handle_http_finish($cv,$state,$handle) if $state->{length} <= 0;
 }
 
 
@@ -248,6 +248,8 @@ sub _write_chunk {
     my $len            = sprintf('%x',length $data);
     my $chunk_metadata = "$len;chunk-signature=$signature"; 
     my $chunk          = join (CRLF,$chunk_metadata,$data).CRLF;
+
+    warn "chunk #",$state->{signature}{chunkno}++||0,": $chunk_metadata";
     $handle->push_write($chunk);
 
     if (length $data == 0) {
