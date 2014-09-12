@@ -20,20 +20,28 @@ VM::EC2::Dispatch->register(
     },
 
     'list objects'     => sub {VM::EC2::Dispatch::load_module('VM::S3::BucketKey');
-			     my $data = shift;
-			     my $s3   = shift;
+			       VM::EC2::Dispatch::load_module('VM::S3::BucketPrefix');
+			       my $data = shift;
+			       my $s3   = shift;
+			       
+			       my $contents = $data->{Contents} or return;
+			       my @contents = ref($contents) eq 'ARRAY' ? @$contents : $contents;
 
-			     my $contents = $data->{Contents} or return;
-			     my @contents = ref($contents) eq 'ARRAY' ? @$contents : $contents;
+			       my $buck = $s3->{list_buckets_bucket};
 
-			     my $buck = $s3->{list_buckets_bucket};
-
-			     if ($data->{IsTruncated} eq 'true') {
+			       if ($data->{IsTruncated} eq 'true') {
 				 $s3->{list_buckets_marker}{$buck} = $data->{NextMarker} || $contents[-1]->{Key};
-			     } else {
-				 delete $s3->{list_buckets_marker}{$buck};
-			     }
-			     return map {VM::S3::BucketKey->new($_,$s3,@_)} @contents;
+			       } else {
+				   delete $s3->{list_buckets_marker}{$buck};
+			       }
+			       my $prefixes = $data->{CommonPrefixes};
+			       my @prefixes = map { $_->{Prefix} } ref($prefixes) eq 'ARRAY' 
+				                                        ? @$prefixes : $prefixes;  # nasty
+
+			       my @bucket_keys      = grep {$_->Key ne $data->{Prefix}}
+			                                    map {VM::S3::BucketKey->new($_,$s3,@_)}     @contents;
+			       my @bucket_prefixes  = map {VM::S3::BucketPrefix->new({Key=>$_},$s3,@_)}  @prefixes;
+			       return sort (@bucket_keys,@bucket_prefixes);
     },
 
     'bucket acl'       => 'VM::S3::Acl',
