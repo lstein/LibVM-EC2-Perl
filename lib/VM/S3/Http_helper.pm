@@ -11,6 +11,7 @@ use constant MAX_RECURSE    => 5;
 use constant CRLF           => "\015\012";
 use constant CRLF2          => CRLF.CRLF;
 use constant CHUNK_SIZE    => 65536; # 64K
+#use constant CHUNK_SIZE    => 8192; # 8K
 
 # chunk metadata overhead calculation
 use constant SHA256_HEX_LEN => 64;
@@ -209,22 +210,33 @@ sub _push_body_writes {
     my ($date,$region,$service)      = split '/',$state->{signature}{scope};
     $state->{signature}{signing_key} = AWS::Signature4->signing_key($self->secret,$service,$region,$date);
 
-    $handle->on_drain(
-	sub { 
-	    my $handle = shift;
-	    my $buffer = '';
-	    my $bytes_left = CHUNK_SIZE;
-	    while ($bytes_left) {
-		my $bytes  = sysread($content,$buffer,$bytes_left,length $buffer);
-		if (length $buffer >= CHUNK_SIZE) {# got everything we need
-		    $self->_write_chunk($cv,$state,$handle,$buffer);
-		} elsif ($bytes==0) { # eof!
-		    $self->_write_chunk($cv,$state,$handle,$buffer);
-		    $self->_write_chunk($cv,$state,$handle,'');  # last chunk
-		    last;
-		}
-		$bytes_left -= $bytes;
+    my $buffer = '';
+    my $read_handle; $read_handle = AnyEvent::Handle->new(
+	fh        => $content,
+	on_error => sub {
+	    my ($rh,$fatal,$message) = @_;
+	    warn "error: $message";
+	    $self->_handle_http_error($cv,$read_handle,$message,599); # keep $read_handle in scope!
+	},
+	on_eof => sub {
+	    my $rh = shift;
+	    warn "on_eof...";
+	    $self->_write_chunk($cv,$state,$handle,$buffer);
+
+
+	    $self->_write_chunk($cv,$state,$handle,'');  # last chunk
+	    $rh->destroy;
+	},
+	on_read => sub { 
+	    my $rh = shift;
+	    warn "on_read.... buffer len = ",length $rh->{rbuf};
+	    $buffer .= $rh->{rbuf};
+	    warn "\$buffer = ",length $buffer;
+	    while (length $buffer >= CHUNK_SIZE) {
+		my $data = substr($buffer,0,CHUNK_SIZE,'');
+		$self->_write_chunk($cv,$state,$handle,$data);
 	    }
+	    $rh->{rbuf} = '';
 	});
 }
 
@@ -248,6 +260,8 @@ sub _write_chunk {
     my $len            = sprintf('%x',length $data);
     my $chunk_metadata = "$len;chunk-signature=$signature"; 
     my $chunk          = join (CRLF,$chunk_metadata,$data).CRLF;
+
+    warn "chunk #",$state->{signature}{chunkno}++||0,": $chunk_metadata";
     $handle->push_write($chunk);
 
     if (length $data == 0) {
