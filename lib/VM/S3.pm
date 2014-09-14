@@ -19,30 +19,7 @@ VM::EC2::Dispatch->register(
 			    return $bl ? $bl->buckets : undef
     },
 
-    'list objects'     => sub {VM::EC2::Dispatch::load_module('VM::S3::BucketKey');
-			       VM::EC2::Dispatch::load_module('VM::S3::BucketPrefix');
-			       my $data = shift;
-			       my $s3   = shift;
-			       
-			       my $contents = $data->{Contents} or return;
-			       my @contents = ref($contents) eq 'ARRAY' ? @$contents : $contents;
-
-			       my $buck = $s3->{list_buckets_bucket};
-
-			       if ($data->{IsTruncated} eq 'true') {
-				 $s3->{list_buckets_marker}{$buck} = $data->{NextMarker} || $contents[-1]->{Key};
-			       } else {
-				   delete $s3->{list_buckets_marker}{$buck};
-			       }
-			       my $prefixes = $data->{CommonPrefixes};
-			       my @prefixes = map { $_->{Prefix} } ref($prefixes) eq 'ARRAY' 
-				                                        ? @$prefixes : $prefixes;  # nasty
-
-			       my @bucket_keys      = grep {$_->Key ne $data->{Prefix}}
-			                                    map {VM::S3::BucketKey->new($_,$s3,@_)}     @contents;
-			       my @bucket_prefixes  = map {VM::S3::BucketPrefix->new({Key=>$_},$s3,@_)}  @prefixes;
-			       return sort (@bucket_keys,@bucket_prefixes);
-    },
+    'list objects'     => \&_list_objects_dispatch,
 
     'bucket acl'       => 'VM::S3::Acl',
 
@@ -64,11 +41,20 @@ sub _service {
     $headers   ||= [];
     $payload   ||= '';
 
+    # allow user to use -key=>value form
+    for my $key (keys %$params) {
+	(my $newkey = $key) =~ s/^-//;
+	$newkey             =~ s/_/-/g;
+	$params->{$newkey}  = $params->{$key};
+	delete $params->{$key} unless $key eq $newkey;
+    }
+
     my $cv = $self->condvar;
 
     my $cv1 = $self->_get_service_endpoint($bucket);
     $cv1->cb(sub {
 	my ($endpoint,$uri,$host) = shift->recv();
+
 	local $self->{endpoint}   = $endpoint;
 	local $self->{version}    = '2006-03-01';
 
@@ -164,6 +150,15 @@ sub more_objects {
     my $self = shift;
     my $bucket = shift || $self->{list_buckets_bucket};
     return exists $self->{list_buckets_marker}{$bucket};
+}
+
+sub object {
+    my $self = shift;
+    @_ >= 2 or croak "usage: \$s3->object('bucket-name'=>'key-name')";
+    my ($bucket,$key) = @_;
+    my @objects = $self->list_objects($bucket,-marker=>substr($key,0,-1));
+    my ($obj)   = grep {$_->Key eq $key} @objects;
+    return $obj;
 }
 
 sub _bucket_g {
@@ -416,6 +411,35 @@ sub _options_to_headers {
 	push @result,($key=>$value);
     }
     return \@result;
+}
+
+sub _list_objects_dispatch {
+    my ($data,$s3) = @_;
+
+    VM::EC2::Dispatch::load_module('VM::S3::BucketKey');
+    VM::EC2::Dispatch::load_module('VM::S3::BucketPrefix');
+    
+    my $contents = $data->{Contents} or return;
+    my @contents = ref($contents) eq 'ARRAY' ? @$contents : $contents;
+    
+    my $buck = $s3->{list_buckets_bucket};
+    
+    if ($data->{IsTruncated} eq 'true') {
+	$s3->{list_buckets_marker}{$buck} = $data->{NextMarker} || $contents[-1]->{Key};
+    } else {
+	delete $s3->{list_buckets_marker}{$buck};
+    }
+    my $prefixes = $data->{CommonPrefixes};
+    my @prefixes = map { $_->{Prefix} } ref($prefixes) eq 'ARRAY' 
+	? @$prefixes : $prefixes;  # nasty
+    
+    my @bucket_keys      = grep {$_->Key ne $data->{Prefix}}
+                                map {VM::S3::BucketKey->new($_,$s3,@_)}       @contents;
+    my @bucket_prefixes  = map {VM::S3::BucketPrefix->new({Key=>$_},$s3,@_)}  @prefixes;
+
+    foreach (@bucket_keys,@bucket_prefixes) { $_->bucket($data->{Name}) }
+
+    return sort (@bucket_keys,@bucket_prefixes);
 }
 
 1;

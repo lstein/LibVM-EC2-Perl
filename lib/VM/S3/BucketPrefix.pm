@@ -10,10 +10,14 @@ sub valid_fields {
 
 sub short_name { shift->Key }
 
-sub owner {
+sub bucket {
     my $self = shift;
-    return VM::S3::Owner->new($self->Owner,$self->ec2);
+    my $d    = $self->{bucket};
+    $self->{bucket} = shift if @_;
+    $d;
 }
+
+sub is_directory { 1; }
 
 1;
 

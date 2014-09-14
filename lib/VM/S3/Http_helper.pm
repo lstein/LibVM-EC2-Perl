@@ -68,22 +68,22 @@ sub _get_http_handle {
     my $self = shift;
     my ($host,$port,$tls,$cv) = @_;
 
-    if ($_cached_handles{$host,$port}) {
-	return $_cached_handles{$host,$port} unless $_cached_handles{$host,$port}->destroyed;
+    my $handle;
+
+    if (my $ch = $_cached_handles{$host,$port}) {
+	$handle = $ch if $ch->ping;
     }
 
-    my $handle; 
-    $handle = AnyEvent::Handle->new(connect => [$host,$port],
-				    $tls ? (tls=>'connect') : (),
-
-				    on_eof => sub {$handle->destroy()},
-
-				    on_error => sub {
-					my ($handle,$fatal,$message) = @_;
-					$self->_handle_http_error($cv,$handle,$message,599);
-				    }
-	);
-
+    $handle ||= AnyEvent::PingHandle->new(connect => [$host,$port],
+					  $tls ? (tls=>'connect') : (),
+					  on_connect=>sub {warn "new connection to $host:$port"});
+    
+    $handle->on_eof(sub {my $h = shift; warn "EOF! residual= $h->{rbuf}",$h->destroy()}),
+    $handle->on_error(sub {
+	my ($handle,$fatal,$message) = @_;
+	warn "EROR! $message";
+	$self->_handle_http_error($cv,$handle,$message,599);
+		      });
     return $_cached_handles{$host,$port} = $handle;
 }
 
@@ -210,7 +210,10 @@ sub _handle_http_finish {
 	$response->content($state->{body});
 	$cv->send($response);
     }
-    $handle->destroy() if $response->header('Connection') eq 'close';
+
+    if ($response->header('Connection') eq 'close') {
+	$handle->destroy();
+    }
 
     # run completion routine - we pass headers as a hash in order to be compatible with AnyEvent::HTTP callbacks
     $self->_run_completion_routine($response,$state->{on_complete}) if $state->{on_complete};
@@ -406,5 +409,18 @@ sub _chunked_encoding_overhead {
 
     return $chunk_count * $full_chunk_len + $final_chunk_len + $terminal_chunk;
 }
+
+package AnyEvent::PingHandle;
+use base 'AnyEvent::Handle';
+
+sub ping {
+    my $self   = shift;
+    my $fileno = fileno($self->fh);
+    my $fbits = '';
+    vec($fbits,$fileno,1)=1;
+    my $nfound = select($fbits, undef, undef, 0);
+    return $nfound <= 0;
+}
+
 
 1;
