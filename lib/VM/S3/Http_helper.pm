@@ -74,16 +74,14 @@ sub _get_http_handle {
 	$handle = $ch if $ch->ping;
     }
 
-    $handle ||= AnyEvent::PingHandle->new(connect => [$host,$port],
+    $handle ||= AnyEvent::PoolHandle->new(connect => [$host,$port],
 					  $tls ? (tls=>'connect') : (),
 					  on_connect=>sub {warn "new connection to $host:$port"});
     
-    $handle->on_eof(sub {my $h = shift; warn "EOF! residual= $h->{rbuf}",$h->destroy()}),
+    $handle->on_eof(sub {my $h = shift; $h->destroy()}),
     $handle->on_error(sub {
 	my ($handle,$fatal,$message) = @_;
-	warn "EROR! $message";
-	$self->_handle_http_error($cv,$handle,$message,599);
-		      });
+	$self->_handle_http_error($cv,$handle,$message,599)});
     return $_cached_handles{$host,$port} = $handle;
 }
 
@@ -91,7 +89,7 @@ sub _handle_http_error {
     my $self = shift;
     my ($cv,$handle,$message,$code) = @_;
     $self->error(VM::EC2::Error->new({Message=>$message,Code=>$code},$self));    
-    $handle->destroy();
+    $handle->finished();
     $cv->send();
     1;
 }
@@ -214,6 +212,9 @@ sub _handle_http_finish {
     if ($response->header('Connection') eq 'close') {
 	$handle->destroy();
     }
+
+    # mark potentially available
+    $handle->finished();
 
     # run completion routine - we pass headers as a hash in order to be compatible with AnyEvent::HTTP callbacks
     $self->_run_completion_routine($response,$state->{on_complete}) if $state->{on_complete};
@@ -410,8 +411,43 @@ sub _chunked_encoding_overhead {
     return $chunk_count * $full_chunk_len + $final_chunk_len + $terminal_chunk;
 }
 
-package AnyEvent::PingHandle;
+package AnyEvent::PoolHandle;
 use base 'AnyEvent::Handle';
+
+my %CONNECTION_CACHE;
+my %HANDLE_AVAILABLE;
+
+sub new {
+    my $class = shift;
+    my %args  = @_;
+
+    if ($args{connect}) {
+	my ($host,$port) = @{$args{connect}};
+	my $ch;
+	for my $h (values %{$CONNECTION_CACHE{$host,$port}}) {
+	    if ($h->ping) {
+		$ch ||= $h if $HANDLE_AVAILABLE{$h};
+	    } else {
+		delete $CONNECTION_CACHE{$host,$port}{$ch};
+		delete $HANDLE_AVAILABLE{$_};
+	    }
+	}
+	if ($ch) {
+	    delete $HANDLE_AVAILABLE{$ch};
+	    return $ch;
+	}
+	my $handle = $class->SUPER::new(@_);
+	return $CONNECTION_CACHE{$host,$port}{$handle} = $handle;
+    } else {
+	return $class->SUPER::new(@_);
+    }
+
+}
+
+sub finished {
+    my $self = shift;
+    $HANDLE_AVAILABLE{$self}++ unless $self->destroyed;
+}
 
 sub ping {
     my $self   = shift;
@@ -419,7 +455,8 @@ sub ping {
     my $fbits = '';
     vec($fbits,$fileno,1)=1;
     my $nfound = select($fbits, undef, undef, 0);
-    return $nfound <= 0;
+    my $success = $nfound <= 0;
+    return $success;
 }
 
 
