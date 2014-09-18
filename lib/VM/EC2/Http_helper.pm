@@ -1,8 +1,10 @@
-package VM::S3::Http_helper;
+package VM::EC2::Http_helper;
 
 use strict;
+use HTTP::Response;
 use Digest::SHA 'sha256_hex','hmac_sha256','hmac_sha256_hex';
 use AWS::Signature4;
+use Carp 'croak';
 
 # utility class for http requests; forms a virtual base class for VM::S3
 
@@ -17,7 +19,6 @@ use constant CHUNK_SIZE    => 65536; # 64K
 use constant SHA256_HEX_LEN => 64;
 use constant CHUNK_SIG_LEN  => length(';chunk-signature=');
 
-my %_cached_handles;
 sub submit_http_request {
     my $self    = shift;
     my ($req,$cv,$state) = @_;
@@ -25,7 +26,7 @@ sub submit_http_request {
     # force the request into shape
     my $request = $req->clone();
     $request->header(Host   => $request->uri->host) unless $request->header('Host');
- 
+
     # state variables for recursion handling
     $cv               ||= $self->condvar;
     $state            ||= {};
@@ -43,14 +44,12 @@ sub submit_http_request {
     my $headers  = $request->headers->as_string;
     my $host     = $uri->host;
     my $scheme   = $uri->scheme;
-    my $resource = $uri->path;
+    my $resource = $uri->path_query || '/';
     my $port     = $uri->port;
-    my $tls      = $scheme eq 'https';
 
     my $completion = $state->{on_complete};
 
-    # BUG: ignore http proxy environment variable
-    my $handle = $self->_get_http_handle($host,$port,$tls,$cv);
+    my $handle = $self->_get_http_handle($host,$port,$scheme,$cv);
     
     # do the writes
     $handle->push_write("$method $resource HTTP/1.1".CRLF);
@@ -64,25 +63,53 @@ sub submit_http_request {
     return $cv;
 }
 
+sub env_proxy {
+    my $self = shift;
+    for my $e (keys %ENV) {
+	next unless $e =~ /(\w+)_proxy$/i;
+	$self->proxy(lc $1,$ENV{$e});
+    }
+}
+
+sub proxy {
+    my $self = shift;
+    # setting proxy
+    croak 'usage: ',ref($self),'->proxy($scheme,$url)' unless @_ >= 2;
+    my ($schemes,$url) = @_;
+    my @s = ref $schemes ? @$schemes : ($schemes);
+    for my $s (@s) {
+	$self->{proxies}{$s} = $url;
+    }
+}
+
+sub get_proxy {
+    my $self = shift;
+    my ($scheme,$host) = @_;
+    my $proxy = $self->{proxies}{$scheme};
+    return unless $proxy;
+
+    my $no_proxy = $self->{proxies}{no} || '';
+    return if $no_proxy =~ /\b$host\b/;
+
+    return $proxy;
+}
+
 sub _get_http_handle {
     my $self = shift;
-    my ($host,$port,$tls,$cv) = @_;
+    my ($host,$port,$scheme,$cv) = @_;
 
-    my $handle;
+    my $tls    = $scheme eq 'https';
+    my $proxy  = $self->get_proxy($scheme,$host);
 
-    if (my $ch = $_cached_handles{$host,$port}) {
-	$handle = $ch if $ch->ping;
-    }
-
-    $handle ||= AnyEvent::PoolHandle->new(connect => [$host,$port],
-					  $tls ? (tls=>'connect') : (),
-					  on_connect=>sub {warn "new connection to $host:$port"});
+    my $handle = AnyEvent::PoolHandle->new(connect => [$host,$port],
+					   $tls ? (tls=>'connect') : (),
+					   on_connect=>sub {warn "new connection to $host:$port"});
     
     $handle->on_eof(sub {my $h = shift; $h->destroy()}),
     $handle->on_error(sub {
 	my ($handle,$fatal,$message) = @_;
 	$self->_handle_http_error($cv,$handle,$message,599)});
-    return $_cached_handles{$host,$port} = $handle;
+    return $handle;
 }
 
 sub _handle_http_error {
@@ -186,6 +213,8 @@ sub _handle_http_finish {
     my $response = $state->{response} 
                    or $self->_handle_http_error($cv,$handle,"no header seen in response",500) && return;
 
+    $response->content($state->{body});
+
     if ($response->is_redirect) {
 	my $location = $response->header('Location');
 	my $uri = URI->new($location);
@@ -205,7 +234,6 @@ sub _handle_http_finish {
 
     else {
 	$self->error(undef);
-	$response->content($state->{body});
 	$cv->send($response);
     }
 
@@ -341,8 +369,6 @@ sub _write_chunk {
     my $len            = sprintf('%x',length $data);
     my $chunk_metadata = "$len;chunk-signature=$signature"; 
     my $chunk          = join (CRLF,$chunk_metadata,$data).CRLF;
-
-#    warn "chunk #",$state->{signature}{chunkno}++||0,": $chunk_metadata";
 
     if (length $data == 0) {
 	delete $state->{signature};

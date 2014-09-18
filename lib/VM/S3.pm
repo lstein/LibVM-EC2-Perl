@@ -1,7 +1,7 @@
 package VM::S3;
 
 use strict;
-use base 'VM::EC2','VM::S3::Http_helper';
+use base 'VM::EC2';#,'VM::S3::Http_helper';
 use AnyEvent::HTTP;
 use AnyEvent::Handle;
 use HTTP::Request::Common;

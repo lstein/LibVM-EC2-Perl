@@ -571,6 +571,7 @@ use strict;
 
 use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
+use base 'VM::EC2::Http_helper';
 eval "require AWS::Signature4"; # optional
 
 use MIME::Base64 qw(encode_base64 decode_base64);
@@ -579,7 +580,6 @@ use POSIX 'strftime';
 use URI;
 use URI::Escape;
 use AnyEvent;
-use AnyEvent::HTTP;
 use AnyEvent::CacheDNS ':register';
 use HTTP::Request::Common;
 use VM::EC2::Error;
@@ -1805,41 +1805,32 @@ sub async_request {
     my ($action,$request) = @_;
     $action ||= undef;
 
-    my @headers;
-    $request->headers->scan(sub {push @headers,@_});
-
     my $cv    = $self->condvar;
     my $callback = sub {
 	my $timer = shift;
-	http_request(
-	    $request->method => $request->uri,
-	    persistent => 1,
-	    body    => $request->content,
-	    recurse => 10,
-	    headers => {
-		TE      => undef,
-		Referer => undef,
-		@headers,
-	    },
-	    sub {
-		my ($body,$hdr) = @_;
-		if ($hdr->{Status} !~ /^2/) { # an error
-		    if ($body =~ /RequestLimitExceeded/) {
-			warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
-			$timer->retry();
-			return;
-		    } else {
-			$self->async_send_error($action,$hdr,$body,$cv);
+	$self->submit_http_request($request,undef,{
+	    on_complete =>
+		sub {
+		    my ($body,$hdr) = @_;
+#		    warn "HDR:\n",Data::Dumper::Dumper($hdr);
+#		    warn "BODY:\n$body";
+		    if ($hdr->{Status} !~ /^2/) { # an error
+			if ($body =~ /RequestLimitExceeded/) {
+			    warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
+			    $timer->retry();
+			    return;
+			} else {
+			    $self->async_send_error($action,$hdr,$body,$cv);
+			    $timer->success();
+			    return;
+			}
+		    } else { # success
+			$self->error(undef);
+			my @obj = VM::EC2::Dispatch->content2objects($action,$hdr->{'content-type'},$body,$self,$hdr);
+			$cv->send(@obj);
 			$timer->success();
-			return;
 		    }
-		} else { # success
-		    $self->error(undef);
-		    my @obj = VM::EC2::Dispatch->content2objects($action,$hdr->{'content-type'},$body,$self,$hdr);
-		    $cv->send(@obj);
-		    $timer->success();
-		}
-	    })
+	    }})
     };
     RetryTimer->new(on_retry       => $callback,
 		    interval       => 1,
