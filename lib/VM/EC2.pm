@@ -1813,6 +1813,7 @@ sub async_request {
 	my $timer = shift;
 	http_request(
 	    $request->method => $request->uri,
+	    persistent => 1,
 	    body    => $request->content,
 	    recurse => 10,
 	    headers => {
