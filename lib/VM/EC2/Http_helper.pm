@@ -14,6 +14,7 @@ use constant CRLF           => "\015\012";
 use constant CRLF2          => CRLF.CRLF;
 use constant CHUNK_SIZE    => 65536; # 64K
 #use constant CHUNK_SIZE    => 8192; # 8K
+use constant DEBUG => 0;
 
 # chunk metadata overhead calculation
 use constant SHA256_HEX_LEN => 64;
@@ -27,15 +28,13 @@ sub submit_http_request {
     my $request = $req->clone();
     $request->header(Host   => $request->uri->host) unless $request->header('Host');
 
+    warn $request->as_string if DEBUG;
+
     # state variables for recursion handling
     $cv               ||= $self->condvar;
     $state            ||= {};
-    $state->{recurse}   = MAX_RECURSE unless exists $state->{recurse};
-    if ($state->{recurse} <= 0) {
-	$self->error(VM::EC2::Error->new({Message=>'too many redirects',Code=>500},$self));
-	$cv->send();
-	return $cv;
-    }
+    $state->{recurse} = MAX_RECURSE unless exists $state->{recurse};
+    $state->{_recurse}= $state->{recurse};
     $state->{request}  ||= $request;
     $state->{response} ||= undef;
 
@@ -47,19 +46,23 @@ sub submit_http_request {
     my $resource = $uri->path_query || '/';
     my $port     = $uri->port;
 
-    my $completion = $state->{on_complete};
+    $resource = $uri if $scheme eq 'http' && $self->get_proxy($scheme,$host);
 
-    my $handle = $self->_get_http_handle($host,$port,$scheme,$cv);
+    my $conversation = sub {
+	my $handle = shift;
+
+	# do the writes
+	$handle->push_write("$method $resource HTTP/1.1".CRLF);
+	$handle->push_write($headers.CRLF);  # headers already has a crlf, so we get two here
+
+	$self->_push_body_writes($cv,$state,$handle) unless $request->header('Expect') eq '100-continue';
+
+	# read the status line & headers
+	$handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($cv,$state,@_)});
+    };
+
+    my $handle = $self->_run_request($host,$port,$scheme,$cv,$conversation);
     
-    # do the writes
-    $handle->push_write("$method $resource HTTP/1.1".CRLF);
-    $handle->push_write($headers.CRLF);  # headers already has a crlf, so we get two here
-
-    $self->_push_body_writes($cv,$state,$handle) unless $request->header('Expect') eq '100-continue';
-
-    # read the status line & headers
-    $handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($cv,$state,@_)});
-
     return $cv;
 }
 
@@ -91,25 +94,44 @@ sub get_proxy {
     my $no_proxy = $self->{proxies}{no} || '';
     return if $no_proxy =~ /\b$host\b/;
 
-    return $proxy;
+    return URI->new($proxy);
 }
 
-sub _get_http_handle {
+sub _run_request {
     my $self = shift;
-    my ($host,$port,$scheme,$cv) = @_;
+    my ($host,$port,$scheme,$cv,$conversation) = @_;
 
-    my $tls    = $scheme eq 'https';
     my $proxy  = $self->get_proxy($scheme,$host);
+    my $tls    = $proxy ? $proxy->scheme eq 'tls' : $scheme eq 'https';
 
     my $handle = AnyEvent::PoolHandle->new(connect => [$host,$port],
-					   $tls ? (tls=>'connect') : (),
-					   on_connect=>sub {warn "new connection to $host:$port"});
-    
+					   $proxy ? (proxy   => [$proxy->host,$proxy->port]) : (),
+					   $tls   ? (tls=>'connect')                         : (),
+					   on_connect => sub {warn "connecting to $host:$port via $proxy" if DEBUG},
+	);
+
     $handle->on_eof(sub {my $h = shift; $h->destroy()}),
     $handle->on_error(sub {
 	my ($handle,$fatal,$message) = @_;
 	$self->_handle_http_error($cv,$handle,$message,599)});
-    return $handle;
+
+    # run CONNECT conversation
+    if ($proxy && $scheme eq 'https' && $handle->is_new) {
+	$handle->push_write("CONNECT $host:$port HTTP/1.1".CRLF2);
+	$handle->push_read(line => CRLF2,sub {
+	    my ($handle,$str) = @_;
+	    my $r = HTTP::Response->parse($str);
+	    $self->_handle_http_error($cv,$handle,$r->code,$r->message)
+		unless $r->is_success;
+	    if ($scheme eq 'https' && !exists $handle->{tls}) {
+		$handle->starttls('connect');
+		$conversation->($handle);
+	    }});
+    }
+
+    else {
+	$conversation->($handle);
+    }
 }
 
 sub _handle_http_error {
@@ -126,6 +148,8 @@ sub _handle_http_headers {
     my ($cv,$state,$handle,$str) = @_;
     my $response = HTTP::Response->parse($str);
 
+    warn $str if DEBUG;
+
     if (my $cb = $state->{on_header}) { $cb->($response->headers) }
 
     $state->{response} = $response;
@@ -134,6 +158,10 @@ sub _handle_http_headers {
 	$self->_push_body_writes($cv,$state,$handle);
 	$handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($cv,$state,@_)});	
     } 
+
+    elsif ($state->{request}->method =~ /HEAD/i) { # ignore body
+	$self->_handle_http_finish($cv,$state,$handle);
+    }
 
     # handle counted content
     elsif (my $len = $response->header('Content-Length')) {
@@ -147,9 +175,13 @@ sub _handle_http_headers {
 			   sub {$self->_handle_http_chunk_header($cv,$state,@_)});
     }
 
-    # no content, just finish up
-    else {
+    elsif ($response->header('Content-length') == 0) {
 	$self->_handle_http_finish($cv,$state,$handle);
+    }
+
+    # no content or transfer encoding! - read till end
+    else {
+	$handle->on_read(sub {$self->_handle_http_body($cv,$state,@_)});
     }
 }
 
@@ -178,6 +210,7 @@ sub _handle_http_body {
 sub _handle_http_chunk_header {
     my $self = shift;
     my ($cv,$state,$handle,$str) = @_;
+    warn "chunk header: $str" if DEBUG;
     $str =~ /^([0-9a-fA-F]+)/  or $self->_handle_http_error($cv,$handle,"garbled http chunk",500) && return;
     my $chunk_len = hex $1;
     if ($chunk_len > 0) {
@@ -191,6 +224,8 @@ sub _handle_http_chunk_header {
 sub _handle_http_chunk {
     my $self = shift;
     my ($cv,$state,$handle,$str) = @_;
+
+    warn "chunk body: $str" if DEBUG;
     $state->{length} -= length $str;
 
     local $/ = CRLF;
@@ -216,17 +251,21 @@ sub _handle_http_finish {
     $response->content($state->{body});
 
     if ($response->is_redirect) {
-	my $location = $response->header('Location');
-	my $uri = URI->new($location);
-	my $previous      = $state->{request};
-	$state->{request} = $previous->clone;
-	$state->{request}->previous($previous);
-	$state->{request}->uri($uri);
-	$state->{request}->header(Host => $uri->host);
-	$state->{recurse}--;
-	$self->submit_http_request($state->{request},$cv,$state);
+	if ($state->{recurse} > 0) {
+	    my $location = $response->header('Location');
+	    my $uri = URI->new($location);
+	    my $previous      = $state->{request};
+	    $state->{request} = $previous->clone;
+	    $state->{response}->previous($previous);
+	    $state->{request}->uri($uri);
+	    $state->{request}->header(Host => $uri->host);
+	    $state->{_recurse}--;
+	    $self->submit_http_request($state->{request},$cv,$state);
+	} else {
+	    $cv->send($state->{response});
+	}
 
-    } elsif ($response->is_error) {
+    } elsif ($response->is_error && $state->{body}) {
 	my $error = VM::EC2::Dispatch->create_error_object($state->{body},$self,'put object');
 	$cv->error($error);
 	$cv->send();
@@ -462,7 +501,8 @@ sub new {
 	    delete $HANDLE_AVAILABLE{$ch};
 	    return $ch;
 	}
-	my $handle = $class->SUPER::new(@_);
+	$args{connect} = $args{proxy} if $args{proxy};
+	my $handle = $class->SUPER::new(%args);
 	return $CONNECTION_CACHE{$host,$port}{$handle} = $handle;
     } else {
 	return $class->SUPER::new(@_);
@@ -472,6 +512,7 @@ sub new {
 
 sub finished {
     my $self = shift;
+    $self->{_used}++;
     $HANDLE_AVAILABLE{$self}++ unless $self->destroyed;
 }
 
@@ -483,6 +524,13 @@ sub ping {
     my $nfound = select($fbits, undef, undef, 0);
     my $success = $nfound <= 0;
     return $success;
+}
+
+sub is_new { shift->used == 0 }
+
+sub used {
+    my $self = shift;
+    return $self->{_used}||0;
 }
 
 

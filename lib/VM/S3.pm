@@ -2,7 +2,6 @@ package VM::S3;
 
 use strict;
 use base 'VM::EC2';#,'VM::S3::Http_helper';
-use AnyEvent::HTTP;
 use AnyEvent::Handle;
 use HTTP::Request::Common;
 use HTTP::Response;
@@ -209,21 +208,24 @@ sub bucket_region {
     elsif (!$self->valid_bucket_name($bucket)) {
 	$cv->send('us standard');
     } else {
-	http_head('http://s3.amazonaws.com/',
-		  recurse => 0,
-		  headers => { Host => $bucket },
-		  sub {
-		      my ($body,$hdr) = @_;
-		      if ($hdr->{Status} == 200 || $hdr->{Status} == 403) {
-			  $cv->send($BR_cache{$bucket} = 'us standard');
-		      } elsif ($hdr->{Status} == 307 || $hdr->{Status} == 302) {
-			  $hdr->{location} =~ /s3-([\w-]+)\.amazonaws\.com/;
-			  $cv->send($BR_cache{$bucket} = $1);
-		      } else {
-			  $cv->send($BR_cache{$bucket} = undef);
-		      }
-		  }
-	    );
+	$cv->cb(sub {
+	    my $response = shift->recv();
+	    unless ($response) {
+		die $self->error_str;
+	    }
+	    my $status = $response->code;
+	    if ($response->is_success || $status == 403) {
+		$cv->send($BR_cache{$bucket} = 'us standard');
+	    } elsif ($status == 307 || $status == 302) {
+		$response->header('Location') =~ /s3-([\w-]+)\.amazonaws\.com/;
+		$cv->send($BR_cache{$bucket} = $1);
+	    } else {
+		$cv->send($BR_cache{$bucket} = undef);
+	    }});
+	$self->submit_http_request(HEAD('http://s3.amazonaws.com/',
+					Host=>$bucket),
+				   $cv,
+				   { recurse     => 0});
     }
     return $cv if $VM::EC2::ASYNC;
     return $cv->recv();
@@ -429,9 +431,12 @@ sub _list_objects_dispatch {
     } else {
 	delete $s3->{list_buckets_marker}{$buck};
     }
-    my $prefixes = $data->{CommonPrefixes};
-    my @prefixes = map { $_->{Prefix} } ref($prefixes) eq 'ARRAY' 
-	? @$prefixes : $prefixes;  # nasty
+
+    my @prefixes;
+    if (my $prefixes = $data->{CommonPrefixes}) {
+	@prefixes = map { $_->{Prefix} } ref($prefixes) eq 'ARRAY' 
+	    ? @$prefixes : $prefixes;  # nasty
+    }
     
     my @bucket_keys      = grep {$_->Key ne $data->{Prefix}}
                                 map {VM::S3::BucketKey->new($_,$s3,@_)}       @contents;
