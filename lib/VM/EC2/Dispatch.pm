@@ -149,15 +149,15 @@ sub register {
 # new way
 sub content2objects {
     my $self = shift;
-    my ($action,$type,$content,$ec2,$headers) = @_;
+    my ($action,$headers,$content,$ec2) = @_;
 
     my $handler = $REGISTRATION->{$action} || 'VM::EC2::Generic';
     my ($method,@params) = split /,/,$handler;
 
-    return $headers->{Status} == 200 if $handler eq 'response_ok';
+    return $headers->is_success if $handler eq 'response_ok';
 
     # quick hack - not an XML response!
-    return $content unless $type =~ /xml/ || $content =~ /^<\?xml/;
+    return $content unless $headers->header('Content-type') =~ /xml/ || $content =~ /^<\?xml/;
 
     if (ref $handler eq 'CODE') {
 	my $parsed = $self->new_xml_parser->XMLin($content);

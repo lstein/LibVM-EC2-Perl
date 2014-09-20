@@ -4,6 +4,7 @@ use strict;
 use HTTP::Response;
 use Digest::SHA 'sha256_hex','hmac_sha256','hmac_sha256_hex';
 use AWS::Signature4;
+use AnyEvent::Util;
 use Carp 'croak';
 
 # utility class for http requests; forms a virtual base class for VM::S3
@@ -13,8 +14,10 @@ use constant MAX_RECURSE    => 5;
 use constant CRLF           => "\015\012";
 use constant CRLF2          => CRLF.CRLF;
 use constant CHUNK_SIZE    => 65536; # 64K
+use constant TIMEOUT       => 30;
 #use constant CHUNK_SIZE    => 8192; # 8K
 use constant DEBUG => 0;
+use constant DEBUG_CONNECTION => 0;
 
 # chunk metadata overhead calculation
 use constant SHA256_HEX_LEN => 64;
@@ -22,7 +25,7 @@ use constant CHUNK_SIG_LEN  => length(';chunk-signature=');
 
 sub submit_http_request {
     my $self    = shift;
-    my ($req,$cv,$state) = @_;
+    my ($req,$cb,$state) = @_;
 
     # force the request into shape
     my $request = $req->clone();
@@ -31,12 +34,12 @@ sub submit_http_request {
     warn $request->as_string if DEBUG;
 
     # state variables for recursion handling
-    $cv               ||= $self->condvar;
-    $state            ||= {};
-    $state->{recurse} = MAX_RECURSE unless exists $state->{recurse};
-    $state->{_recurse}= $state->{recurse};
-    $state->{request}  ||= $request;
-    $state->{response} ||= undef;
+    $state                ||= {};
+    $state->{recurse}       = MAX_RECURSE unless exists $state->{recurse};
+    $state->{_recurse}      = $state->{recurse};
+    $state->{request}     ||= $request;
+    $state->{response}    ||= undef;
+    $state->{on_complete} ||= $cb;
 
     my $uri      = $request->uri;
     my $method   = $request->method;
@@ -55,15 +58,16 @@ sub submit_http_request {
 	$handle->push_write("$method $resource HTTP/1.1".CRLF);
 	$handle->push_write($headers.CRLF);  # headers already has a crlf, so we get two here
 
-	$self->_push_body_writes($cv,$state,$handle) unless $request->header('Expect') eq '100-continue';
+	$self->_push_body_writes($state,$handle) unless $request->header('Expect') eq '100-continue';
 
 	# read the status line & headers
-	$handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($cv,$state,@_)});
+	$handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($state,@_)});
     };
 
-    my $handle = $self->_run_request($host,$port,$scheme,$cv,$conversation);
-    
-    return $cv;
+    my $handle = $self->_run_request($state,$host,$port,$scheme,$conversation);
+    return wantarray && AnyEvent::Util::guard { 
+	$handle->destroy(); 
+	$self->_handle_http_error($state,$handle,'request cancelled by user',599)};
 }
 
 sub env_proxy {
@@ -99,7 +103,7 @@ sub get_proxy {
 
 sub _run_request {
     my $self = shift;
-    my ($host,$port,$scheme,$cv,$conversation) = @_;
+    my ($state,$host,$port,$scheme,$conversation) = @_;
 
     my $proxy  = $self->get_proxy($scheme,$host);
     my $tls    = $proxy ? $proxy->scheme eq 'tls' : $scheme eq 'https';
@@ -107,13 +111,18 @@ sub _run_request {
     my $handle = AnyEvent::PoolHandle->new(connect => [$host,$port],
 					   $proxy ? (proxy   => [$proxy->host,$proxy->port]) : (),
 					   $tls   ? (tls=>'connect')                         : (),
-					   on_connect => sub {warn "connecting to $host:$port via $proxy" if DEBUG},
+					   on_connect => sub {my $handle = shift;
+							      warn "connecting $handle to $host:$port via ",$proxy||'no proxy' 
+								  if DEBUG || DEBUG_CONNECTION},
 	);
 
-    $handle->on_eof(sub {my $h = shift; $h->destroy()}),
+    $handle->on_eof(sub {
+	my $h = shift; 
+	$h->destroy()}),
+
     $handle->on_error(sub {
 	my ($handle,$fatal,$message) = @_;
-	$self->_handle_http_error($cv,$handle,$message,599)});
+	$self->_handle_http_error($state,$handle,$message,599)});
 
     # run CONNECT conversation
     if ($proxy && $scheme eq 'https' && $handle->is_new) {
@@ -121,7 +130,7 @@ sub _run_request {
 	$handle->push_read(line => CRLF2,sub {
 	    my ($handle,$str) = @_;
 	    my $r = HTTP::Response->parse($str);
-	    $self->_handle_http_error($cv,$handle,$r->code,$r->message)
+	    $self->_handle_http_error($state,$handle,$r->code,$r->message)
 		unless $r->is_success;
 	    if ($scheme eq 'https' && !exists $handle->{tls}) {
 		$handle->starttls('connect');
@@ -136,16 +145,15 @@ sub _run_request {
 
 sub _handle_http_error {
     my $self = shift;
-    my ($cv,$handle,$message,$code) = @_;
-    $self->error(VM::EC2::Error->new({Message=>$message,Code=>$code},$self));    
+    my ($state,$handle,$message,$code) = @_;
+    my $response = $state->{response} ||= HTTP::Response->new($code,$message);
     $handle->finished();
-    $cv->send();
-    1;
+    $state->{on_complete}->($response) if $state->{on_complete};
 }
 
 sub _handle_http_headers {
     my $self = shift;
-    my ($cv,$state,$handle,$str) = @_;
+    my ($state,$handle,$str) = @_;
     my $response = HTTP::Response->parse($str);
 
     warn $str if DEBUG;
@@ -155,42 +163,42 @@ sub _handle_http_headers {
     $state->{response} = $response;
     # handle continue
     if ($response->code == 100) {
-	$self->_push_body_writes($cv,$state,$handle);
-	$handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($cv,$state,@_)});	
+	$self->_push_body_writes($state,$handle);
+	$handle->push_read (line => CRLF2,sub {$self->_handle_http_headers($state,@_)});	
     } 
 
     elsif ($state->{request}->method =~ /HEAD/i) { # ignore body
-	$self->_handle_http_finish($cv,$state,$handle);
+	$self->_handle_http_finish($state,$handle);
     }
 
     # handle counted content
     elsif (my $len = $response->header('Content-Length')) {
 	$state->{length} = $len;
-	$handle->on_read(sub {$self->_handle_http_body($cv,$state,@_)} );
+	$handle->on_read(sub {$self->_handle_http_body($state,@_)} );
     } 
 
     # handle chunked content
     elsif ($response->header('Transfer-Encoding') =~ /\bchunked\b/) {
 	$handle->push_read(line=>CRLF,
-			   sub {$self->_handle_http_chunk_header($cv,$state,@_)});
+			   sub {$self->_handle_http_chunk_header($state,@_)});
     }
 
     elsif ($response->header('Content-length') == 0) {
-	$self->_handle_http_finish($cv,$state,$handle);
+	$self->_handle_http_finish($state,$handle);
     }
 
     # no content or transfer encoding! - read till end
     else {
-	$handle->on_read(sub {$self->_handle_http_body($cv,$state,@_)});
+	$handle->on_read(sub {$self->_handle_http_body($state,@_)});
     }
 }
 
 sub _handle_http_body {
     my $self = shift;
-    my ($cv,$state,$handle) = @_;
+    my ($state,$handle) = @_;
 
     my $response = $state->{response} 
-       or $self->_handle_http_error($cv,$handle,"garbled http body",500) && return;
+       or $self->_handle_http_error($state,$handle,"garbled http body",500) && return;
 
     if (my $cb = $state->{on_body}) { 
 	$cb->($handle->rbuf,$response->headers);
@@ -203,27 +211,27 @@ sub _handle_http_body {
     $self->_on_read_chunk_callback(length $handle->rbuf,$state);
 
     $handle->rbuf = '';
-    $self->_handle_http_finish($cv,$state,$handle) if $state->{length} <= 0;
+    $self->_handle_http_finish($state,$handle) if $state->{length} <= 0;
 }
 
 
 sub _handle_http_chunk_header {
     my $self = shift;
-    my ($cv,$state,$handle,$str) = @_;
+    my ($state,$handle,$str) = @_;
     warn "chunk header: $str" if DEBUG;
-    $str =~ /^([0-9a-fA-F]+)/  or $self->_handle_http_error($cv,$handle,"garbled http chunk",500) && return;
+    $str =~ /^([0-9a-fA-F]+)/  or $self->_handle_http_error($state,$handle,"garbled http chunk",500) && return;
     my $chunk_len = hex $1;
     if ($chunk_len > 0) {
 	$state->{length} = $chunk_len + 2;  # extra CRLF terminates chunk
-	$handle->push_read(chunk=>$state->{length}, sub {$self->_handle_http_chunk($cv,$state,@_)});
+	$handle->push_read(chunk=>$state->{length}, sub {$self->_handle_http_chunk($state,@_)});
     } else {
-	$handle->push_read(line=>CRLF, sub {$self->_handle_http_finish($cv,$state,$handle)});
+	$handle->push_read(line=>CRLF, sub {$self->_handle_http_finish($state,$handle)});
     }
 }
 
 sub _handle_http_chunk {
     my $self = shift;
-    my ($cv,$state,$handle,$str) = @_;
+    my ($state,$handle,$str) = @_;
 
     warn "chunk body: $str" if DEBUG;
     $state->{length} -= length $str;
@@ -233,9 +241,9 @@ sub _handle_http_chunk {
     $state->{body}   .= $str;
 
     if ($state->{length} > 0) { # more to fetch
-	$handle->push_read(chunk=>$state->{length}, sub {$self->_handle_http_chunk($cv,$state,@_)});
+	$handle->push_read(chunk=>$state->{length}, sub {$self->_handle_http_chunk($state,@_)});
     } else { # next chunk
-	$handle->push_read(line=>CRLF,sub {$self->_handle_http_chunk_header($cv,$state,@_)});
+	$handle->push_read(line=>CRLF,sub {$self->_handle_http_chunk_header($state,@_)});
     }
 
     $self->_on_read_chunk_callback(length $str,$state);
@@ -244,9 +252,9 @@ sub _handle_http_chunk {
 
 sub _handle_http_finish {
     my $self = shift;
-    my ($cv,$state,$handle) = @_;
+    my ($state,$handle) = @_;
     my $response = $state->{response} 
-                   or $self->_handle_http_error($cv,$handle,"no header seen in response",500) && return;
+                   or $self->_handle_http_error($state,$handle,"no header seen in response",500) && return;
 
     $response->content($state->{body});
 
@@ -260,20 +268,18 @@ sub _handle_http_finish {
 	    $state->{request}->uri($uri);
 	    $state->{request}->header(Host => $uri->host);
 	    $state->{_recurse}--;
-	    $self->submit_http_request($state->{request},$cv,$state);
+	    $self->submit_http_request($state->{request},undef,$state);
 	} else {
-	    $cv->send($state->{response});
+	    $state->{on_complete}->($state->{response});
 	}
 
     } elsif ($response->is_error && $state->{body}) {
 	my $error = VM::EC2::Dispatch->create_error_object($state->{body},$self,'put object');
-	$cv->error($error);
-	$cv->send();
+	$self->error($error);
     }
 
     else {
 	$self->error(undef);
-	$cv->send($response);
     }
 
     if ($response->header('Connection') eq 'close') {
@@ -283,30 +289,17 @@ sub _handle_http_finish {
     # mark potentially available
     $handle->finished();
 
-    # run completion routine - we pass headers as a hash in order to be compatible with AnyEvent::HTTP callbacks
-    $self->_run_completion_routine($response,$state->{on_complete}) if $state->{on_complete};
-}
-
-sub _run_completion_routine {
-    my $self = shift;
-    my ($response,$cb) = @_;
-    my %hdr;
-    $response->headers->scan(sub {
-	my ($k,$v) = @_;
-	if (exists $hdr{$k}) { $hdr{$k} .= ", $v" }
-	else                 { $hdr{$k}  = $v     }
-			     });
-    $hdr{Status} = $response->code;
-    $cb->($response->content,\%hdr) 
+    # run completion routine
+    $state->{on_complete}->($response) if $state->{on_complete};
 }
 
 sub _push_body_writes {
     my $self = shift;
-    my ($cv,$state,$handle) = @_;
+    my ($state,$handle) = @_;
     my $content     = eval{$state->{request}->content} or return;
 
     if ($self->_stream_size($content)) {
-	$self->_chunked_http_write($cv,$state,$handle);
+	$self->_chunked_http_write($state,$handle);
     } else {
 	$handle->push_write($content);
     }
@@ -314,7 +307,7 @@ sub _push_body_writes {
 
 sub _chunked_http_write {
     my $self = shift;
-    my ($cv,$state,$handle) = @_;
+    my ($state,$handle) = @_;
     my $request = $state->{request} or return;
     my $content = $request->content or return;
 
@@ -329,19 +322,19 @@ sub _chunked_http_write {
 
     my ($size,$fh_or_callback) = $self->_stream_size($content);
     if (ref $fh_or_callback eq 'CODE') {
-	$self->_chunked_write_from_callback($cv,$state,$handle,$fh_or_callback);
+	$self->_chunked_write_from_callback($state,$handle,$fh_or_callback);
     } elsif ($fh_or_callback->isa('GLOB')) {
-	$self->_chunked_write_from_fh($cv,$state,$handle,$fh_or_callback);
+	$self->_chunked_write_from_fh($state,$handle,$fh_or_callback);
     }
 }
 
 sub _chunked_write_from_fh {
     my $self = shift;
-    my ($cv,$state,$handle,$fh) = @_;
+    my ($state,$handle,$fh) = @_;
 
     my $do_last_chunk = sub { my $rh = shift;
-			      $self->_write_chunk($cv,$state,$handle,$rh->{rbuf});
-			      $self->_write_chunk($cv,$state,$handle,'');  # last chunk
+			      $self->_write_chunk($state,$handle,$rh->{rbuf});
+			      $self->_write_chunk($state,$handle,'');  # last chunk
 			      delete $rh->{rbuf};
 			      $rh->destroy();
     };
@@ -353,7 +346,7 @@ sub _chunked_write_from_fh {
 	    if ($message =~ /pipe/) {
 		$do_last_chunk->($rh);
 	    } else {
-		$self->_handle_http_error($cv,$read_handle,$message,599); # keep $read_handle in scope!
+		$self->_handle_http_error($state,$read_handle,$message,599); # keep $read_handle in scope!
 		$rh->destroy;
 	    }
 	 },
@@ -364,14 +357,14 @@ sub _chunked_write_from_fh {
 	$read_handle->push_read(chunk => CHUNK_SIZE,
 				sub {
 				    my ($rh,$data) = @_;
-				    $self->_write_chunk($cv,$state,$handle,$data);
+				    $self->_write_chunk($state,$handle,$data);
 				});
 		      });
 }
 
 sub _chunked_write_from_callback {
     my $self = shift;
-    my ($cv,$state,$handle,$cb) = @_;
+    my ($state,$handle,$cb) = @_;
 
     $state->{cb_buffer} = '';
 
@@ -379,18 +372,18 @@ sub _chunked_write_from_callback {
 	sub {
 	    my $data = $cb->(CHUNK_SIZE);
 	    if (length $data == 0) {
-		$self->_write_chunk($cv,$state,$handle,$state->{cb_buffer});
-		$self->_write_chunk($cv,$state,$handle,'');
+		$self->_write_chunk($state,$handle,$state->{cb_buffer});
+		$self->_write_chunk($state,$handle,'');
 	    } else {
 		$state->{cb_buffer} .= $data;
-		$self->_write_chunk($cv,$state,$handle,substr($state->{cb_buffer},0,CHUNK_SIZE,''));
+		$self->_write_chunk($state,$handle,substr($state->{cb_buffer},0,CHUNK_SIZE,''));
 	    }
 	});
 }
 
 sub _write_chunk {
     my $self = shift;
-    my ($cv,$state,$handle,$data) = @_;
+    my ($state,$handle,$data) = @_;
 
     # first compute the chunk signature
     my $hash = sha256_hex($data);
@@ -486,33 +479,38 @@ sub new {
     my $class = shift;
     my %args  = @_;
 
-    if ($args{connect}) {
-	my ($host,$port) = @{$args{connect}};
-	my $ch;
-	for my $h (values %{$CONNECTION_CACHE{$host,$port}}) {
-	    if ($h->ping) {
-		$ch ||= $h if $HANDLE_AVAILABLE{$h};
-	    } else {
-		delete $CONNECTION_CACHE{$host,$port}{$ch};
-		delete $HANDLE_AVAILABLE{$_};
-	    }
-	}
-	if ($ch) {
-	    delete $HANDLE_AVAILABLE{$ch};
-	    return $ch;
-	}
-	$args{connect} = $args{proxy} if $args{proxy};
-	my $handle = $class->SUPER::new(%args);
-	return $CONNECTION_CACHE{$host,$port}{$handle} = $handle;
-    } else {
-	return $class->SUPER::new(@_);
-    }
+    return $class->SUPER::new(@_) unless $args{connect};
 
+    my ($host,$port) = @{$args{connect}};
+
+    my $ch;
+    for my $h (values %{$CONNECTION_CACHE{$host,$port}}) {
+	next unless $HANDLE_AVAILABLE{$h};
+	if ($h->ping) {
+	    $ch = $h;
+	    last;
+	} else {
+	    warn "$h is dead, removing it from pool" if VM::EC2::Http_helper::DEBUG || VM::EC2::Http_helper::DEBUG_CONNECTION;
+	    delete $CONNECTION_CACHE{$host,$port}{$h};
+	    delete $HANDLE_AVAILABLE{$h};
+	}
+    }
+    
+    if ($ch) {
+	delete $HANDLE_AVAILABLE{$ch};
+	warn "reusing $ch for connection" if VM::EC2::Http_helper::DEBUG || VM::EC2::Http_helper::DEBUG_CONNECTION;
+	return $ch;
+    }
+    
+    $args{connect} = $args{proxy} if $args{proxy};
+    my $handle = $class->SUPER::new(%args);
+    return $CONNECTION_CACHE{$host,$port}{$handle} = $handle;
 }
 
 sub finished {
     my $self = shift;
     $self->{_used}++;
+    warn "returning $self to pool" if VM::EC2::Http_helper::DEBUG || VM::EC2::Http_helper::DEBUG_CONNECTION;
     $HANDLE_AVAILABLE{$self}++ unless $self->destroyed;
 }
 

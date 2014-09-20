@@ -1808,30 +1808,29 @@ sub async_request {
     my $cv    = $self->condvar;
     my $callback = sub {
 	my $timer = shift;
-	$self->submit_http_request($request,undef,{
-	    on_complete =>
-		sub {
-		    my ($body,$hdr) = @_;
-#		    warn "HDR:\n",Data::Dumper::Dumper($hdr);
-#		    warn "BODY:\n$body";
-		    if ($hdr->{Status} !~ /^2/) { # an error
-			if ($body =~ /RequestLimitExceeded/) {
-			    warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
-			    $timer->retry();
-			    return;
-			} else {
-			    $self->async_send_error($action,$hdr,$body,$cv);
-			    $timer->success();
-			    return;
-			}
-		    } else { # success
-			$self->error(undef);
-			my @obj = VM::EC2::Dispatch->content2objects($action,$hdr->{'content-type'},$body,$self,$hdr);
-			$cv->send(@obj);
-			$timer->success();
-		    }
-	    }})
+	$self->submit_http_request($request,		
+				   sub {
+				       my $response = shift;
+				       my $body     = $response->decoded_content;
+				       if (!$response->is_success) { # an error
+					   if ($body =~ /RequestLimitExceeded/) {
+					       warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
+					       $timer->retry();
+					       return;
+					   } else {
+					       $self->async_send_error($action,$response,$body,$cv);
+					       $timer->success();
+					       return;
+					   }
+				       } else { # success
+					   $self->error(undef);
+					   my @obj = VM::EC2::Dispatch->content2objects($action,$response,$body,$self);
+					   $cv->send(@obj);
+					   $timer->success();
+				       }
+				   });
     };
+
     RetryTimer->new(on_retry       => $callback,
 		    interval       => 1,
 		    max_retries    => 12,
@@ -1842,7 +1841,7 @@ sub async_request {
 
 sub async_send_error {
     my $self = shift;
-    my ($action,$hdr,$body,$cv) = @_;
+    my ($action,$response,$body,$cv) = @_;
     my $error;
 
     if ($body =~ /<Response>/) {
@@ -1852,8 +1851,8 @@ sub async_send_error {
     } elsif ($body =~ /<ErrorResponse xmlns="http:\/\//) {
         $error = VM::EC2::Dispatch->create_alt_error_object($body,$self,$action);
     } else {
-	my $code = $hdr->{Status};
-        my $msg  = $code =~ /^59[0-9]/ ? $hdr->{Reason} : $body;
+	my $code = $response->code;
+        my $msg  = $code =~ /^59[0-9]/ ? $response->message : $body;
 	$error = VM::EC2::Error->new({Code=>$code,Message=>"$msg, at API call '$action')"},$self);
     }
 

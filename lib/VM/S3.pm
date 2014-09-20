@@ -53,6 +53,10 @@ sub _service {
     my $cv1 = $self->_get_service_endpoint($bucket);
     $cv1->cb(sub {
 	my ($endpoint,$uri,$host) = shift->recv();
+	unless ($endpoint) {
+	    $cv->send();
+	    return;
+	}
 
 	local $self->{endpoint}   = $endpoint;
 	local $self->{version}    = '2006-03-01';
@@ -96,17 +100,24 @@ sub _get_service_endpoint {
 
     if ($bucket) {
 	my $br_cv = $self->bucket_region_async($bucket);
-	$br_cv->cb(sub {
-	    my $region = shift->recv();
-	    $endpoint  = "https://s3-$region.amazonaws.com" unless $region eq 'us standard' || $region eq 'us-east-1'; 
-	    if ($self->valid_bucket_name($bucket)) {
-		$host = "$bucket.s3.amazonaws.com";
-		$uri  = URI->new("$endpoint/$key");
-	    }  else {
-		$uri = URI->new("$endpoint/$bucket/$key");
-	    }
-	    $cv->send($endpoint,$uri,$host);
-		   });
+	$br_cv->cb(
+	    sub {
+		my $c = shift;
+		my $region = $c->recv();
+		unless ($region) {
+		    $cv->send();
+		    return;
+		}
+		$endpoint  = "https://s3-$region.amazonaws.com" 
+		    unless $region eq 'us standard' || $region eq 'us-east-1'; 
+		if ($self->valid_bucket_name($bucket)) {
+		    $host = "$bucket.s3.amazonaws.com";
+		    $uri  = URI->new("$endpoint/$key");
+		}  else {
+		    $uri = URI->new("$endpoint/$bucket/$key");
+		}
+		$cv->send($endpoint,$uri,$host);
+	    });
 	return $cv;
     } else {
 	$uri  = URI->new("$endpoint/");
@@ -155,7 +166,7 @@ sub object {
     my $self = shift;
     @_ >= 2 or croak "usage: \$s3->object('bucket-name'=>'key-name')";
     my ($bucket,$key) = @_;
-    my @objects = $self->list_objects($bucket,-marker=>substr($key,0,-1));
+    my @objects = $self->list_objects($bucket,-marker=>substr($key,0,-1)) or return;
     my ($obj)   = grep {$_->Key eq $key} @objects;
     return $obj;
 }
@@ -193,7 +204,7 @@ sub put_bucket_cors         {
     $c      =~ s/\s+<xmlns>.+//;
     my $md5 = md5_base64($c);
     $md5   .= '==' unless $md5 =~ /=$/;  # because Digest::MD5 does not generate correct modulo 3 digests
-    $self->_bucket_p('cors',$bucket,$c,{'Content-MD5'=>$md5,'Content-length'=>length $c});
+    $self->_bucket_p('cors',$bucket,$c,['Content-MD5'=>$md5,'Content-length'=>length $c]);
 }
 
 my %BR_cache;
@@ -201,18 +212,22 @@ sub bucket_region {
     my $self   = shift;
     my $bucket = shift;
 
-    my $cv  = AnyEvent->condvar;
+    my $cv  = $self->condvar;
     if (exists $BR_cache{$bucket}) {
 	$cv->send($BR_cache{$bucket});
     }
     elsif (!$self->valid_bucket_name($bucket)) {
 	$cv->send('us standard');
     } else {
-	$cv->cb(sub {
+	my $cv1 = $self->condvar;
+	$self->submit_http_request(HEAD('http://s3.amazonaws.com/',
+					Host=>$bucket),
+				   sub { my $response = shift;
+					 $cv1->send($response)},
+				   { recurse     => 0},
+	    );
+	$cv1->cb(sub {
 	    my $response = shift->recv();
-	    unless ($response) {
-		die $self->error_str;
-	    }
 	    my $status = $response->code;
 	    if ($response->is_success || $status == 403) {
 		$cv->send($BR_cache{$bucket} = 'us standard');
@@ -220,12 +235,11 @@ sub bucket_region {
 		$response->header('Location') =~ /s3-([\w-]+)\.amazonaws\.com/;
 		$cv->send($BR_cache{$bucket} = $1);
 	    } else {
+		my $error = VM::EC2::Error->new({Message=>$response->message,
+						 Code => $response->code},$self);
+		$self->error($error);
 		$cv->send($BR_cache{$bucket} = undef);
 	    }});
-	$self->submit_http_request(HEAD('http://s3.amazonaws.com/',
-					Host=>$bucket),
-				   $cv,
-				   { recurse     => 0});
     }
     return $cv if $VM::EC2::ASYNC;
     return $cv->recv();
@@ -264,6 +278,11 @@ sub put_object {
     
     $cv1->cb(sub {
 	my ($endpoint,$uri,$host) = shift->recv();
+	unless ($endpoint) {
+	    $cv->error($cv1->error);
+	    $cv->send();
+	    return;
+	}
 
 	my $headers       = $self->_options_to_headers(
 	    \@options,
@@ -294,9 +313,9 @@ sub put_object {
 			     -secret_key=>$self->secret
 	    )->sign(@signing_parms);
 
-	$self->submit_http_request($request,$cv,
+	$self->submit_http_request($request,
+				   $opt{-on_complete},
 				   {
-				       on_complete    => $opt{-on_complete},
 				       on_header      => $opt{-on_header},
 				       on_body        => $opt{-on_body},
 				       on_write_chunk => $opt{-on_write_chunk},
@@ -329,8 +348,9 @@ sub put_request {
 }
 
 # get_object($bucket,$key,
-#            -on_body   => \&callback,
-#            -on_header => \&callback,
+#            -on_body   =>     \&callback,
+#            -on_header =>     \&callback,
+#            -on_read_chunk => \&callback,
 #            -range     => ...
 #            -if_modified_since => ...            
 #            -if_unmodified_since=> ...
@@ -347,7 +367,16 @@ sub get_object {
     
     $cv1->cb(sub {
 	my ($endpoint,$uri,$host) = shift->recv();
-	my $headers       = $self->_options_to_headers(\@_,'If-Modified-Since','If-Unmodified-Since','If-Match','If-None-Match');
+	unless ($endpoint) {
+	    $cv->error($cv1->error);
+	    $cv->send();
+	    return;
+	}
+	my $headers       = $self->_options_to_headers(\@_,
+						       'If-Modified-Since',
+						       'If-Unmodified-Since',
+						       'If-Match',
+						       'If-None-Match');
 
 	my $request = GET($uri,
 			  $host ? (Host => $host) : (),
@@ -358,21 +387,21 @@ sub get_object {
 	    )->sign($request);
 
 	my $callback = sub {
-	    my ($body,$hdr) = @_;
-	    if ($hdr->{Status} !~ /^2/) {
-		$self->async_send_error('get object',$hdr,$body,$cv);
+	    my $response = shift;
+	    if (!$response->is_success) {
+		$self->async_send_error('get object',$response,$response->decoded_content,$cv);
 	    } elsif (!$options{-on_body}) {
-		$cv->send($body);
+		$cv->send($response->decoded_content);
 	    } else {
 		$cv->send(1);
 	    }
 	};
 
-	$self->submit_http_request($request,$cv,
+	$self->submit_http_request($request,
+				   $callback,
 				   { on_body       => $options{-on_body},
 				     on_header     => $options{-on_header},
 				     on_read_chunk => $options{-on_read_chunk},
-				     on_complete   => $callback
 				   });
 	     });
 
