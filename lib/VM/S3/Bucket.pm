@@ -28,6 +28,11 @@ sub objects {
     $self->s3->list_objects($self->Name);
 }
 
+sub keys {
+    my $self = shift;
+    $self->s3->list_objects($self->Name);
+}
+
 sub cors {
     my $self = shift;
     if (@_) {
@@ -35,6 +40,11 @@ sub cors {
     } else {
 	return $self->s3->bucket_cors($self->Name);
     }
+}
+
+sub put {
+    my $self = shift;
+    $self->s3->put_object($self->Name,@_);
 }
 
 1;

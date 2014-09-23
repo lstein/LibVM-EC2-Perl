@@ -663,11 +663,12 @@ sub import {
 
 =head2 $ec2 = VM::EC2->new(-access_key=>$id,-secret_key=>$key,-endpoint=>$url)
 
-Create a new Amazon access object. Required arguments are:
+Create a new Amazon access object. Possible arguments are:
 
  -access_key   Access ID for an authorized user
 
  -secret_key   Secret key corresponding to the Access ID
+
 
  -security_token Temporary security token obtained through a call to the
                AWS Security Token Service

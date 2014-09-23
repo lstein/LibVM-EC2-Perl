@@ -161,6 +161,7 @@ sub _handle_http_headers {
     if (my $cb = $state->{on_header}) { $cb->($response->headers) }
 
     $state->{response} = $response;
+
     # handle continue
     if ($response->code == 100) {
 	$self->_push_body_writes($state,$handle);
@@ -238,7 +239,12 @@ sub _handle_http_chunk {
 
     local $/ = CRLF;
     chomp($str);
-    $state->{body}   .= $str;
+
+    if (my $cb = $state->{on_body}) {
+	$cb->($str,$state->{response}->headers);
+    } else {
+	$state->{body}   .= $str;
+    }
 
     if ($state->{length} > 0) { # more to fetch
 	$handle->push_read(chunk=>$state->{length}, sub {$self->_handle_http_chunk($state,@_)});
@@ -337,6 +343,7 @@ sub _chunked_write_from_fh {
 			      $self->_write_chunk($state,$handle,'');  # last chunk
 			      delete $rh->{rbuf};
 			      $rh->destroy();
+			      $handle->on_drain(undef);
     };
 
      my $read_handle; $read_handle = AnyEvent::Handle->new(
@@ -358,6 +365,7 @@ sub _chunked_write_from_fh {
 				sub {
 				    my ($rh,$data) = @_;
 				    $self->_write_chunk($state,$handle,$data);
+				    return 0;
 				});
 		      });
 }

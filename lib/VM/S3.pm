@@ -1,5 +1,117 @@
 package VM::S3;
 
+=head1 NAME
+
+VM::S3 - Perl interface to Amazon S3 Simple Storage Service
+
+=head1 SYNOPSIS
+
+my $s3 = VM::S3->new(-access_key => 'access key id',
+                     -secret_key => 'aws_secret_key');
+
+my @buckets = $s3->list_buckets();
+
+for my $b (@buckets) {
+    my $region   = $b->region;
+    my @objects  = $b->objects;
+    print "$b ($region)\n";
+    print "\t$_\n" foreach @objects;
+}
+
+my $obj       = $s3->object(MyBucket => 'MyObject.jpg');
+my $size      = $obj->size;
+my $owner     = $obj->owner;
+my $etag      = $obj->e_tag;
+
+# for a small object, read contents into memory
+my $contents  = $s3->get;
+
+# for a large object, invoke a callback
+open my $f,'>','large_file.jpg' or die $!;
+$obj->get(-on_body => sub {
+    my $data = shift;
+    print $f $data;
+    }
+close $f;
+
+# upload a new object from memory
+my $bucket = $s3->bucket('MyBucket');
+my $etag   = $bucket->put('MyObject.mp3' => $data);
+
+# upload from a filehandle
+open my $f,'<','large_file.mp3' or die;
+my $etag   = $bucket->put('MyObject.mp3' => $f);
+
+# upload from a callback - must know size of object in advance
+my $size = 1_234_567
+my $etag = $bucket->put('MyObject.mp3' => [\&callback => $size]);
+
+=cut
+
+=head1 DESCRIPTION
+
+=head1 ASYNCHRONOUS CALLS
+
+=head1 CORE METHODS
+
+This section describes the VM::S3 constructor, accessor methods, and
+methods relevant to error handling. VM::S3 inherits its methods from
+VM::EC2. Please see L<VM::EC2> for additional methods not described
+here.
+
+=head2 $s3 = VM::S3->new(-access_key=>$id,-secret_key=>$key)
+
+Create a new Amazon S3 object. Arguments are:
+
+ -access_key     Access ID for an authorized user
+
+ -secret_key     Secret key corresponding to the Access ID
+
+ -security_token Temporary security token obtained through a call to the
+                  AWS Security Token Service (STS).
+
+ -raise_error    If true, throw an exception.
+
+ -print_error    If true, print errors to STDERR.
+
+One or more of -access_key or -secret_key can be omitted if the
+environment variables EC2_ACCESS_KEY and EC2_SECRET_KEY are
+defined. Unlike the EC2 methods (see L<VM::EC2>, you do not need to
+specify a region or endpoint. This is handled automatically for you.
+
+-security_token is used in conjunction with temporary security tokens
+returned by $ec2->get_federation_token() and $ec2->get_session_token()
+to grant restricted, time-limited access to some or all your S3
+resources to users who do not have access to your account. If you pass
+either a VM::EC2::Security::Token object, or the
+VM::EC2::Security::Credentials object contained within the token
+object, then new() does not need the -access_key or -secret_key
+arguments. You may also pass a session token string scalar to
+-security_token, in which case you must also pass the access key ID
+and secret keys generated at the same time the session token was
+created. See
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html
+and L</AWS SECURITY TOKENS>.
+
+By default, when the Amazon API reports an error, such as attempting
+to perform an invalid operation on an instance, the corresponding
+method will return empty and the error message can be recovered from
+$s3->error(). However, if you pass -raise_error=>1 to new(), the
+module will instead raise a fatal error, which you can trap with
+eval{} and report with $@:
+
+  eval {
+     $ec2->some_dangerous_operation();
+     $ec2->another_dangerous_operation();
+  };
+  print STDERR "something bad happened: $@" if $@;
+
+The error object can be retrieved with $s3->error() as before.
+
+=cut
+
+
+
 use strict;
 use base 'VM::EC2';#,'VM::S3::Http_helper';
 use AnyEvent::Handle;
@@ -126,6 +238,25 @@ sub _get_service_endpoint {
     }
 }
 
+=head2 @buckets = $s3->list_buckets()
+
+List buckets attached to your account. Each bucket is represented as a
+VM::S3::Bucket object.
+
+=cut
+
+sub list_buckets {
+    my $self = shift;
+    return $self->get_service('list buckets');
+}
+
+=head2 $bucket = $s3->bucket('MyBucketName')
+
+Return the bucket attached to your account matching the name
+"MyBucketName". The bucket is represented as a VM::S3::Bucket object.
+
+=cut
+
 sub bucket {
     my $self   = shift;
     my $bucket = shift or croak "usage: \$s3->bucket('bucket-name')";
@@ -134,10 +265,29 @@ sub bucket {
     return $buck;
 }
 
-sub list_buckets {
-    my $self = shift;
-    return $self->get_service('list buckets');
-}
+=head2 @keys = $s3->list_objects('MyBucketName',@args)
+
+List all the keys in the indicated bucket. Keys are returned as
+objects of type VM::S3::BucketKey. Optional arguments are -name=>value
+pairs. See
+http://docs.aws.amazon.com/AmazonS3/latest/API/RESTBucketGET.html for
+more documentation.
+
+ -delimiter      Delimiter character used to group keys.
+
+ -encoding_type  Requests Amazon S3 to encode the response and specifies the 
+                  encoding system to use.
+
+ -marker         Specifies the key or partial key to start with when listing 
+                  objects in a bucket.
+
+ -max_keys       Sets the maximum number of keys to return in the request
+                  (defaults to 1000).
+
+ -prefix         Limits the response to keys that begin with the specified
+                  prefix.
+
+=cut
 
 sub list_objects {
     my $self   = shift;
@@ -156,11 +306,36 @@ sub list_objects {
     $self->get_service('list objects',$bucket,{@args});
 }
 
+=head2 $boolean = $s3->more_objects()
+
+If list_objects() hits the maximum number of keys specified by
+-max_keys (or 1000 by default), then a subsequent call to
+more_objects() will return true and you can fetch the next group of
+objects by calling list_objects() without a bucket name, as
+illustrated in the following code snippet:
+
+ @keys = $s3->list_objects('MyBucketName',-max_keys => 20, -delimiter => '/')
+ while ($s3->more_objects) {
+    push @keys,$s3->list_objects;
+ }
+
+
+=cut
+
 sub more_objects {
     my $self = shift;
     my $bucket = shift || $self->{list_buckets_bucket};
     return exists $self->{list_buckets_marker}{$bucket};
 }
+
+=head2 $key = $s3->object('MyBucketName' => 'MyObjectKey')
+
+Return the VM::S3::BucketKey corresponding to "MyObjectKey" in
+"MyBucketName". Will return undef if either the bucket or the key are
+not found. You can then perform operations on the key, such as
+fetching its underlying data or metadata.
+
+=cut
 
 sub object {
     my $self = shift;
@@ -183,16 +358,123 @@ sub _bucket_p {
     $self->put_service("put bucket $op",$bucket,{$op=>undef},$payload,$headers);
 }
 
+=head2 $acl = $s3->bucket_acl('MyBucketName')
+
+Return the Access Control List of the indicated bucket as a
+VM::S3::Acl object.
+
+=cut
+
 sub bucket_acl             { shift->_bucket_g('acl',@_)       }
+
+=head2 $cors = $s3->bucket_cors('MyBucketName')
+
+Return the cross-origin resource sharing policy of the indicated
+bucket as a VM::S3::CorsRules object.
+
+=cut
+
 sub bucket_cors            { shift->_bucket_g('cors',@_)      }
+
+=head2 $lifecycle = $s3->bucket_lifecycle('MyBucketName')
+
+Return the lifecycle of the indicated bucket as a
+VM::S3::LifecycleRules object.
+
+BUG: this needs to be implemented - just returns a generic object now.
+
+=cut
+
 sub bucket_lifecycle       { shift->_bucket_g('lifecycle',@_) }
+
+=head2 $policy = $s3->bucket_policy('MyBucketName')
+
+Return the bucket policy of the indicated bucket as a
+VM::S3::BucketPolicy object.
+
+BUG: this needs to be implemented - just returns a generic object now.
+
+=cut
+
 sub bucket_policy          { shift->_bucket_g('policy',@_)    }
+
+=head2 $policy = $s3->bucket_policy('MyBucketName')
+
+Return the bucket policy of the indicated bucket as a
+VM::S3::BucketPolicy object.
+
+BUG: this needs to be implemented - just returns a generic object now.
+
+=cut
+
 sub bucket_location        { shift->_bucket_g('location',@_)  }
+
+=head2 $logging = $s3->bucket_logging('MyBucketName')
+
+Return the logging policy of the indicated bucket as a
+VM::S3::LoggingPolicy object.
+
+BUG: this needs to be implemented - just returns a generic object now.
+
+=cut
+
 sub bucket_logging         { shift->_bucket_g('logging',@_)  }
+
+
+=head2 $notification = $s3->bucket_notification('MyBucketName')
+
+Return the notification configuration policy of the indicated bucket
+as a VM::S3::Notification object.
+
+BUG: this needs to be implemented - just returns a generic object now.
+
+=cut
+
 sub bucket_notification    { shift->_bucket_g('notification',@_)  }
+
+=head2 $tagging = $s3->bucket_tagging('MyBucketName')
+
+Return the tag/value pairs attached to the indicated bucket as a hashref.
+
+BUG: this needs to be implemented - just returns a generic object
+now. Also, the inherited add_tags() and tags() methods don't work;
+need to be overridden for S3.
+
+=cut
+
 sub bucket_tagging         { shift->_bucket_g('tagging',@_)  }
+
+=head2 $versions = $s3->bucket_object_versions('MyBucketName',@args)
+
+Returns all versions of objects in MyBucketName. 
+
+BUG: this needs to be implemented - just returns a generic object
+now.  Needs description of arguments.
+
+=cut
+
 sub bucket_object_versions { shift->_bucket_g('versions',@_)  }
+
+=head2 $payment_info = $s3->bucket_request_payment('MyBucketName')
+
+Return information on Requestor Pays policy for the indicated bucket.
+
+BUG: this needs to be implemented - just returns a generic object
+now. 
+
+=cut
+
 sub bucket_request_payment { shift->_bucket_g('requestPayment',@_)  }
+
+=head2 $url = $s3->bucket_website('MyBucketName')
+
+Return the website informattion of the indicated bucket.
+
+BUG: this needs to be implemented - just returns a generic object
+now. 
+
+=cut
+
 sub bucket_website         { shift->_bucket_g('website',@_)  }
 
 sub put_bucket_cors         { 
@@ -314,7 +596,10 @@ sub put_object {
 	    )->sign(@signing_parms);
 
 	$self->submit_http_request($request,
-				   $opt{-on_complete},
+				   sub {
+				       my $request = shift;
+				       $cv->send($request);
+				   },
 				   {
 				       on_header      => $opt{-on_header},
 				       on_body        => $opt{-on_body},
@@ -478,5 +763,27 @@ sub _list_objects_dispatch {
 
 1;
 
+=head1 SEE ALSO
 
+L<VM::EC2>
+L<VM::S3::Bucket>
+L<VM::S3::BucketKey>
+L<VM::S3::Cors>
+L<VM::S3::CorsRules>
+L<VM::S3::Grant>
+L<VM::S3::Owner>
+L<VM::S3::Acl>
 
+=head1 AUTHOR
+
+Lincoln Stein E<lt>lincoln.stein@gmail.comE<gt>.
+
+Copyright (c) 2014 Ontario Institute for Cancer Research
+
+This package and its accompanying libraries is free software; you can
+redistribute it and/or modify it under the terms of the GPL (either
+version 1, or at your option, any later version) or the Artistic
+License 2.0.  Refer to LICENSE for the full license text. In addition,
+please see DISCLAIMER.txt for disclaimers of warranty.
+
+=cut
