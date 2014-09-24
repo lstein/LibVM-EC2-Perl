@@ -250,10 +250,10 @@ sub list_buckets {
     return $self->get_service('list buckets');
 }
 
-=head2 $bucket = $s3->bucket('MyBucketName')
+=head2 $bucket = $s3->bucket('my.bucket.name')
 
 Return the bucket attached to your account matching the name
-"MyBucketName". The bucket is represented as a VM::S3::Bucket object.
+"my.bucket.name". The bucket is represented as a VM::S3::Bucket object.
 
 =cut
 
@@ -265,7 +265,7 @@ sub bucket {
     return $buck;
 }
 
-=head2 @keys = $s3->list_objects('MyBucketName',@args)
+=head2 @keys = $s3->list_objects('my.bucket.name',@args)
 
 List all the keys in the indicated bucket. Keys are returned as
 objects of type VM::S3::BucketKey. Optional arguments are -name=>value
@@ -314,7 +314,7 @@ more_objects() will return true and you can fetch the next group of
 objects by calling list_objects() without a bucket name, as
 illustrated in the following code snippet:
 
- @keys = $s3->list_objects('MyBucketName',-max_keys => 20, -delimiter => '/')
+ @keys = $s3->list_objects('my.bucket.name',-max_keys => 20, -delimiter => '/')
  while ($s3->more_objects) {
     push @keys,$s3->list_objects;
  }
@@ -328,10 +328,10 @@ sub more_objects {
     return exists $self->{list_buckets_marker}{$bucket};
 }
 
-=head2 $key = $s3->object('MyBucketName' => 'MyObjectKey')
+=head2 $key = $s3->object('my.bucket.name' => 'MyObjectKey')
 
 Return the VM::S3::BucketKey corresponding to "MyObjectKey" in
-"MyBucketName". Will return undef if either the bucket or the key are
+"my.bucket.name". Will return undef if either the bucket or the key are
 not found. You can then perform operations on the key, such as
 fetching its underlying data or metadata.
 
@@ -358,7 +358,7 @@ sub _bucket_p {
     $self->put_service("put bucket $op",$bucket,{$op=>undef},$payload,$headers);
 }
 
-=head2 $acl = $s3->bucket_acl('MyBucketName')
+=head2 $acl = $s3->bucket_acl('my.bucket.name')
 
 Return the Access Control List of the indicated bucket as a
 VM::S3::Acl object.
@@ -367,7 +367,7 @@ VM::S3::Acl object.
 
 sub bucket_acl             { shift->_bucket_g('acl',@_)       }
 
-=head2 $cors = $s3->bucket_cors('MyBucketName')
+=head2 $cors = $s3->bucket_cors('my.bucket.name')
 
 Return the cross-origin resource sharing policy of the indicated
 bucket as a VM::S3::CorsRules object.
@@ -376,7 +376,7 @@ bucket as a VM::S3::CorsRules object.
 
 sub bucket_cors            { shift->_bucket_g('cors',@_)      }
 
-=head2 $lifecycle = $s3->bucket_lifecycle('MyBucketName')
+=head2 $lifecycle = $s3->bucket_lifecycle('my.bucket.name')
 
 Return the lifecycle of the indicated bucket as a
 VM::S3::LifecycleRules object.
@@ -387,7 +387,7 @@ BUG: this needs to be implemented - just returns a generic object now.
 
 sub bucket_lifecycle       { shift->_bucket_g('lifecycle',@_) }
 
-=head2 $policy = $s3->bucket_policy('MyBucketName')
+=head2 $policy = $s3->bucket_policy('my.bucket.name')
 
 Return the bucket policy of the indicated bucket as a
 VM::S3::BucketPolicy object.
@@ -398,7 +398,7 @@ BUG: this needs to be implemented - just returns a generic object now.
 
 sub bucket_policy          { shift->_bucket_g('policy',@_)    }
 
-=head2 $policy = $s3->bucket_policy('MyBucketName')
+=head2 $policy = $s3->bucket_policy('my.bucket.name')
 
 Return the bucket policy of the indicated bucket as a
 VM::S3::BucketPolicy object.
@@ -409,7 +409,7 @@ BUG: this needs to be implemented - just returns a generic object now.
 
 sub bucket_location        { shift->_bucket_g('location',@_)  }
 
-=head2 $logging = $s3->bucket_logging('MyBucketName')
+=head2 $logging = $s3->bucket_logging('my.bucket.name')
 
 Return the logging policy of the indicated bucket as a
 VM::S3::LoggingPolicy object.
@@ -421,7 +421,7 @@ BUG: this needs to be implemented - just returns a generic object now.
 sub bucket_logging         { shift->_bucket_g('logging',@_)  }
 
 
-=head2 $notification = $s3->bucket_notification('MyBucketName')
+=head2 $notification = $s3->bucket_notification('my.bucket.name')
 
 Return the notification configuration policy of the indicated bucket
 as a VM::S3::Notification object.
@@ -432,7 +432,7 @@ BUG: this needs to be implemented - just returns a generic object now.
 
 sub bucket_notification    { shift->_bucket_g('notification',@_)  }
 
-=head2 $tagging = $s3->bucket_tagging('MyBucketName')
+=head2 $tagging = $s3->bucket_tagging('my.bucket.name')
 
 Return the tag/value pairs attached to the indicated bucket as a hashref.
 
@@ -444,9 +444,9 @@ need to be overridden for S3.
 
 sub bucket_tagging         { shift->_bucket_g('tagging',@_)  }
 
-=head2 $versions = $s3->bucket_object_versions('MyBucketName',@args)
+=head2 $versions = $s3->bucket_object_versions('my.bucket.name',@args)
 
-Returns all versions of objects in MyBucketName. 
+Returns all versions of objects in my.bucket.name. 
 
 BUG: this needs to be implemented - just returns a generic object
 now.  Needs description of arguments.
@@ -455,7 +455,7 @@ now.  Needs description of arguments.
 
 sub bucket_object_versions { shift->_bucket_g('versions',@_)  }
 
-=head2 $payment_info = $s3->bucket_request_payment('MyBucketName')
+=head2 $payment_info = $s3->bucket_request_payment('my.bucket.name')
 
 Return information on Requestor Pays policy for the indicated bucket.
 
@@ -466,7 +466,7 @@ now.
 
 sub bucket_request_payment { shift->_bucket_g('requestPayment',@_)  }
 
-=head2 $url = $s3->bucket_website('MyBucketName')
+=head2 $url = $s3->bucket_website('my.bucket.name')
 
 Return the website informattion of the indicated bucket.
 
@@ -477,7 +477,18 @@ now.
 
 sub bucket_website         { shift->_bucket_g('website',@_)  }
 
-sub put_bucket_cors         { 
+=head2 $boolean = $s3->put_bucket_cors('my.bucket.name' => $cors)
+
+Add or replace the Cors rules associated with the indicated
+bucket. The second argument may be a properly formatted CORS XML, or a
+VM::S3::CorsRules object, which provides convenience methods for
+creating the proper XML.
+
+If successful, a true value is returned.
+
+=cut
+
+sub put_bucket_cors { 
     my $self = shift;
     croak "usage: put_bucket_cors(\$bucket,\$cors_xml)" unless @_ == 2;
     my ($bucket,$cors) = @_;
@@ -490,6 +501,17 @@ sub put_bucket_cors         {
 }
 
 my %BR_cache;
+
+=head2 $region = $s3->bucket_region('my.bucket.name')
+
+Return the region in which the indicated bucket is located. It does
+this by performing a HEAD on the bucket and recording the redirect
+location, if any. Buckets with poorly-formed names, such as those with
+uppercase letters, are only allowed in the standard region, so "us
+standard" is automatically returned for these.
+
+=cut
+
 sub bucket_region {
     my $self   = shift;
     my $bucket = shift;
@@ -526,6 +548,99 @@ sub bucket_region {
     return $cv if $VM::EC2::ASYNC;
     return $cv->recv();
 }
+
+=head2 $etag = $s3->put_object('my.bucket.name'=>'MyKey',$data,@options)
+
+Add or replace an object in bucket "my.bucket.name" with key
+"MyKey". The third argument, $data, may be any of the following:
+
+=over 4
+
+=item A scalar. 
+
+The contents of $data will be written to S3.
+
+=item A filehandle, including IO::File and other GLOB-like objects. 
+
+Perl B<must> be able to determine the ultimate size of the
+contents of the filehandle by calling stat(). This means that you
+cannot stream from STDIN or a pipe. If you wish to do this, use
+put_multipart_object() instead (not currently implemented).
+
+=item A two-element array of the form [$total_size,\&callback]
+
+The first element of the array is the total finished size of the data,
+and the second is a coderef that will be invoked repeatedly until the
+data has been loaded. The signature of the coderef is
+$callback->($bytes_wanted). It is expected to return the number of
+bytes requested.
+
+=back
+
+@options are an optional list of -key=>value pairs. Some provide
+callbacks that can be used to monitor the progress of a long file
+transfer. Others control the metadata of the uploaded object. 
+
+Callbacks:
+
+ -on_header            callback to invoke when the PUT header is received.
+                         The callback will be passed a single argument 
+                         consisting of the HTTP::Response object
+
+ -on_write_chunk       callback to invoke when a chunk of data has been written.
+                         It will be invoked with a two argument list consisting
+                         of the number of bytes transferred so far, and the
+                         number of bytes to transfer in total. It can be used
+                         to implement a nifty progress bar.
+
+Metadata control. See
+http://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPUT.html for
+full details:
+
+ -cache_control        cache control directive, e.g. "no-cache"
+
+ -content_disposition  content disposition instruction, 
+                           e.g. "attachment; filename='foo.txt'"
+
+ -content_encoding     content encoding, e.g. "gzip"
+
+ -content_type         content type, e.g. "text/plain"
+
+ -expires              date and time at which the object is no longer cacheable, 
+                          e.g. "Thu, 01 Dec 2014 16:00:00 GMT"
+
+ -x_amz_meta_*         any metadata you wish to stoe with the object
+
+ -x_amz_storage_class  one of "STANDARD" or "REDUCED_REDUNDANCY"
+
+ -x_amz_website_redirect_location redirect requests for this object to another object 
+                          in the same bucket or another website
+
+ -x_amz_acl            a canned ACL. One of "private", "public-read-write", 
+                          "authenticated-read","bucket-owner-read", or "bucket-owner-full-control"
+
+ -x_amz_grant_read     list of email addresses, Amazon user IDs or group URLs to grant object read
+                           permissions to.
+
+ -x_amz_grant_write    list of email addresses, Amazon user IDs or group URLs to grant object write
+                           permissions to.
+
+ -x_amz_grant_read_acp list of email addresses, Amazon user IDs or group URLs who can read the ACL
+
+ -x_amz_grant_write_acp list of email addresses, Amazon user IDs or group URLs who can write the ACL
+
+ -x_amz_grant_write_acp grantees have all privileges.
+
+The -x_amz_grant* options accept list of email addresses and/or Amazon IDs in the form:
+
+ -x_amz_grant_read => 'emailAddress="test.user@gmail.com", emailAddress="user2@yahoo.com", id=1234567
+
+You may also provide a "url" argument that points to a predefined group.
+
+Upon completion the method returns the ETag of the created/updated object.
+
+
+=cut
 
 # put_object($bucket,$key,$data,@options)
 # 
@@ -631,6 +746,35 @@ sub put_request {
     $request->header(Expect => '100-continue');
     return $self->submit_http_request($request);
 }
+
+=head2 $data = $s3->get_object('my.bucket.name','ObjectKey',@options)
+
+Fetch the object named "ObjectKey" in bucket "my.bucket.name" and
+return its contents into memory. You can use options to set callbacks,
+most commonly to write a large object to disk, or to download the
+object only under certain conditions.
+
+Callbacks:  FILL IN!
+
+ -on_body      
+
+ -on_header
+
+ -on_read_chunk
+
+Request modifiers:  FILL IN!
+
+ -range
+
+ -if_modified_since
+
+ -if_unmodified_since
+
+ -if_match
+
+ -if_none_match
+
+=cut
 
 # get_object($bucket,$key,
 #            -on_body   =>     \&callback,
