@@ -154,11 +154,21 @@ sub _handle_http_error {
 sub _handle_http_headers {
     my $self = shift;
     my ($state,$handle,$str) = @_;
+
+    # remove stray carriage returns from the return string
+    # which are otherwise contaminating the status line
+    $str         =~ tr/\015//d;
     my $response = HTTP::Response->parse($str);
 
     warn $str if DEBUG;
 
-    if (my $cb = $state->{on_header}) { $cb->($response->headers) }
+    if (my $cb = $state->{on_header}) { 
+	my $result = $cb->($response) ;
+	unless ($result) {
+	    $self->_handle_http_error($state,$handle,'request cancelled by user -on_header callback',599);
+	    return;
+	}
+    }
 
     $state->{response} = $response;
 

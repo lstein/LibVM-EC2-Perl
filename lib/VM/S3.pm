@@ -597,39 +597,40 @@ Metadata control. See
 http://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPUT.html for
 full details:
 
- -cache_control        cache control directive, e.g. "no-cache"
+ -cache_control          cache control directive, e.g. "no-cache"
 
- -content_disposition  content disposition instruction, 
+ -content_disposition    content disposition instruction, 
                            e.g. "attachment; filename='foo.txt'"
 
- -content_encoding     content encoding, e.g. "gzip"
+ -content_encoding       content encoding, e.g. "gzip"
 
- -content_type         content type, e.g. "text/plain"
+ -content_type           content type, e.g. "text/plain"
 
- -expires              date and time at which the object is no longer cacheable, 
+ -expires                date and time at which the object is no longer cacheable, 
                           e.g. "Thu, 01 Dec 2014 16:00:00 GMT"
 
- -x_amz_meta_*         any metadata you wish to stoe with the object
+ -x_amz_meta_*           any metadata you wish to stoe with the object
 
- -x_amz_storage_class  one of "STANDARD" or "REDUCED_REDUNDANCY"
+ -x_amz_storage_class    one of "STANDARD" or "REDUCED_REDUNDANCY"
 
- -x_amz_website_redirect_location redirect requests for this object to another object 
+ -x_amz_website_redirect_location 
+                         redirect requests for this object to another object 
                           in the same bucket or another website
 
- -x_amz_acl            a canned ACL. One of "private", "public-read-write", 
-                          "authenticated-read","bucket-owner-read", or "bucket-owner-full-control"
+ -x_amz_acl              a canned ACL. One of "private", "public-read-write", 
+                            "authenticated-read","bucket-owner-read", or "bucket-owner-full-control"
 
- -x_amz_grant_read     list of email addresses, Amazon user IDs or group URLs to grant object read
+ -x_amz_grant_read       list of email addresses, Amazon user IDs or group URLs to grant object read
                            permissions to.
 
- -x_amz_grant_write    list of email addresses, Amazon user IDs or group URLs to grant object write
+ -x_amz_grant_write      list of email addresses, Amazon user IDs or group URLs to grant object write
                            permissions to.
 
- -x_amz_grant_read_acp list of email addresses, Amazon user IDs or group URLs who can read the ACL
+ -x_amz_grant_read_acp   list of email addresses, Amazon user IDs or group URLs who can read the ACL
 
- -x_amz_grant_write_acp list of email addresses, Amazon user IDs or group URLs who can write the ACL
+ -x_amz_grant_write_acp  list of email addresses, Amazon user IDs or group URLs who can write the ACL
 
- -x_amz_grant_write_acp grantees have all privileges.
+ -x_amz_grant_all        list of email addresses, Amazon user IDs or group URLs who have all privileges
 
 The -x_amz_grant* options accept list of email addresses and/or Amazon IDs in the form:
 
@@ -754,25 +755,44 @@ return its contents into memory. You can use options to set callbacks,
 most commonly to write a large object to disk, or to download the
 object only under certain conditions.
 
-Callbacks:  FILL IN!
+Callbacks:
 
- -on_body      
+ -on_body              Callback invoked when the content, or a portion of the
+                         content is received. The callback will be invoked with
+                         a single scalar argument containing the data received.
+                         When this callback is present, get_object() will not
+                         store the data and return it at the end of the call.
 
- -on_header
+ -on_header            Callback invoked when the HTTP header is received. The single
+                         argument is the HTTP::Request object that contains the status
+                         response line and headers. The callback may cancel
+                         the request at this point by returning a false value.
 
- -on_read_chunk
+ -on_read_chunk        This callback acts independently of -on_body to periodically
+                         return data transfer progress information. The callback is
+                         invoked with two arguments consisting of the number of bytes
+                         read and the total bytes expected. It can be used to display
+                         a progress bar or to measure transfer speed.
 
-Request modifiers:  FILL IN!
+Request modifiers:
 
- -range
+ -range                An HTTP byte range used to retrieve a partial object. The byte
+                         range is in any of the formats described at 
+                         http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.35.1.
+                         The most common format is "bytes=XX-YY", where XX and YY are the
+                         desired start and end bytes of the range.
 
- -if_modified_since
+ -if_modified_since    An HTTP date and time in the format described at 
+                         http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.18.
+                         The object will only be returned if its modification date is more
+                         recent than the requested date.
 
- -if_unmodified_since
+ -if_unmodified_since  An HTTP date and time. The object will only be returned if its 
+                         modification date is less recent than the requested date.
 
- -if_match
+ -if_match             An ETag. The object will only be returned if its ETag matches.
 
- -if_none_match
+ -if_none_match        An ETag. The object will be returned if the ETag doesn't match.
 
 =cut
 
@@ -789,7 +809,9 @@ sub get_object {
     my $self = shift;
     croak "usage: get_object(\$bucket,\$key,\@params)" unless @_ >= 2;
     my ($bucket,$key) = splice(@_,0,2);
-    my %options       = @_;
+    my @options       = @_;
+    my %options       = @options;
+
 
     my $cv = $self->condvar;
     my $cv1 = $self->_get_service_endpoint($bucket,$key);
@@ -801,7 +823,8 @@ sub get_object {
 	    $cv->send();
 	    return;
 	}
-	my $headers       = $self->_options_to_headers(\@_,
+	my $headers       = $self->_options_to_headers(\@options,
+						       'Range',
 						       'If-Modified-Since',
 						       'If-Unmodified-Since',
 						       'If-Match',
