@@ -138,6 +138,8 @@ VM::EC2::Dispatch->register(
 
     'put bucket cors'  => 'response_ok',
 
+    'bucket lifecycle' => 'VM::S3::LifecycleRules',
+
     );
 
 sub s3 { shift->ec2 }
