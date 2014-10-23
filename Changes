@@ -1,3 +1,7 @@
+1.28 (23 October 2014)
+    - $snapshot->authorized_users() was returning duplicate user IDs due to an apparent AWS bug. Change
+      behavior to return unique user list.
+
 1.26
     - Use AnyEvent::CacheDNS to reduce latency of asynchronous calls. This introduces a new module
       dependency.

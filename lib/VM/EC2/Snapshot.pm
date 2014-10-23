@@ -342,8 +342,13 @@ sub current_status_async {
 
 sub createVolumePermissions {
     my $self = shift;
-    return map {VM::EC2::Snapshot::CreateVolumePermission->new($_,$self->aws)}
+    my @users = map {VM::EC2::Snapshot::CreateVolumePermission->new($_,$self->aws)}
         $self->aws->describe_snapshot_attribute($self->snapshotId,'createVolumePermission');
+
+    # work around an apparent AWS bug discovered 23 October 2014 in which call returns
+    # duplicate user IDs
+    my %seenit;
+    return grep {!$seenit{$_}++} @users;
 }
 
 sub is_public {
