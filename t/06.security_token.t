@@ -39,8 +39,12 @@ my $default = {
         }
     ]
 };
+
+my $json = JSON->new();
+$json->canonical(1);
+
 # default policy should be to deny all
-is("$policy", encode_json($default),'default policy is deny all');
+is("$policy", $json->encode($default),'default policy is deny all');
 
 # allow describing everything
 $policy->allow('Describe*');
@@ -65,7 +69,7 @@ my $exp = {
         }
     ],
 };
-is("$policy", encode_json($exp), 'allow/deny');
+is("$policy", $json->encode($exp), 'allow/deny');
 
 my $token = $ec2->get_federation_token(-name     => 'TestUser',
 				       -policy   => $policy,
