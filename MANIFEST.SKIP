@@ -14,4 +14,6 @@ _SKIP$
 ^MYMETA\.json$
 \.tar.gz$
 \#
+^aws4_testsuite/
+^tests/
 ^TO-FIX

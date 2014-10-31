@@ -17,7 +17,6 @@ use_ok('VM::EC2',':standard');
 
 # defaults
 my $ec2 = VM::EC2->new(-print_error=>1,
-		       -region=>'us-east-1',
                        -credentials_file=>'./t/credentials_file') or BAIL_OUT("Can't load VM::EC2 module");
 
 is($ec2->access_key,'DEFAULT_KEY');
@@ -25,7 +24,6 @@ is($ec2->secret,'DEFAULT_SECRET');
 
 # foo profile (shorthand)
 $ec2 = VM::EC2->new(-print_error=>1,
-		    -region=>'us-east-1',
                     -credentials_file=>'./t/credentials_file',
                     -credentials_profile=>'foo') or BAIL_OUT("Can't load VM::EC2 module");
 
@@ -34,7 +32,6 @@ is($ec2->secret,'FOO_SECRET');
 
 # foo profile (longhand)
 $ec2 = VM::EC2->new(-print_error=>1,
-		    -region=>'us-east-1',
                     -credentials_file=>'./t/credentials_file',
                     -credentials_profile=>'profile foo') or BAIL_OUT("Can't load VM::EC2 module");
 

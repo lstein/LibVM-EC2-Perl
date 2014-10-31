@@ -762,9 +762,9 @@ sub new {
 	($parsed_id,$parsed_secret) = $self->_parse_credentials_file($credentials_file,$credentials_profile);
     }
 
-    $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY} || $parsed_id
+    $id           ||= $args{-access_key} || $parsed_id || $ENV{EC2_ACCESS_KEY} 
                       or croak "Please provide -access_key parameter, define environment variable EC2_ACCESS_KEY, or configure the AWS CLI";
-    $secret       ||= $args{-secret_key} || $ENV{EC2_SECRET_KEY} || $parsed_secret
+    $secret       ||= $args{-secret_key} || $parsed_secret || $ENV{EC2_SECRET_KEY} 
                       or croak "Please provide -secret_key, define environment variable EC2_SECRET_KEY, or configure the AWS CLI";
     $token        ||= $args{-security_token};
 
