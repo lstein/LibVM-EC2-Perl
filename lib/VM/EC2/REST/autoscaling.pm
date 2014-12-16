@@ -223,7 +223,7 @@ sub create_autoscaling_group {
     croak "-min_size argument is required" if (not defined $min);
 
     my @params = (AutoScalingGroupName => $name, LaunchConfigurationName => $lconfig, MaxSize => $max,
-                  MinSize => $max);
+                  MinSize => $min);
     push @params, $self->member_list_parm('AvailabilityZones',\%args);
     push @params, $self->member_list_parm('LoadBalancerNames',\%args);
     push @params, $self->member_list_parm('TerminationPolicies',\%args);
