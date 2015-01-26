@@ -16,4 +16,5 @@ _SKIP$
 \#
 ^aws4_testsuite/
 ^tests/
+^euca/
 ^TO-FIX
