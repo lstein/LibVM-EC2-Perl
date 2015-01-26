@@ -140,16 +140,19 @@ VM::EC2::Dispatch->register(
 
     'bucket lifecycle' => 'VM::S3::LifecycleRules',
 
+    'initiate multipart upload' => 'VM::S3::MultipartUpload',
+
     );
 
 sub s3 { shift->ec2 }
 
-sub get_service { shift->_service('get',@_) }
-sub put_service { shift->_service('put',@_) }
+sub get_service  { shift->_service('get', @_) }
+sub put_service  { shift->_service('put', @_) }
+sub post_service { shift->_service('post',@_) }
 
 sub _service {
     my $self     = shift;
-    my ($method,$action,$bucket,$params,$payload,$headers) = @_;
+    my ($method,$action,$bucket,$key,$params,$payload,$headers) = @_;
     $params    ||= {};
     $headers   ||= [];
     $payload   ||= '';
@@ -164,7 +167,7 @@ sub _service {
 
     my $cv = $self->condvar;
 
-    my $cv1 = $self->_get_service_endpoint($bucket);
+    my $cv1 = $self->_get_service_endpoint($bucket,$key);
     $cv1->cb(sub {
 	my ($endpoint,$uri,$host) = shift->recv();
 	unless ($endpoint) {
@@ -305,7 +308,7 @@ sub list_objects {
 	$self->{list_buckets_args}{$bucket}   = \@args;
     }
 
-    $self->get_service('list objects',$bucket,{@args});
+    $self->get_service('list objects',$bucket,undef,{@args});
 }
 
 =head2 $boolean = $s3->more_objects()
@@ -351,13 +354,13 @@ sub object {
 sub _bucket_g {
     my $self   = shift;
     my ($op,$bucket,$headers,) = @_;
-    $self->get_service("bucket $op",$bucket,{$op => undef},undef,$headers);
+    $self->get_service("bucket $op",$bucket,undef,{$op => undef},undef,$headers);
 }
 
 sub _bucket_p {
     my $self = shift;
     my ($op,$bucket,$payload,$headers) = @_;
-    $self->put_service("put bucket $op",$bucket,{$op=>undef},$payload,$headers);
+    $self->put_service("put bucket $op",$bucket,undef,{$op=>undef},$payload,$headers);
 }
 
 =head2 $acl = $s3->bucket_acl('my.bucket.name')
@@ -645,7 +648,14 @@ Upon completion the method returns the ETag of the created/updated object.
 
 =cut
 
-# put_object($bucket,$key,$data,@options)
+sub put_object {
+    my $self = shift;
+    my ($bucket,$key,$data,@options) = @_;
+    croak "Usage: put_object(\$bucket,\$key,\$data,\@options)" unless @_ >=3;
+    return $self->_put_object($bucket,$key,$data,0,0,\@options);
+}
+
+# _put_object($bucket,$key,$data,$partNumber,$uploadId,@options)
 # 
 # options:
 #    -cache_control => ...
@@ -658,6 +668,8 @@ Upon completion the method returns the ETag of the created/updated object.
 #    -x_amz_website_redirect_location => ...
 #    -x_amz_acl => private | public-read | public-read-write | authenticated-read | bucket-owner-read | bucket-owner-full-control
 #    -x_amz_grant_{read,write,read-acp,write-acp,full-control}
+#    -x_amz-server-side-encryption
+#    -x_amz-server-side-encryption-*
 #
 #  $data can be:
 #               1) a simple scalar
@@ -665,13 +677,14 @@ Upon completion the method returns the ETag of the created/updated object.
 #               3) a callback that will be called to retrieve the next n bytes of data:
 #                        callback($bytes_wanted)
 #
-sub put_object {
+sub _put_object {
     my $self = shift;
-    croak "Usage: put_object(\$bucket,\$key,\$data,\@options)" unless @_ >=3;
-    my ($bucket,$key,$data,@options) = @_;
+    croak "Usage: put_object(\$bucket,\$key,\$data,\$partNumber,\$uploadId,\\\@options)" unless @_ >= 5;
+    my ($bucket,$key,$data,$partNumber,$uploadId,$options) = @_;
 
-    my @x_amz   = map {s/_/-/g; $_} grep {/x_amz_.+/} keys {@options};
-    my %opt     = @options;
+    $options  ||= [];
+    my %opt     = @$options;
+    my @x_amz   = map {s/_/-/g; $_} grep {/x_amz_.+/} keys %opt;
     
     my $cv = $self->condvar;
     my $cv1 = $self->_get_service_endpoint($bucket,$key);
@@ -685,7 +698,7 @@ sub put_object {
 	}
 
 	my $headers       = $self->_options_to_headers(
-	    \@options,
+	    $options,
 	    qw(Cache-Control Content-Disposition Content-Encoding Content-Type Expires X-Amz-Storage-Class X-Amz-Website-Redirect-Location),@x_amz);
 
 	my $chunked_transfer_size = $self->_stream_size($data);
@@ -699,6 +712,7 @@ sub put_object {
 	                                     : (Content_Length        => $data_len,
 						X_Amz_Content_Sha256  => sha256_hex($data));
 
+	$uri .= "?partNumber=$partNumber&uploadId=$uploadId" if $partNumber && $uploadId;
 	my $request = PUT($uri,
 			  Host                  => $host,
 			  Expect                => '100-continue',
@@ -740,6 +754,30 @@ sub put_object {
     }
 
 }
+
+=head2 $multipart_upload_object = $s3->initiate_multipart_upload($bucket,$key)
+
+Initiate a multipart upload on the indicated bucket and object key.
+
+The returned multipart upload object has the methods:
+
+   $muo->upload_id
+   $muo->bucket
+   $muo->key
+
+=cut
+
+sub initiate_multipart_upload {
+    my $self = shift;
+    my ($bucket,$key) = @_;
+    $self->post_service('initiate multipart upload',$bucket,$key,{'uploads'=>undef});
+}
+
+=head2 $cv = put_request($request)
+
+Needs documentation!
+
+=cut
 
 # return a cv
 sub put_request {
