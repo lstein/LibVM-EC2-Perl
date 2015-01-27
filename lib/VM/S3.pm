@@ -645,7 +645,6 @@ You may also provide a "url" argument that points to a predefined group.
 
 Upon completion the method returns the ETag of the created/updated object.
 
-
 =cut
 
 sub put_object {
@@ -771,6 +770,24 @@ sub initiate_multipart_upload {
     my $self = shift;
     my ($bucket,$key) = @_;
     $self->post_service('initiate multipart upload',$bucket,$key,{'uploads'=>undef});
+}
+
+=head2 $multipart_load_completion_object = $s3->complete_multipart_upload($bucket,$key,$uploadId,\@parts)
+
+Provide uploadId and list of VM::S3::UploadPart objects.
+
+The returned VM::S3::MultipartCompletion object has the methods:
+
+   $mco->location
+   $mco->bucket
+   $mco->key
+   $mco->etag
+
+=cut
+
+sub complete_multipart_upload {
+    my $self = shift;
+    # needs implementation
 }
 
 =head2 $cv = put_request($request)
