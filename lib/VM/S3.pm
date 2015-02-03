@@ -142,9 +142,12 @@ VM::EC2::Dispatch->register(
 
     'initiate multipart upload' => 'VM::S3::MultipartUpload',
 
+    'complete multipart upload' => 'VM::S3::MultipartUploadResult',
+
     );
 
-sub s3 { shift->ec2 }
+# huh?
+# sub s3 { shift->ec2 }
 
 sub get_service  { shift->_service('get', @_) }
 sub put_service  { shift->_service('put', @_) }
@@ -186,6 +189,7 @@ sub _service {
 			      'Content'              => $payload,
 			      @$headers,
 	    );
+	$request->remove_header('Content-Type'); # just gets us into trouble
 	AWS::Signature4->new(-access_key=>$self->access_key,
 			     -secret_key=>$self->secret
 	    )->sign($request);
@@ -643,7 +647,9 @@ The -x_amz_grant* options accept list of email addresses and/or Amazon IDs in th
 
 You may also provide a "url" argument that points to a predefined group.
 
-Upon completion the method returns the ETag of the created/updated object.
+Upon completion the method returns the ETag of the created/updated
+object. In asynchronous mode, returns a condition variable that will
+return the etag upon a call to recv().
 
 =cut
 
@@ -772,6 +778,39 @@ sub initiate_multipart_upload {
     $self->post_service('initiate multipart upload',$bucket,$key,{'uploads'=>undef});
 }
 
+=head2 $multipart_upload_part = $s3->upload_part($bucket,$key,$partNo,$data,@options)
+
+Upload an object part. Options are the same as put_object() except
+that you provide a $partNo indicating the sequence of the piece of
+data being uploaded.
+
+Returned object is a VM::S3::UploadPart (or a CondVar in asynchronous mode).
+
+=cut
+
+sub upload_part {
+    my $self = shift;
+    my ($bucket,$key,$uploadId,$partNo,$data,@options) = @_;
+
+    eval "use VM::S3::UploadPart" unless VM::S3::UploadPart->can('new');
+
+    my $cv = $self->condvar;
+
+    my $cv1 = $self->_put_object_async($bucket,$key,$data,$partNo,$uploadId,\@options);
+    $cv1->cb(sub {
+	my $cv1       = shift;
+	my $etag     = $cv1->recv;
+	my $obj      = VM::S3::UploadPart->new({UploadId   => $uploadId,
+						PartNumber => $partNo,
+						ETag       => $etag},
+					       $self);
+	$cv->send($obj);
+	    });
+    
+    return $cv if $VM::EC2::ASYNC;
+    return $cv->recv();
+}
+
 =head2 $multipart_load_completion_object = $s3->complete_multipart_upload($bucket,$key,$uploadId,\@parts)
 
 Provide uploadId and list of VM::S3::UploadPart objects.
@@ -787,7 +826,13 @@ The returned VM::S3::MultipartCompletion object has the methods:
 
 sub complete_multipart_upload {
     my $self = shift;
-    # needs implementation
+    my ($bucket,$key,$uploadId,$partlist) = @_;
+    my @parts     = map {{
+	PartNumber => $_->part_number,
+	ETag       => $_->e_tag}
+    } @$partlist;
+    my $payload = XML::Simple->new->XMLout({Part=>\@parts},RootName=>'CompleteMultipartUpload',NoAttr=>1);
+    $self->post_service('complete multipart upload',$bucket,$key,{uploadId=>$uploadId},$payload);
 }
 
 =head2 $cv = put_request($request)
