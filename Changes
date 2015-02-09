@@ -1,9 +1,19 @@
+1.28 (23 October 2014)
+    - $snapshot->authorized_users() was returning duplicate user IDs due to an apparent AWS bug. Change
+      behavior to return unique user list.
+    - Security policy JSON string returned by VM::EC2::Security::Policy is now canonicalized so that
+      regression tests succeed.
+
 1.26
     - Use AnyEvent::CacheDNS to reduce latency of asynchronous calls. This introduces a new module
       dependency.
     - Compliant to 2014-05-01 API.
     - Volume and snapshot encryption supported.
     - AWS Signature Version 4 supported.
+    - RDS support added.
+    - VPC peering support added.
+    - ParmParser support added for elastic load balancer, RDS, VPN, VPC and customer gateway modules.
+    - Documentation updated.
 
 1.25
     - Change behavior of create_network_acl_entry() so that -egress option defaults to false as originally

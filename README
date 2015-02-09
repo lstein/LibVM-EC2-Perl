@@ -1,12 +1,18 @@
 This is an interface to Amazon EC2 REST tools that follows the
 2014-10-01 API. I created it because I needed access to the Tag and
 TagSet interfaces, and neither euca2ools nor Net::Amazon::EC2 provided
-this functionality. Almost all of the Amazon API is supported, but API
-calls for VM/volume import, bundle task management, and reserved instance
-marketplace are not currently implemented.
+this functionality. Support for the following services are complete:
 
-The module provides an extensible object-oriented interface as
-illustrated by the following code:
+ Elastic Compute Cloud (EC2)
+ Virtual Private Cloud (VPC)
+ Elastic Load Balancing (ELB) and Autoscaling
+ Relational Database Service (RDS)
+
+The module is designed to work in a standard procedural manner, as
+well as in an event-driven application using the AnyEvent framework.
+
+The following code illustrates the object-oriented features of the
+module:
 
  # get new EC2 object
  my $ec2 = VM::EC2->new(-access_key => 'access key id',
@@ -59,17 +65,6 @@ illustrated by the following code:
                     Status=> 'Production');
      $img->make_public(1);
  }
-
-Copying AMIs Between Regions
-----------------------------
-
-This library provides a command-line script that makes it easy to move
-an EBS-backed Amazon Machine Image (AMI) from one region to another.
-
-  migrate-ebs-image.pl --from us-east-1 --to ap-southeast-1 ami-123456
-
-This script will be installed for you when you install the library.
-
 
 Development and bug reports
 ---------------------------

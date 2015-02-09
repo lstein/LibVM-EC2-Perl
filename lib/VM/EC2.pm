@@ -2,9 +2,14 @@ package VM::EC2;
 
 =head1 NAME
 
-VM::EC2 - Control the Amazon EC2 and Open Stack Clouds
+VM::EC2 - Perl interface to Amazon EC2, Virtual Private Cloud, Elastic Load Balancing, Autoscaling, and Relational Database services
 
 =head1 SYNOPSIS
+
+NOTE: For information on AWS's VPC, load balancing, autoscaling and relational
+databases services, see L<VM::EC2::VPC>, L<VM::EC2::ELB>,
+L<VM::EC2::REST::autoscaling>, and
+L<VM::EC2::REST::relational_database_service>
 
  # set environment variables EC2_ACCESS_KEY, EC2_SECRET_KEY and/or EC2_URL
  # to fill in arguments automatically
@@ -566,7 +571,7 @@ use strict;
 
 use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
-eval {require AWS::Signature4}; # optional
+eval "require AWS::Signature4"; # optional
 
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
@@ -580,8 +585,11 @@ use HTTP::Request::Common;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 use JSON;
+use File::HomeDir;
+use File::Spec;
+use Config::IniFiles;
 
-our $VERSION = '1.26';
+our $VERSION = '1.28';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -668,6 +676,10 @@ Create a new Amazon access object. Required arguments are:
  -security_token Temporary security token obtained through a call to the
                AWS Security Token Service
 
+ -credentials_file AWS CLI formatted credentials file
+
+ -credentials_profile AWS CLI profile from which to extract credentials
+
  -endpoint     The URL for making API requests
 
  -region       The region to receive the API requests
@@ -684,6 +696,16 @@ http://ec2.amazonaws.com/ is used. You can also select the endpoint by
 specifying one of the Amazon regions, such as "us-west-2", with the
 -region argument. The endpoint specified by -region will override
 -endpoint.
+
+Alternately, VM::EC2 can parse a standard AWS CLI configuration file.  The
+default location for such a file is C<~/.aws/config>; you can also pass in any
+valid filesystem path (either absolute, or relative to cwd) as the
+-credentials_file argument.  If a configuration file is present at the default
+location or the location provided, VM::EC2 will use the credentials contained
+therein; however, any values explicitly set via arguments or provided via
+environment variables will take precedence.  The AWS CLI configuration file
+format also supports multiple profiles; to specify a profile other than
+C<default>, pass the profile name as the -credentials_profile argument.
 
 -security_token is used in conjunction with temporary security tokens
 returned by $ec2->get_federation_token() and $ec2->get_session_token()
@@ -730,10 +752,21 @@ sub new {
 	$token  = $args{-security_token}->sessionToken;
     }
 
-    $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY}
-                      or croak "Please provide -access_key parameter or define environment variable EC2_ACCESS_KEY";
-    $secret       ||= $args{-secret_key} || $ENV{EC2_SECRET_KEY}
-                      or croak "Please provide -secret_key or define environment variable EC2_SECRET_KEY";
+    # if no token, check for a credentials file
+    my $credentials_profile ||= $args{-credentials_profile} || 'default';
+    my $credentials_file    ||= $args{-credentials_file} ||
+	File::Spec->catfile( File::HomeDir->my_home, '.aws', 'config' );
+
+    # if credentials file found, parse it
+    my ($parsed_id,$parsed_secret);
+    if ( -r $credentials_file ) {
+	($parsed_id,$parsed_secret) = $self->_parse_credentials_file($credentials_file,$credentials_profile);
+    }
+
+    $id           ||= $args{-access_key} || $parsed_id || $ENV{EC2_ACCESS_KEY} 
+                      or croak "Please provide -access_key parameter, define environment variable EC2_ACCESS_KEY, or configure the AWS CLI";
+    $secret       ||= $args{-secret_key} || $parsed_secret || $ENV{EC2_SECRET_KEY} 
+                      or croak "Please provide -secret_key, define environment variable EC2_SECRET_KEY, or configure the AWS CLI";
     $token        ||= $args{-security_token};
 
     my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL} || 'https://ec2.amazonaws.com/';
@@ -1718,6 +1751,41 @@ sub guess_version_from_endpoint {
 
 sub timestamp {
     return strftime("%Y-%m-%dT%H:%M:%SZ",gmtime);
+}
+
+=head2 ($id,$secret) = $ec2->_parse_credentials_file($credentials_file,$profile);
+
+Parse a credentials file in standard AWS command-line config format (see L<http://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html> for more details).
+
+You can optionally pass the name of an alternate profile; the default is 'default'.
+
+=cut
+
+sub _parse_credentials_file {
+    my $self = shift;
+    my ($credentials_file,$profile) = @_;
+
+    $profile ||= 'default';
+
+    # prepend 'profile ' if it's not present
+    if ( $profile ne 'default' ) {
+	$profile = "profile $profile" unless $profile =~ /^profile /;
+    }
+
+    my $credentials = Config::IniFiles->new( -file => $credentials_file );
+
+    unless ( defined $credentials ) {
+	carp "Unable to parse credentials file '$credentials_file': " .
+	    join( ',', @Config::IniFiles::errors );
+	return;
+    }
+
+    my $id     = $credentials->val( $profile, 'aws_access_key_id' )
+	or carp "No 'aws_access_key_id' key in '$profile' profile.";
+    my $secret = $credentials->val( $profile, 'aws_secret_access_key' )
+	or carp "No 'aws_secret_access_key' key in '$profile' profile.";
+
+    return ($id,$secret);
 }
 
 

@@ -159,7 +159,10 @@ sub as_string {
         return $self->as_string;
     }
 
-    return encode_json({Statement => \@list});
+    my $json = JSON->new();
+    $json->canonical(1);
+
+    return $json->encode({Statement => \@list});
 }
 
 1;
