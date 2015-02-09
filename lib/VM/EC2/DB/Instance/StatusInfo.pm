@@ -1,27 +1,26 @@
-package VM::EC2::DB::PendingModifiedValues;
+package VM::EC2::DB::Instance::StatusInfo;
 
 =head1 NAME
 
-VM::EC2::DB::PendingModifiedValues - An RDS Database Pending Modified Values object
+VM::EC2::DB::Instance::StatusInfo - An RDS Database Status Info
 
 =head1 SYNOPSIS
 
  use VM::EC2;
 
  $ec2 = VM::EC2->new(...);
- $db = $ec2->modify_db_instance(...);
- $pending = $db->PendingModifiedValues;
- foreach $p ($pending->valid_fields) {
-    print $p,' ',$pending->$p,"\n" if $pending->$p;
- }
+ $db = $ec2->describe_db_instances('mydbinstance');
+ my $status = $db->StatusInfos;
+ print $status->Status,' : ',$status->Message,"\n";
 
 =head1 DESCRIPTION
 
-This object represents the changes to a DB instance that are currently pending.
+This object represents a DB Instance Status Info, as returned by the
+VM::EC2->describe_db_instances() call.
 
 =head1 STRING OVERLOADING
 
-none
+In a scalar context, this object returns the Status field.
 
 =head1 SEE ALSO
 
@@ -33,7 +32,7 @@ L<VM::EC2::DB::Instance>
 
 Lance Kinley E<lt>lkinley@loyaltymethods.comE<gt>.
 
-Copyright (c) 2013 Loyalty Methods, Inc.
+Copyright (c) 2015 Loyalty Methods, Inc.
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
@@ -46,25 +45,23 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
+use overload '""' => sub { shift->Status },
+             fallback => 1;
+
 sub valid_fields {
     my $self = shift;
     return qw(
-        AllocatedStorage
-        BackupRetentionPeriod
-        DBInstanceClass
-        DBInstanceIdentifier
-        EngineVersion
-        Iops
-        MasterUserPassword
-        MultiAZ
-        Port
+               Message
+               Normal
+               Status
+               StatusType
     );
 }
 
-sub MultiAZ {
+sub Normal {
     my $self = shift;
-    my $multi_az = $self->SUPER::MultiAZ;
-    return $multi_az eq 'true';
+    my $n = $self->SUPER::Normal;
+    return $n eq 'true';
 }
 
 1;

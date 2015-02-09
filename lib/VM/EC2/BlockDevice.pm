@@ -46,7 +46,7 @@ passed through:
  volumeSize  -- Size of the EBS volume (in gigs).
  deleteOnTermination -- Whether this EBS will be deleted when the
                 instance terminates.
- volumeType  -- The volume type, one of "standard" or "io1"
+ volumeType  -- The volume type, one of "standard", "gp2", or "io1"
  iops        -- The number of I/O operations per second that the volume
                 supports, an integer between 100 and 4000. Only valid for
                 volumes of type "io1".
@@ -113,11 +113,11 @@ sub ebs {
     return $self->{ebs} ||= VM::EC2::BlockDevice::EBS->new($ebs,$self->aws);
 }
 
-sub snapshotId { shift->ebs->snapshotId }
-sub volumeSize { shift->ebs->volumeSize }
-sub deleteOnTermination { shift->ebs->deleteOnTermination }
-sub volumeType  { shift->ebs->volumeType }
-sub iops        { shift->ebs->iops       }
+sub snapshotId { eval { shift->ebs->snapshotId } }
+sub volumeSize { eval { shift->ebs->volumeSize } }
+sub deleteOnTermination { eval { shift->ebs->deleteOnTermination } }
+sub volumeType  { eval { shift->ebs->volumeType } }
+sub iops        { eval { shift->ebs->iops       } }
 
 sub as_string {
     my $self  = shift;

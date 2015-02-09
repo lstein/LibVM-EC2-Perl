@@ -27,10 +27,6 @@ VM::EC2::DB::SecurityGroup - An RDS Database Security Group
 
  VpcId                         -- The VPC ID of the DB security group
 
- ec2_security_groups           -- Alias for EC2SecurityGroups
-
- ip_ranges                     -- Alias for IPRanges
-
 =head1 DESCRIPTION
 
 This object represents a DB Security Group.  It is the resultant
@@ -95,9 +91,5 @@ sub IPRanges {
         (VM::EC2::DB::IPRange->new($ranges,$self->aws)) :
         map { VM::EC2::DB::IPRange->new($_,$self->aws) } @$ranges;
 }
-
-sub ec2_security_groups { shift->EC2SecurityGroups }
-
-sub ip_ranges { shift->IPRanges }
 
 1;

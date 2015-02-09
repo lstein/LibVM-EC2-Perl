@@ -87,6 +87,7 @@ use VM::EC2::DB::Parameter::Group::Status;
 use VM::EC2::DB::SecurityGroup::Membership;
 use VM::EC2::DB::Endpoint;
 use VM::EC2::DB::PendingModifiedValues;
+use VM::EC2::DB::Instance::StatusInfo;
 
 use overload '""' => sub { shift->DBInstanceIdentifier },
     fallback => 1;
@@ -105,11 +106,13 @@ sub valid_fields {
               DBParameterGroups
               DBSecurityGroups
               DBSubnetGroup
+              DbiResourceId
               Endpoint
               Engine
               EngineVersion
               InstanceCreateTime
               Iops
+              KmsKeyId
               LatestRestorableTime
               LicenseModel
               MasterUsername
@@ -122,6 +125,10 @@ sub valid_fields {
               ReadReplicaDBInstanceIdentifiers
               ReadReplicaSourceDBInstanceIdentifier
               SecondaryAvailabilityZone
+              StatusInfos
+              StorageEncrypted
+              StorageType
+              TdeCredentialArn
               VpcSecurityGroups
              );
 }
@@ -191,6 +198,18 @@ sub PubliclyAccessible {
     my $self = shift;
     my $public = $self->SUPER::PubliclyAccessible;
     return $public eq 'true';
+}
+
+sub StatusInfos {
+    my $self = shift;
+    my $s = $self->SUPER::StatusInfos;
+    return VM::EC2::DB::Instance::StatusInfo->new($s,$self->aws);
+}
+
+sub StorageEncrypted {
+    my $self = shift;
+    my $enc = $self->SUPER::StorageEncrypted;
+    return $enc eq 'true';
 }
 
 sub VpcSecurityGroups {

@@ -1,14 +1,26 @@
-package VM::EC2::DB::Snapshot;
+package VM::EC2::DB::PendingMaintenanceAction;
 
 =head1 NAME
 
-VM::EC2::DB::Snapshot - An RDS Database Snapshot
+VM::EC2::DB::PendingMaintenanceAction - An RDS Database Pending Maintenance Action object
 
 =head1 SYNOPSIS
 
+ use VM::EC2;
+
+ $ec2 = VM::EC2->new(...);
+ $action = $ec2->apply_pending_maintenance_action(...);
+ foreach $p ($pending->valid_fields) {
+    print $p,' ',$action->$p,"\n" if $action->$p;
+ }
+
 =head1 DESCRIPTION
 
+Provides information about a pending maintenance action for a resource.
+
 =head1 STRING OVERLOADING
+
+In string context, this object returns the Action field.
 
 =head1 SEE ALSO
 
@@ -20,7 +32,7 @@ L<VM::EC2::DB::Instance>
 
 Lance Kinley E<lt>lkinley@loyaltymethods.comE<gt>.
 
-Copyright (c) 2013-2014 Loyalty Methods, Inc.
+Copyright (c) 2015 Loyalty Methods, Inc.
 
 This package and its accompanying libraries is free software; you can
 redistribute it and/or modify it under the terms of the GPL (either
@@ -33,34 +45,17 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 use strict;
 use base 'VM::EC2::Generic';
 
-use overload '""' => sub { shift->DBSnapshotIdentifier },
+use overload '""' => sub { shift->Action },
     fallback => 1;
 
 sub valid_fields {
     my $self = shift;
     return qw(
-        AllocatedStorage
-        AvailabilityZone
-        DBInstanceIdentifier
-        DBSnapshotIdentifier
-        Encrypted
-        Engine
-        EngineVersion
-        InstanceCreateTime
-        Iops
-        KmsKeyId
-        LicenseModel
-        MasterUsername
-        OptionGroupName
-        PercentProgress
-        Port
-        SnapshotCreateTime
-        SnapshotType
-        SourceRegion
-        StorageType
-        TdeCredentialArn
-        Status
-        VpcId
+        Action
+        AutoAppliedAfterDate
+        CurrentApplyDate
+        ForcedApplyDate
+        OptInStatus
     );
 }
 
