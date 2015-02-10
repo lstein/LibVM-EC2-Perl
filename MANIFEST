@@ -33,7 +33,10 @@ lib/VM/EC2/DB/Event/Category.pm
 lib/VM/EC2/DB/Event/Subscription.pm
 lib/VM/EC2/DB/Instance.pm
 lib/VM/EC2/DB/Instance/OrderableOption.pm
+lib/VM/EC2/DB/Instance/StatusInfo.pm
 lib/VM/EC2/DB/IPRange.pm
+lib/VM/EC2/DB/LogFilePortion.pm
+lib/VM/EC2/DB/LogFilesDetails.pm
 lib/VM/EC2/DB/Option.pm
 lib/VM/EC2/DB/Option/Group.pm
 lib/VM/EC2/DB/Option/Group/Membership.pm
@@ -42,10 +45,13 @@ lib/VM/EC2/DB/Option/Group/Option/Setting.pm
 lib/VM/EC2/DB/Parameter.pm
 lib/VM/EC2/DB/Parameter/Group.pm
 lib/VM/EC2/DB/Parameter/Group/Status.pm
+lib/VM/EC2/DB/ParmParser.pm
+lib/VM/EC2/DB/PendingMaintenanceAction.pm
 lib/VM/EC2/DB/PendingModifiedValues.pm
 lib/VM/EC2/DB/Reserved/Instance.pm
 lib/VM/EC2/DB/Reserved/Instance/Offering.pm
 lib/VM/EC2/DB/Reserved/RecurringCharge.pm
+lib/VM/EC2/DB/ResourcePendingMaintenanceAction.pm
 lib/VM/EC2/DB/SecurityGroup.pm
 lib/VM/EC2/DB/SecurityGroup/Membership.pm
 lib/VM/EC2/DB/Snapshot.pm
@@ -80,6 +86,7 @@ lib/VM/EC2/Group.pm
 lib/VM/EC2/Image.pm
 lib/VM/EC2/Image/LaunchPermission.pm
 lib/VM/EC2/Instance.pm
+lib/VM/EC2/Instance/ClassicLink.pm
 lib/VM/EC2/Instance/ConsoleOutput.pm
 lib/VM/EC2/Instance/IamProfile.pm
 lib/VM/EC2/Instance/Metadata.pm
@@ -116,6 +123,7 @@ lib/VM/EC2/ReservedInstance/Offering.pm
 lib/VM/EC2/ReservedInstance/ParmParser.pm
 lib/VM/EC2/REST/ami.pm
 lib/VM/EC2/REST/autoscaling.pm
+lib/VM/EC2/REST/classic_link.pm
 lib/VM/EC2/REST/customer_gateway.pm
 lib/VM/EC2/REST/devpay.pm
 lib/VM/EC2/REST/dhcp.pm
@@ -172,6 +180,7 @@ lib/VM/EC2/Volume/Status/Details.pm
 lib/VM/EC2/Volume/Status/Event.pm
 lib/VM/EC2/Volume/StatusItem.pm
 lib/VM/EC2/VPC.pm
+lib/VM/EC2/VPC/ClassicLink.pm
 lib/VM/EC2/VPC/CustomerGateway.pm
 lib/VM/EC2/VPC/DhcpOptions.pm
 lib/VM/EC2/VPC/InternetGateway.pm

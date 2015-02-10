@@ -140,7 +140,7 @@ L<VM::EC2::REST::relational_database_service>
 
 =head1 DESCRIPTION
 
-This is an interface to the 2014-05-01 version of the Amazon AWS API
+This is an interface to the 2014-10-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -630,6 +630,7 @@ use constant import_tags => {
     ':hpc'      => ['placement_group'],
     ':scaling'  => ['elastic_load_balancer','autoscaling'],
     ':elb'      => ['elastic_load_balancer'],
+    ':link'     => ['classic_link'],
     ':rds'      => ['relational_database_service'],
     ':misc'     => ['devpay','reserved_instance', 'spot_instance','vm_export','vm_import','windows'],
     ':all'      => [qw(:standard :vpc :hpc :scaling :misc)],
@@ -1741,7 +1742,7 @@ sub guess_version_from_endpoint {
     my $self = shift;
     my $endpoint = $self->endpoint;
     return '2009-04-04' if $endpoint =~ /Eucalyptus/;  # eucalyptus version according to http://www.eucalyptus.com/participate/code
-    return '2014-05-01';                               # most recent AWS version that we support
+    return '2014-10-01';                               # most recent AWS version that we support
 }
 
 =head2 $ts = $ec2->timestamp

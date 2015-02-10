@@ -688,11 +688,13 @@ The following is the list of attributes that can be set:
  -root_device_name        -- root device name
  -source_dest_check       -- enable NAT (VPC only)
  -group_id                -- VPC security group
- -block_devices           -- Specify block devices to change 
+ -block_devices           -- specify block devices for changing the
                              deleteOnTermination flag
  -block_device_mapping    -- Alias for -block_devices
- -ebs_optimization        -- EBS Optmization
- -sriov_net_support       -- Enhanced networking support
+ -ebs_optimized           -- EBS optimization (boolean)
+ -sriov_net_support       -- enable enhanced networking support
+                             (must supply 'simple' as value)
+                             cannot be turned off once enabled
 
 Only one attribute can be changed in a single request. For example:
 
@@ -733,7 +735,7 @@ sub modify_instance_attribute {
                            SriovNetSupport)],
 	list_parm   => 'GroupId',
 	block_device_parm => 'BlockDeviceMapping',
-        boolean_parm => 'ebsOptimized',
+        boolean_parm => 'EbsOptimized',
 					   });
     return $self->call('ModifyInstanceAttribute',@param);
 }

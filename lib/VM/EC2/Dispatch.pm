@@ -215,7 +215,7 @@ sub boolean {
     return $parsed->{$tag} eq 'true';
 }
 
-=head2 @list = $dispatch->elb_member_list($raw_xml,$ec2,$tag)
+=head2 @list = $dispatch->elb_member_list($raw_xml,$ec2,$tag[,$embedded_tag])
 
 This is used for XML responses from the ELB API such as this:
 
@@ -269,6 +269,18 @@ sub elb_member_list {
     my ($result_key) = grep /Result$/,keys %$parsed;
     return $embedded_tag ? map { $_->{$embedded_tag} } @{$parsed->{$result_key}{$tag}{member}} :
                            @{$parsed->{$result_key}{$tag}{member}};
+}
+
+# fetch a single object that is not embedded within a <$tag> element
+# DownloadDBLogFilePortion RDS API call needs this
+sub fetch_rds_one {
+    my $self = shift;
+    my ($content,$ec2,$tag,$class,$nokey) = @_; 
+    load_module($class);
+    my $parser = $self->new_xml_parser($nokey);
+    my $parsed = $parser->XMLin($content);
+    my $obj = $parsed->{"${tag}Result"} or return;
+    return $class->new($obj,$ec2,@{$parsed}{'xmlns','RequestId'});
 }
 
 # identical to fetch_one, except looks inside the (APICallName)Result tag that
@@ -372,14 +384,30 @@ sub fetch_rds_objects {
     my $parser = $self->new_xml_parser($nokey);
     my $parsed = $parser->XMLin($content);
     my ($result_key) = grep /Result$/,keys %$parsed;
-    # xml tags in api are not entirely consistent
-    my @endings = qw/s sList List/;
+    my $list;
     my $list_tag;
-    foreach (@endings) {
-        $list_tag = $tag . $_;
-        last if exists $parsed->{$result_key}{$list_tag};
+    # xml tags in api are not consistent across rds calls
+    # case where tag exists followed by tag with 'Resource' prepended or
+    # 'Details' appended
+    if (exists $parsed->{$result_key}{$tag}) {
+        foreach (("Resource$tag","${tag}Details")) {
+            if (exists $parsed->{$result_key}{$tag}{$_}) {
+                $list = $parsed->{$result_key}{$tag}{$_};
+                last;
+            }
+        }
     }
-    my $list = $parsed->{$result_key}{$list_tag}{$tag} or return;
+    # case where tag with appended string exists, followed by actual tag
+    else {
+	    foreach (qw/s sList List/) {
+		my $list_tag = $tag . $_;
+		if (exists $parsed->{$result_key}{$list_tag}) {
+                    $list = $parsed->{$result_key}{$list_tag}{$tag};
+                    last;
+                }
+	    }
+    }
+    return unless $list;
     return ref $list eq 'HASH' ?
         ($class->new($list,$ec2,@{$parsed}{'xmlns','RequestId'})) :
         map {$class->new($_,$ec2,@{$parsed}{'xmlns','RequestId'})} @$list;

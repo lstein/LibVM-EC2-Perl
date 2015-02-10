@@ -60,6 +60,9 @@ sub valid_fields {
         LicenseModel
         MultiAZCapable
         ReadReplicaCapable
+        StorageType
+        SupportsIops
+        SupportsStorageEncryption
         Vpc
     );
 }
@@ -84,6 +87,18 @@ sub ReadReplicaCapable {
     my $self = shift;
     my $r = $self->SUPER::ReadReplicaCapable;
     return $r eq 'true';
+}
+
+sub SupportsIops {
+    my $self = shift;
+    my $s = $self->SUPER::SupportsIops;
+    return $s eq 'true';
+}
+
+sub SupportsStorageEncryption {
+    my $self = shift;
+    my $s = $self->SUPER::SupportsStorageEncryption;
+    return $s eq 'true';
 }
 
 sub Vpc {

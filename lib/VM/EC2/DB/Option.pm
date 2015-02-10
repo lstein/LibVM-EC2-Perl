@@ -63,8 +63,6 @@ sub VpcSecurityGroupMemberships {
         map { VM::EC2::DB::VpcSecurityGroup::Membership->new($_,$self->aws) } @$groups;
 }
 
-sub db_security_group_memberships { shift->DBSecurityGroupMemberships }
-
 sub name { shift->OptionName }
 
 sub description { shift->OptionDescription }

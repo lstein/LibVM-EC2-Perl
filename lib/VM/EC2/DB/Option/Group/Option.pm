@@ -61,6 +61,7 @@ sub valid_fields {
         Name
         OptionGroupOptionSettings
         OptionsDependedOn
+        Permanent
         Persistent
         PortRequired
     );
@@ -87,6 +88,12 @@ sub OptionsDependedOn {
 sub Persistent {
     my $self = shift;
     my $p = $self->SUPER::Persistent;
+    return $p eq 'true';
+}
+
+sub Permanent {
+    my $self = shift;
+    my $p = $self->SUPER::Permanent;
     return $p eq 'true';
 }
 
